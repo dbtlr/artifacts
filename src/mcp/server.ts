@@ -88,8 +88,12 @@ export function createMcpServer(store: ArtifactStore): McpServer {
       },
     },
     ({ id }) => {
-      const existed = store.removeArtifact(id);
-      return jsonResult({ existed, id });
+      try {
+        const existed = store.removeArtifact(id);
+        return jsonResult({ existed, id });
+      } catch (error) {
+        return toolError(errorMessage(error));
+      }
     },
   );
 
@@ -104,7 +108,13 @@ export function createMcpServer(store: ArtifactStore): McpServer {
         project: z.string().optional().describe('Only list artifacts in this project'),
       },
     },
-    ({ project }) => jsonResult(store.listArtifacts({ project })),
+    ({ project }) => {
+      try {
+        return jsonResult(store.listArtifacts({ project }));
+      } catch (error) {
+        return toolError(errorMessage(error));
+      }
+    },
   );
 
   server.registerTool(
@@ -116,11 +126,15 @@ export function createMcpServer(store: ArtifactStore): McpServer {
       },
     },
     ({ id }) => {
-      const artifact = store.getArtifact(id);
-      if (!artifact) {
-        return toolError(`No artifact found with id ${JSON.stringify(id)}`);
+      try {
+        const artifact = store.getArtifact(id);
+        if (!artifact) {
+          return toolError(`No artifact found with id ${JSON.stringify(id)}`);
+        }
+        return jsonResult(artifact);
+      } catch (error) {
+        return toolError(errorMessage(error));
       }
-      return jsonResult(artifact);
     },
   );
 

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { StreamableHTTPTransport } from '@hono/mcp';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 
 import { HomePage } from './components/home-page.js';
 import { Layout } from './components/layout.js';
@@ -19,6 +20,8 @@ import { createMcpServer } from './mcp/server.js';
 // it outright for deployments with a different layout.
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 const STATIC_ROOT = process.env.ARTIFACTS_STATIC_ROOT ?? join(moduleDir, '..', 'dist', 'public');
+
+const MAX_MCP_BODY_BYTES = 10 * 1024 * 1024;
 
 // `store` is left undefined in production (`export const app` below), so the
 // default sqlite-backed store is only ever touched lazily, on the first
@@ -57,14 +60,18 @@ export function createApp(store?: ArtifactStore): Hono {
   // GET (the optional standalone stream for server-initiated notifications,
   // which these stateless, push-free tools never use) is declined with 405 —
   // the client transport treats that as "no stream available" and moves on.
+  // Cap request bodies: artifact content is agent-authored text; anything
+  // beyond this is a mistake, not a use case.
+  app.use('/mcp', bodyLimit({ maxSize: MAX_MCP_BODY_BYTES }));
+
   app.all('/mcp', async (c) => {
     if (c.req.method === 'GET') {
-      return c.body(null, 405);
+      return c.body(null, 405, { Allow: 'POST' });
     }
     const server = createMcpServer(resolveStore());
     const transport = new StreamableHTTPTransport({ enableJsonResponse: true });
-    await server.connect(transport);
     try {
+      await server.connect(transport);
       return await transport.handleRequest(c);
     } finally {
       await server.close();
