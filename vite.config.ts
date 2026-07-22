@@ -26,6 +26,14 @@ export default defineConfig({
   },
   plugins: [
     toolingPlugin({
+      lint: {
+        overrides: [
+          // The data store is single-user KISS: synchronous fs calls paired
+          // with node:sqlite's synchronous DatabaseSync, not async I/O we
+          // forgot to await.
+          { files: ['src/data/**/*.ts'], rules: { 'node/no-sync': 'off' } },
+        ],
+      },
       node: true,
       pack: { dts: false, entry: ['src/server.ts'], exports: false, fixedExtension: false },
     }),
