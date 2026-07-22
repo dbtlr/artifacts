@@ -12,9 +12,12 @@
     "test": "vp test run"
   },
   "dependencies": {
+    "@hono/mcp": "^0.3.1",
     "@hono/node-server": "^2.0.11",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "hono": "^4.12.31",
-    "nanoid": "^6.0.0"
+    "nanoid": "^6.0.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@dbtlr/tooling": "^0.5.0",
