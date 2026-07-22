@@ -35,10 +35,10 @@ USER node
 
 EXPOSE 3000
 
-# Belt-and-suspenders liveness/readiness probe: hits `/` so caddy-docker-proxy
-# (or any orchestrator watching container health) doesn't route to the
-# container before Node has actually bound the port, closing the cold-start
-# 502 window. wget is the busybox one bundled in node:*-alpine.
+# Liveness probe: hits `/` so `docker ps` and any orchestrator that gates on
+# container health can see the server is actually bound. Note caddy-docker-proxy
+# itself does not gate upstreams on health status; Caddy's own retries cover the
+# brief cold-start window. wget is the busybox one bundled in node:*-alpine.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- http://localhost:3000/ || exit 1
 
