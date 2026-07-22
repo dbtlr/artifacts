@@ -123,11 +123,31 @@ function renderMermaidFence(code: string): string {
   return `<pre class="mermaid">${markdownIt.utils.escapeHtml(code)}</pre>`;
 }
 
-// A fence's language is its `info` string's first whitespace-separated word
-// (markdown-it derives the `highlight` callback's `lang` argument the same
-// way), so ```mermaid twoslash still counts as mermaid.
+// Single predicate shared by both places that need to recognize "this fence
+// is mermaid" — the `highlight` callback below (fed markdown-it's own
+// already-derived `langName`) and `isMermaidFence`'s token-stream scan (fed
+// the raw `info` string, unescaped the same way markdown-it unescapes it
+// before deriving `langName` — see `fenceLangName`). One predicate instead
+// of two separate `=== 'mermaid'` checks keeps them from silently drifting
+// apart.
+function isMermaidLangName(langName: string): boolean {
+  return langName === MERMAID_LANG;
+}
+
+// Replicates markdown-it's own `langName` derivation (renderer.mjs's `fence`
+// rule: `unescapeAll(token.info).trim()`'s first whitespace-separated word)
+// so a fence's info string, even one containing an HTML entity or backslash
+// escape, is read exactly the way markdown-it itself reads it before calling
+// `options.highlight`. Skipping the unescaping here would let a fence like
+// "&#109;ermaid" (unescapes to "mermaid") render as `<pre class="mermaid">`
+// via the highlight callback below while `hasMermaid` (built from this
+// function) stayed false — the two must agree.
+function fenceLangName(info: string): string {
+  return markdownIt.utils.unescapeAll(info).trim().split(/\s+/u)[0] ?? '';
+}
+
 function isMermaidFence(token: Token): boolean {
-  return token.type === 'fence' && token.info.trim().split(/\s+/u)[0] === MERMAID_LANG;
+  return token.type === 'fence' && isMermaidLangName(fenceLangName(token.info));
 }
 
 // --- Heading anchors + table of contents ---
@@ -193,6 +213,24 @@ function dedupeSlug(slug: string, usedIds: Set<string>): string {
   return candidate;
 }
 
+// A heading's own rendered HTML is free to contain a real `<a>` (a linked
+// heading, e.g. "## [Link Text](url)" is unremarkable markdown) — but the
+// TOC wraps every heading's label in its *own* `<a href="#heading-...">`,
+// and an `<a>` nested inside an `<a>` is invalid HTML that browsers recover
+// from by splitting/closing the outer one early, leaving the section anchor
+// empty or non-clickable. Image tokens have the same "this doesn't belong
+// nested inside our own anchor" problem for a different reason (no useful
+// clickable target). Filtering `link_open`/`link_close`/`image` out of the
+// inline token array before rendering keeps every other inline rule (text,
+// `strong`, `em`, `code_inline`, ...) intact — including a link's own inner
+// text — so the TOC label is plain-but-formatted text inside exactly one
+// anchor, never a nested one.
+function tocSafeInlineChildren(children: Token[]): Token[] {
+  return children.filter(
+    (child) => child.type !== 'link_open' && child.type !== 'link_close' && child.type !== 'image',
+  );
+}
+
 // Walks the parsed token stream once: assigns each heading_open token a
 // unique `id` attribute (mutating `tokens` in place, so the default renderer
 // picks it up automatically) and returns the ordered heading list the TOC is
@@ -211,7 +249,11 @@ function extractHeadings(tokens: Token[]): HeadingInfo[] {
     token.attrSet('id', id);
     const labelHtml =
       inline?.type === 'inline' && inline.children
-        ? markdownIt.renderer.renderInline(inline.children, markdownIt.options, {})
+        ? markdownIt.renderer.renderInline(
+            tocSafeInlineChildren(inline.children),
+            markdownIt.options,
+            {},
+          )
         : '';
     const level = Number.parseInt(token.tag.slice(1), 10);
     headings.push({ id, labelHtml, level });
@@ -281,7 +323,11 @@ function renderToc(headings: HeadingInfo[]): string | undefined {
 // `getHighlighter()` first, guaranteeing that's set by the time render runs.
 const markdownIt: MarkdownIt = new MarkdownIt({
   highlight: (code, lang) => {
-    if (lang.trim() === MERMAID_LANG) {
+    // `lang` here is markdown-it's own already-unescaped, already-split
+    // `langName` (see fenceLangName's comment) — routed through the same
+    // `isMermaidLangName` predicate `isMermaidFence` uses, so this and
+    // `hasMermaid` can never disagree about what counts as mermaid.
+    if (isMermaidLangName(lang.trim())) {
       return renderMermaidFence(code);
     }
     if (!highlighterInstance) {

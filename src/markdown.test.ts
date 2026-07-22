@@ -96,6 +96,22 @@ describe('mermaid fences', () => {
     expect(html).toContain('class="shiki');
     expect(html).not.toContain('class="mermaid"');
   });
+
+  it('recognizes an HTML-entity-encoded fence info string the same way markdown-it itself does', async () => {
+    // markdown-it's own fence renderer computes the `highlight` callback's
+    // `lang` via `utils.unescapeAll(token.info)` before splitting on
+    // whitespace, so "&#109;ermaid" (unescapes to "mermaid") already rendered
+    // as <pre class="mermaid"> via that callback — but `hasMermaid`, built
+    // from a separate token-stream scan, used to read the raw `token.info`
+    // without the same unescaping and stayed false. Both must agree.
+    const { hasMermaid, html } = await renderMarkdownToHtml(
+      '```&#109;ermaid\nflowchart TD\n  A --> B\n```\n',
+    );
+
+    expect(hasMermaid).toBe(true);
+    expect(html).toContain('<pre class="mermaid">');
+    expect(html).not.toContain('class="shiki');
+  });
 });
 
 describe('heading anchors and table of contents', () => {
@@ -186,6 +202,32 @@ describe('heading anchors and table of contents', () => {
     const sectionBIndex = toc?.indexOf('href="#heading-section-b"') ?? -1;
     expect(sectionAIndex).toBeLessThan(subsectionIndex);
     expect(subsectionIndex).toBeLessThan(sectionBIndex);
+  });
+
+  it('flattens a heading containing a link so the TOC never nests an <a> inside its own anchor', async () => {
+    const { html, toc } = await renderMarkdownToHtml(
+      '## [Link Text](https://example.com)\n\n## Second\n',
+    );
+
+    // The heading itself, in the actual content, still renders as a normal
+    // link — only the TOC's own copy of the label is flattened.
+    expect(html).toContain('<a href="https://example.com">Link Text</a>');
+    expect(toc).toBeDefined();
+    expect(toc).toContain('href="#heading-link-text"');
+    expect(toc).toContain('Link Text');
+    // A nested <a href="https://example.com"> inside the TOC's own section
+    // anchor is exactly the bug this guards against: browsers recover from
+    // nested anchors by splitting/closing the outer one early, leaving the
+    // section anchor empty or unclickable.
+    expect(toc).not.toContain('href="https://example.com"');
+    expect(toc?.match(/<a /gu) ?? []).toHaveLength(2);
+  });
+
+  it('drops an image from the TOC label instead of emitting <img>', async () => {
+    const { toc } = await renderMarkdownToHtml('## ![alt text](img.png)\n\n## Second\n');
+
+    expect(toc).toBeDefined();
+    expect(toc).not.toContain('<img');
   });
 });
 

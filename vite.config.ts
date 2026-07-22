@@ -25,6 +25,12 @@ export default defineConfig({
   // the browser even though the file exists right there in dist/public.
   base: '/assets/',
   build: {
+    // Mermaid's own largest lazily-loaded diagram-renderer chunk is ~663 kB
+    // — expected and fine (it's an extra chunk file, only fetched for the
+    // diagram type actually used, never the server bundle); raised past that
+    // so the build doesn't print a size warning for a chunk that's supposed
+    // to be that size.
+    chunkSizeWarningLimit: 700,
     emptyOutDir: true,
     outDir: 'dist/public',
     rollupOptions: {
