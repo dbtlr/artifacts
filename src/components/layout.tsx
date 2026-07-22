@@ -1,6 +1,6 @@
 import type { FC, PropsWithChildren } from 'hono/jsx';
 
-const STYLESHEET_HREF = '/app.css';
+const STYLESHEET_HREF = '/assets/app.css';
 
 type LayoutProps = PropsWithChildren<{ title: string }>;
 

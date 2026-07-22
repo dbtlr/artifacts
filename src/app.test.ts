@@ -7,8 +7,9 @@ describe('app', () => {
     const res = await app.request('/');
 
     expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
     const body = await res.text();
     expect(body).toContain('Artifacts');
-    expect(body).toContain('/app.css');
+    expect(body).toContain('/assets/app.css');
   });
 });
