@@ -79,6 +79,16 @@ function assertValidType(type: ArtifactType): void {
   }
 }
 
+type BlankableField = 'description' | 'project' | 'title';
+
+// title/project/description all drive list-view identification (CLAUDE.md),
+// so a blank one is never useful — reject it up front, before any write.
+function assertNonBlank(field: BlankableField, value: string): void {
+  if (value.trim().length === 0) {
+    throw new Error(`Invalid artifact ${field} ${JSON.stringify(value)}: must not be blank`);
+  }
+}
+
 function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error;
 }
@@ -177,6 +187,9 @@ export function createArtifactStore(dir: string): ArtifactStore {
 
   function createArtifact(input: CreateArtifactInput): Artifact {
     assertValidType(input.type);
+    assertNonBlank('title', input.title);
+    assertNonBlank('project', input.project);
+    assertNonBlank('description', input.description);
 
     const id = generateId();
     const now = isoNow();
@@ -208,6 +221,11 @@ export function createArtifactStore(dir: string): ArtifactStore {
     if (!row) {
       return null;
     }
+    // Deliberately unguarded: a row whose file is missing means the store
+    // was corrupted by something outside this module's control (e.g. manual
+    // fs tampering), since create/update/remove never leave that state on
+    // their own. Letting readFileSync's ENOENT propagate surfaces that loudly
+    // instead of masking it as an ordinary "not found".
     const content = readFileSync(artifactPath(row.id, row.type), 'utf8');
     return { ...toArtifact(row), content };
   }
@@ -220,18 +238,42 @@ export function createArtifactStore(dir: string): ArtifactStore {
     if (patch.type !== undefined) {
       assertValidType(patch.type);
     }
+    if (patch.title !== undefined) {
+      assertNonBlank('title', patch.title);
+    }
+    if (patch.project !== undefined) {
+      assertNonBlank('project', patch.project);
+    }
+    if (patch.description !== undefined) {
+      assertNonBlank('description', patch.description);
+    }
 
     const nextType = patch.type ?? row.type;
     const oldPath = artifactPath(id, row.type);
     const newPath = artifactPath(id, nextType);
 
+    // Apply the file mutation before the row update, but remember how to
+    // reverse it — mirrors createArtifact's write-then-insert ordering, so a
+    // failed row update can't leave metadata pointing at a missing/renamed
+    // file either.
+    let rollbackFile: (() => void) | undefined;
     if (patch.content !== undefined) {
+      const previousContent = readFileSync(oldPath, 'utf8');
       writeFileSync(newPath, patch.content, 'utf8');
       if (newPath !== oldPath) {
         unlinkSync(oldPath);
       }
+      rollbackFile = () => {
+        writeFileSync(oldPath, previousContent, 'utf8');
+        if (newPath !== oldPath) {
+          unlinkSync(newPath);
+        }
+      };
     } else if (nextType !== row.type) {
       renameSync(oldPath, newPath);
+      rollbackFile = () => {
+        renameSync(newPath, oldPath);
+      };
     }
 
     const title = patch.title ?? row.title;
@@ -239,7 +281,12 @@ export function createArtifactStore(dir: string): ArtifactStore {
     const description = patch.description ?? row.description;
     const updatedAt = isoNow();
 
-    updateStatement.run(title, project, description, nextType, updatedAt, id);
+    try {
+      updateStatement.run(title, project, description, nextType, updatedAt, id);
+    } catch (error) {
+      rollbackFile?.();
+      throw error;
+    }
 
     return {
       createdAt: row.created_at,
