@@ -14,7 +14,7 @@ export const Layout: FC<LayoutProps> = ({ title, children }) => (
       <title>{title}</title>
       <link rel="stylesheet" href={STYLESHEET_HREF} />
     </head>
-    <body class="min-h-screen bg-stone-50 text-stone-900 antialiased">
+    <body class="min-h-screen bg-stone-50 text-stone-900 antialiased dark:bg-stone-950 dark:text-stone-100">
       <div class="mx-auto max-w-3xl px-4 py-10">{children}</div>
     </body>
   </html>

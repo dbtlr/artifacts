@@ -13,6 +13,7 @@ import { NotFoundPage } from './components/not-found-page.js';
 import { ProjectPage } from './components/project-page.js';
 import type { ArtifactStore } from './data/store.js';
 import { getDefaultArtifactStore } from './data/store.js';
+import { renderMarkdownToHtml } from './markdown.js';
 import { createMcpServer } from './mcp/server.js';
 
 // Resolve the static asset root relative to this module, not process.cwd(),
@@ -77,7 +78,7 @@ export function createApp(store?: ArtifactStore): Hono {
   // makes store.getArtifact throw (see store.ts) — that's deliberately left
   // unguarded here too, so it surfaces as a 500 rather than masquerading as
   // an ordinary 404.
-  app.get('/a/:id', (c) => {
+  app.get('/a/:id', async (c) => {
     const id = c.req.param('id');
     const artifact = resolveStore().getArtifact(id);
     if (!artifact) {
@@ -91,9 +92,14 @@ export function createApp(store?: ArtifactStore): Hono {
     if (artifact.type === 'html') {
       return c.html(artifact.content);
     }
+    // Only `md` renders through the markdown pipeline; `txt` is passed
+    // through untouched (ArtifactPage falls back to a plain <pre> whenever
+    // renderedHtml is undefined).
+    const renderedHtml =
+      artifact.type === 'md' ? await renderMarkdownToHtml(artifact.content) : undefined;
     return c.html(
       <Layout title={artifact.title}>
-        <ArtifactPage artifact={artifact} />
+        <ArtifactPage artifact={artifact} renderedHtml={renderedHtml} />
       </Layout>,
     );
   });

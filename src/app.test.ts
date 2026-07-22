@@ -217,7 +217,7 @@ describe('get /a/:id', () => {
 
   it('renders an md artifact inside the layout, with content escaped', async () => {
     const artifact = store.createArtifact({
-      content: '# Heading\n\n<script>alert("xss")</script>',
+      content: '# Heading\n\n<script>alert("xss")</script>\n\n```ts\nconst x = 1;\n```\n',
       description: 'Has a script tag',
       project: 'display-route',
       title: 'My Markdown',
@@ -230,9 +230,15 @@ describe('get /a/:id', () => {
     expect(res.headers.get('content-type')).toContain('text/html');
     const body = await res.text();
     expect(body).toContain('/assets/app.css');
+    // Metadata header stays escaped, same as any other artifact type.
     expect(body).toContain('My Markdown');
     expect(body).toContain('display-route');
     expect(body).toContain('Has a script tag');
+    // Markdown body is rendered, not dumped in a <pre>.
+    expect(body).toContain('<h1>Heading</h1>');
+    expect(body).toContain('class="shiki');
+    // The pipeline neutralizes inline HTML (markdown-it's html:false) — it
+    // never reaches the response as a live tag, only as escaped text.
     expect(body).not.toContain('<script>alert("xss")</script>');
     expect(body).toContain('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
   });
