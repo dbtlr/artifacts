@@ -174,13 +174,23 @@ function slugify(text: string): string {
 // Repeated headings (two "## Overview" sections, or just two headings that
 // slugify to the same text) must not collide on the same id — anchors need
 // to be unique to be useful. First occurrence keeps the bare slug; each
-// repeat gets a `-1`, `-2`, ... suffix, scoped to one render (a fresh `Map`
-// per call, not module state) so concurrent renders of different documents
-// never interfere with each other.
-function dedupeSlug(slug: string, seen: Map<string, number>): string {
-  const count = seen.get(slug) ?? 0;
-  seen.set(slug, count + 1);
-  return count === 0 ? slug : `${slug}-${String(count)}`;
+// repeat gets a `-1`, `-2`, ... suffix. Checked against the *set of ids
+// already handed out* (not just a per-base-slug counter) and re-incremented
+// until a free one is found, so a suffixed id can never collide with a later
+// heading whose own literal text happens to match it — e.g. "Overview",
+// "Overview", "Overview 1" yields `heading-overview`, `heading-overview-1`,
+// `heading-overview-1-1`, not two headings sharing `heading-overview-1`.
+// `usedIds` is a fresh `Set` per render call, not module state, so concurrent
+// renders of different documents never interfere with each other.
+function dedupeSlug(slug: string, usedIds: Set<string>): string {
+  let candidate = slug;
+  let suffix = 0;
+  while (usedIds.has(candidate)) {
+    suffix += 1;
+    candidate = `${slug}-${String(suffix)}`;
+  }
+  usedIds.add(candidate);
+  return candidate;
 }
 
 // Walks the parsed token stream once: assigns each heading_open token a
@@ -189,7 +199,7 @@ function dedupeSlug(slug: string, seen: Map<string, number>): string {
 // built from. A heading with an empty inline body (`##` alone) still gets an
 // id, just with the "section" fallback slug above.
 function extractHeadings(tokens: Token[]): HeadingInfo[] {
-  const seen = new Map<string, number>();
+  const usedIds = new Set<string>();
   const headings: HeadingInfo[] = [];
   for (const [index, token] of tokens.entries()) {
     if (token.type !== 'heading_open') {
@@ -197,7 +207,7 @@ function extractHeadings(tokens: Token[]): HeadingInfo[] {
     }
     const inline = tokens[index + 1];
     const text = inline?.type === 'inline' ? inlineText(inline) : '';
-    const id = dedupeSlug(slugify(text), seen);
+    const id = dedupeSlug(slugify(text), usedIds);
     token.attrSet('id', id);
     const labelHtml =
       inline?.type === 'inline' && inline.children

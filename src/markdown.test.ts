@@ -119,10 +119,11 @@ describe('heading anchors and table of contents', () => {
       '## <script>alert(1)</script> "quotes\' 日本語 😀\n\n## Second\n',
     );
 
-    // The id is derived only from letters/numbers — no quotes, brackets, or
-    // whitespace survive into it, so it can never break out of the id/href
-    // attribute it's placed in.
-    expect(html).toMatch(/<h2 id="heading-[\w-]+">/u);
+    // The id is derived only from letters/numbers — no quotes, brackets,
+    // whitespace, or the emoji survive into it, so it can never break out of
+    // the id/href attribute it's placed in. Asserted as the exact id (not
+    // just a pattern the benign "Second" heading would also satisfy).
+    expect(html).toContain('<h2 id="heading-script-alert-1-script-quotes-日本語">');
     expect(html).not.toContain('id="heading-<script>');
     // The heading's own rendered text stays escaped, same as any other text.
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
@@ -136,6 +137,27 @@ describe('heading anchors and table of contents', () => {
     const { html } = await renderMarkdownToHtml('## 日本語\n\n## Second\n');
 
     expect(html).toContain('id="heading-日本語"');
+  });
+
+  it('falls back to a constant slug for a heading with no letters or numbers', async () => {
+    const { html } = await renderMarkdownToHtml('## 😀😀😀\n\n## ---\n');
+
+    expect(html).toContain('id="heading-section"');
+    // Second heading is just as letter/number-free, so it dedupes off the
+    // same fallback rather than colliding with it.
+    expect(html).toContain('id="heading-section-1"');
+  });
+
+  it('never collides a dedup-suffixed id with a later heading whose literal text matches it', async () => {
+    const { html } = await renderMarkdownToHtml(
+      '## Overview\n\ntext\n\n## Overview\n\ntext\n\n## Overview 1\n',
+    );
+
+    const ids = [...html.matchAll(/id="(heading-[^"]+)"/gu)].map((match) => match[1]);
+
+    expect(ids).toEqual(['heading-overview', 'heading-overview-1', 'heading-overview-1-1']);
+    // Every id is unique — the whole point of deduping in the first place.
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it('omits the TOC for a document with fewer than 2 headings', async () => {
