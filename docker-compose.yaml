@@ -1,26 +1,10 @@
-# Autostart: NOT enabled for this deployment.
-#
-# ~/homelab-infra/start.sh scans $INFRA_DIR/../projects (i.e. ~/projects) for
-# ".autostart" marker files and, for each one found, runs
-# `docker compose -f <project>/docker-compose.yml up -d` — note it looks for
-# the file named exactly "docker-compose.yml", not "docker-compose.yaml".
-#
-# This repo lives under ~/workspaces, which start.sh never scans. On top of
-# that, ~/projects does not currently exist on this machine at all, so the
-# scan step is presently skipped for every project, not just this one (see
-# the "projects root ... not found, skipping autostart scan" lines in
-# ~/homelab-infra/start.log). That's a pre-existing gap in the shared infra,
-# out of scope for this repo to fix.
-#
-# To enable autostart for Artifacts once ~/projects is restored/rewired:
-#   1. Get a copy of (or symlink to) this app's checkout under
-#      ~/projects/artifacts.
-#   2. Ensure a file named exactly docker-compose.yml exists there (rename or
-#      symlink this file to that name — start.sh's find/if check is literal).
-#   3. Add an empty ".autostart" marker file next to it.
-#
-# Until then, start/stop this service manually with `docker compose up -d` /
-# `docker compose down` from this directory.
+# Autostart: the shared infra's start.sh scans the workspaces root (top two
+# levels) for ".autostart" marker files and runs `docker compose up -d` on
+# each project that has one next to a docker-compose.yml/.yaml. The marker is
+# deliberately untracked (gitignored): it marks THIS checkout as the deployed
+# one, so disposable worktree copies of the repo never autostart themselves.
+# Create it with `touch .autostart` in the stable main checkout; start/stop
+# manually with `docker compose up -d` / `docker compose down`.
 
 networks:
   caddy:
