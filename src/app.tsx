@@ -6,8 +6,10 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 
+import { ArtifactPage } from './components/artifact-page.js';
 import { HomePage } from './components/home-page.js';
 import { Layout } from './components/layout.js';
+import { NotFoundPage } from './components/not-found-page.js';
 import type { ArtifactStore } from './data/store.js';
 import { getDefaultArtifactStore } from './data/store.js';
 import { createMcpServer } from './mcp/server.js';
@@ -49,6 +51,34 @@ export function createApp(store?: ArtifactStore): Hono {
       </Layout>,
     ),
   );
+
+  // html artifacts are served as-is — CLAUDE.md: "HTML documents are
+  // displayed as is" (same-origin script execution is an accepted risk,
+  // since content is self-authored on a private network). md/txt render
+  // inside the standard Layout instead. A row whose content file is missing
+  // makes store.getArtifact throw (see store.ts) — that's deliberately left
+  // unguarded here too, so it surfaces as a 500 rather than masquerading as
+  // an ordinary 404.
+  app.get('/a/:id', (c) => {
+    const id = c.req.param('id');
+    const artifact = resolveStore().getArtifact(id);
+    if (!artifact) {
+      return c.html(
+        <Layout title="Artifact not found">
+          <NotFoundPage id={id} />
+        </Layout>,
+        404,
+      );
+    }
+    if (artifact.type === 'html') {
+      return c.html(artifact.content);
+    }
+    return c.html(
+      <Layout title={artifact.title}>
+        <ArtifactPage artifact={artifact} />
+      </Layout>,
+    );
+  });
 
   // Stateless MCP: no sessionIdGenerator, so a fresh McpServer + transport is
   // created per request and torn down once that request's response is ready.
