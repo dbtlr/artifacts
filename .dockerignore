@@ -1,0 +1,15 @@
+node_modules
+dist
+data
+.git
+.gitignore
+.github
+
+# worktree/tooling droppings
+.mimir.toml
+.atlas.toml
+.claude
+.vscode
+.idea
+.DS_Store
+*.log
