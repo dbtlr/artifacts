@@ -4,9 +4,10 @@ Artifacts is a small preview environment for agent-generated documents. An
 agent writes an HTML, Markdown, or text file through the MCP endpoint and
 gets back a persistent URL it can share in chat — handy for plans, diagrams,
 status reports, and other artifacts produced while working remotely. Pages
-are server-rendered (Hono + `hono/jsx`, no client-side framework); Markdown
-and text get syntax highlighting, mermaid diagrams, and a table of contents.
-The homepage lists every artifact, most recent first, filterable by project.
+are server-rendered (Hono + `hono/jsx`, no client-side framework); HTML
+artifacts are served as-is, while Markdown and text render in a readable
+standard template. The homepage lists every artifact, most recent first,
+filterable by project.
 
 ## Quickstart
 
