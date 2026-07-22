@@ -94,12 +94,12 @@ export function createApp(store?: ArtifactStore): Hono {
     }
     // Only `md` renders through the markdown pipeline; `txt` is passed
     // through untouched (ArtifactPage falls back to a plain <pre> whenever
-    // renderedHtml is undefined).
-    const renderedHtml =
+    // `rendered` is undefined).
+    const rendered =
       artifact.type === 'md' ? await renderMarkdownToHtml(artifact.content) : undefined;
     return c.html(
       <Layout title={artifact.title}>
-        <ArtifactPage artifact={artifact} renderedHtml={renderedHtml} />
+        <ArtifactPage artifact={artifact} rendered={rendered} />
       </Layout>,
     );
   });

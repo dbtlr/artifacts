@@ -3,6 +3,12 @@ import type { HighlighterCore } from 'shiki/core';
 import { createHighlighterCore } from 'shiki/core';
 import { createOnigurumaEngine } from 'shiki/engine/oniguruma';
 
+// @types/markdown-it exposes the parsed-token shape only via `MarkdownIt`'s
+// `export =` namespace merge, which trips over this project's
+// `verbatimModuleSyntax`; deriving it from `parse`'s own return type instead
+// sidesteps that entirely and stays exactly as accurate.
+type Token = ReturnType<InstanceType<typeof MarkdownIt>['parse']>[number];
+
 // Fine-grained shiki build: `shiki/bundle/full` ships every language and
 // theme, and even `shiki/bundle/web` (a curated ~55-language subset) still
 // omits things an agent-authored artifact might plausibly contain, like Go,
@@ -100,6 +106,164 @@ function highlightCode(highlighter: HighlighterCore, code: string, lang: string)
   }
 }
 
+const MERMAID_LANG = 'mermaid';
+
+// A ```mermaid fence is a diagram source, not a language shiki knows how to
+// tokenize — it must bypass highlightCode entirely rather than fall into its
+// `text` fallback. markdown-it's default fence renderer uses the `highlight`
+// callback's return value verbatim whenever it starts with `<pre`, which is
+// exactly how shiki's own `codeToHtml` output is threaded through above, so
+// this piggybacks on the same seam: return a `<pre class="mermaid">` whose
+// body is the raw diagram source, escaped with markdown-it's own
+// `utils.escapeHtml` (the same escaping the default renderer would have
+// applied) so adversarial source (`<script>`, quotes) can never break out of
+// the block. The client-side mermaid entry (src/client/mermaid.ts) finds
+// this element by class name and renders it to SVG in the browser.
+function renderMermaidFence(code: string): string {
+  return `<pre class="mermaid">${markdownIt.utils.escapeHtml(code)}</pre>`;
+}
+
+// A fence's language is its `info` string's first whitespace-separated word
+// (markdown-it derives the `highlight` callback's `lang` argument the same
+// way), so ```mermaid twoslash still counts as mermaid.
+function isMermaidFence(token: Token): boolean {
+  return token.type === 'fence' && token.info.trim().split(/\s+/u)[0] === MERMAID_LANG;
+}
+
+// --- Heading anchors + table of contents ---
+//
+// Choice: hand-rolled from the token stream rather than a plugin
+// (markdown-it-anchor + markdown-it-table-of-contents, or a combined toc
+// plugin) — this app needs two small, closely related things (stable slugged
+// ids, and a nested list built from the same headings), both a straight walk
+// over `md.parse()`'s flat token array covering maybe 30 lines total. Two
+// more dependencies (plus their own transitive deps and update cadence) to
+// save that little hand-rolled logic isn't a good trade for a KISS codebase
+// that already hand-rolls its own slim shiki wiring above.
+
+type HeadingInfo = { id: string; labelHtml: string; level: number };
+
+// Concatenates only the content-bearing descendants of an inline token
+// (text, code_inline, etc.), skipping markup tokens like strong_open/_close
+// (which carry the `**`/`_` markers as their `.tag`, not their `.content`) —
+// the point is plain text for slugging, e.g. "**Bold** _Text_" -> "Bold Text".
+function inlineText(token: Token): string {
+  if (!token.children) {
+    return token.content;
+  }
+  return token.children.map((child) => inlineText(child)).join('');
+}
+
+// Unicode-safe slug: keeps any Unicode letter/number (so headings in, say,
+// Cyrillic or CJK still get a legible, non-empty slug) and folds every run of
+// anything else (punctuation, whitespace, emoji) to a single hyphen. Prefixed
+// with `heading-` so a generated id can never collide with the app's own
+// chrome — no element outside artifact content is ever given an id at all,
+// but the prefix keeps that true even if one is added later. A heading with
+// no letters/numbers at all (e.g. "---" or "😀") falls back to a constant so
+// it's still a valid, non-empty id rather than a dangling hyphen.
+function slugify(text: string): string {
+  const slug = text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/gu, '');
+  return `heading-${slug || 'section'}`;
+}
+
+// Repeated headings (two "## Overview" sections, or just two headings that
+// slugify to the same text) must not collide on the same id — anchors need
+// to be unique to be useful. First occurrence keeps the bare slug; each
+// repeat gets a `-1`, `-2`, ... suffix, scoped to one render (a fresh `Map`
+// per call, not module state) so concurrent renders of different documents
+// never interfere with each other.
+function dedupeSlug(slug: string, seen: Map<string, number>): string {
+  const count = seen.get(slug) ?? 0;
+  seen.set(slug, count + 1);
+  return count === 0 ? slug : `${slug}-${String(count)}`;
+}
+
+// Walks the parsed token stream once: assigns each heading_open token a
+// unique `id` attribute (mutating `tokens` in place, so the default renderer
+// picks it up automatically) and returns the ordered heading list the TOC is
+// built from. A heading with an empty inline body (`##` alone) still gets an
+// id, just with the "section" fallback slug above.
+function extractHeadings(tokens: Token[]): HeadingInfo[] {
+  const seen = new Map<string, number>();
+  const headings: HeadingInfo[] = [];
+  for (const [index, token] of tokens.entries()) {
+    if (token.type !== 'heading_open') {
+      continue;
+    }
+    const inline = tokens[index + 1];
+    const text = inline?.type === 'inline' ? inlineText(inline) : '';
+    const id = dedupeSlug(slugify(text), seen);
+    token.attrSet('id', id);
+    const labelHtml =
+      inline?.type === 'inline' && inline.children
+        ? markdownIt.renderer.renderInline(inline.children, markdownIt.options, {})
+        : '';
+    const level = Number.parseInt(token.tag.slice(1), 10);
+    headings.push({ id, labelHtml, level });
+  }
+  return headings;
+}
+
+type TocNode = { children: TocNode[]; heading: HeadingInfo };
+
+// Standard "stack of open ancestors" tree build: a heading nests under the
+// nearest preceding heading of a strictly lower level, however far level
+// jumps skip (an h4 straight after an h2 nests under the h2 with no
+// intermediate h3), which is the same tolerant behavior markdown-it's own
+// toc-plugin ecosystem uses for real-world, not-strictly-sequential headings.
+function buildTocTree(headings: HeadingInfo[]): TocNode[] {
+  const root: TocNode[] = [];
+  const stack: { level: number; node: TocNode }[] = [];
+  for (const heading of headings) {
+    const node: TocNode = { children: [], heading };
+    while (stack.length > 0 && stack[stack.length - 1]!.level >= heading.level) {
+      stack.pop();
+    }
+    const parent = stack[stack.length - 1];
+    if (parent) {
+      parent.node.children.push(node);
+    } else {
+      root.push(node);
+    }
+    stack.push({ level: heading.level, node });
+  }
+  return root;
+}
+
+function renderTocNodes(nodes: TocNode[]): string {
+  if (nodes.length === 0) {
+    return '';
+  }
+  const items = nodes
+    .map(
+      (node) =>
+        `<li><a href="#${node.heading.id}">${node.heading.labelHtml}</a>${renderTocNodes(node.children)}</li>`,
+    )
+    .join('');
+  return `<ol>${items}</ol>`;
+}
+
+// Anchor hrefs interpolate `node.heading.id` directly: it's always this
+// module's own `slugify` output (`heading-` plus Unicode letters/numbers/
+// hyphens only), never adversarial text, so it can't smuggle a quote or
+// close the attribute early. `labelHtml` comes from markdown-it's own
+// `renderInline`, which already HTML-escapes plain text content the same way
+// the heading itself is rendered (see markdown.test.ts's inline-HTML test) —
+// safe to interpolate as-is.
+function renderToc(headings: HeadingInfo[]): string | undefined {
+  // Only documents with 2+ headings get a TOC — a single heading (or none)
+  // isn't worth navigating.
+  if (headings.length < 2) {
+    return undefined;
+  }
+  return `<nav aria-label="Table of contents" class="toc">${renderTocNodes(buildTocTree(headings))}</nav>`;
+}
+
 // markdown-it itself does no I/O and is cheap to construct, so — unlike the
 // shiki highlighter above — it doesn't need lazy/async init. Its `highlight`
 // callback runs synchronously during `.render()`, so it reads
@@ -107,6 +271,9 @@ function highlightCode(highlighter: HighlighterCore, code: string, lang: string)
 // `getHighlighter()` first, guaranteeing that's set by the time render runs.
 const markdownIt: MarkdownIt = new MarkdownIt({
   highlight: (code, lang) => {
+    if (lang.trim() === MERMAID_LANG) {
+      return renderMermaidFence(code);
+    }
     if (!highlighterInstance) {
       throw new Error('renderMarkdownToHtml: highlighter must be loaded before md.render()');
     }
@@ -128,11 +295,35 @@ const markdownIt: MarkdownIt = new MarkdownIt({
   linkify: false,
 });
 
-// Converts artifact markdown to an HTML string for server-side rendering.
-// Callers inject the result with hono's `raw()` — see artifact-page.tsx —
+export type RenderedMarkdown = {
+  // Whether any ```mermaid fence survived into the render — artifact-page.tsx
+  // uses this to decide whether to emit the client-side mermaid <script> tag,
+  // so pages without a diagram stay at zero client JS.
+  hasMermaid: boolean;
+  html: string;
+  // A ready-to-inject `<nav>` of nested `<ol>`s, or undefined when the
+  // document has fewer than 2 headings (see renderToc above).
+  toc: string | undefined;
+};
+
+// Converts artifact markdown to an HTML string for server-side rendering,
+// alongside the two pieces of document structure the route/page need to
+// react to: whether a mermaid diagram is present, and a table of contents.
+// Callers inject `html`/`toc` with hono's `raw()` — see artifact-page.tsx —
 // since this is the one place in the app that intentionally emits markup
 // built from artifact content rather than escaping it.
-export async function renderMarkdownToHtml(markdown: string): Promise<string> {
+//
+// Renders via `md.parse()` + `md.renderer.render()` (what `md.render()` does
+// internally) rather than plain `md.render()`, so the parsed token stream is
+// available in between for `extractHeadings` to walk — it mutates heading
+// tokens in place (assigning `id` attrs) before the renderer turns them into
+// HTML, and the same walk is what produces the TOC and the mermaid flag.
+export async function renderMarkdownToHtml(markdown: string): Promise<RenderedMarkdown> {
   await getHighlighter();
-  return markdownIt.render(markdown);
+  const env = {};
+  const tokens = markdownIt.parse(markdown, env);
+  const hasMermaid = tokens.some(isMermaidFence);
+  const headings = extractHeadings(tokens);
+  const html = markdownIt.renderer.render(tokens, markdownIt.options, env);
+  return { hasMermaid, html, toc: renderToc(headings) };
 }

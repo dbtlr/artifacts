@@ -2,7 +2,13 @@
   "extends": "@dbtlr/tooling/tsconfig/node.json",
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "hono/jsx"
+    "jsxImportSource": "hono/jsx",
+    // The base config's "lib" is Node-only ("ESNext") — everything under
+    // src/ is server code except src/client/*, which runs in the browser
+    // (styles.css, and now mermaid.ts) and needs `window`/`matchMedia`.
+    // Adding "DOM" here is simpler than a second tsconfig scoped to
+    // src/client, and safe: no server file references browser-only globals.
+    "lib": ["ESNext", "DOM"]
   },
   "include": ["src", "vite.config.ts"]
 }

@@ -30,3 +30,50 @@
     text-decoration: var(--shiki-dark-text-decoration) !important;
   }
 }
+
+/*
+ * Table of contents (see renderToc in src/markdown.ts): plain nested
+ * <ol>/<li>/<a> markup with no classes of its own, styled here the same way
+ * the .shiki rules above style shiki's own plain markup — a small,
+ * hand-written rule set instead of pulling the `prose` typography plugin
+ * over a block that isn't really "document content."
+ */
+.toc ol {
+  list-style: none;
+  padding-left: 1.25rem;
+}
+
+.toc > ol {
+  padding-left: 0;
+}
+
+.toc li {
+  margin-block: 0.25rem;
+}
+
+.toc a {
+  color: var(--color-stone-600);
+  text-decoration: none;
+}
+
+.toc a:hover {
+  text-decoration: underline;
+}
+
+@media (prefers-color-scheme: dark) {
+  .toc a {
+    color: var(--color-stone-300);
+  }
+}
+
+/*
+ * Mermaid diagrams (see src/client/mermaid.ts): before the client script
+ * runs, `.mermaid` is a `<pre>` of raw diagram source — center it like the
+ * SVG it becomes so there's no layout jump once mermaid replaces its
+ * contents.
+ */
+.mermaid {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+}

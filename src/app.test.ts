@@ -234,13 +234,88 @@ describe('get /a/:id', () => {
     expect(body).toContain('My Markdown');
     expect(body).toContain('display-route');
     expect(body).toContain('Has a script tag');
-    // Markdown body is rendered, not dumped in a <pre>.
-    expect(body).toContain('<h1>Heading</h1>');
+    // Markdown body is rendered, not dumped in a <pre>, and its one heading
+    // got a slugged anchor id (see markdown.test.ts for the full behavior).
+    expect(body).toContain('<h1 id="heading-heading">Heading</h1>');
     expect(body).toContain('class="shiki');
     // The pipeline neutralizes inline HTML (markdown-it's html:false) — it
     // never reaches the response as a live tag, only as escaped text.
     expect(body).not.toContain('<script>alert("xss")</script>');
     expect(body).toContain('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
+    // A single heading isn't enough for a TOC, and there's no mermaid fence.
+    expect(body).not.toContain('class="toc"');
+    expect(body).not.toContain('/assets/mermaid.js');
+  });
+
+  it('renders a mermaid fence as a client-rendered diagram and links the mermaid script', async () => {
+    const artifact = store.createArtifact({
+      content: '# Diagram\n\n```mermaid\nflowchart TD\n  A --> B\n```\n',
+      description: 'Has a mermaid diagram',
+      project: 'display-route',
+      title: 'My Diagram',
+      type: 'md',
+    });
+
+    const res = await testApp.request(`/a/${artifact.id}`);
+
+    const body = await res.text();
+    expect(body).toContain('<pre class="mermaid">flowchart TD');
+    expect(body).not.toContain('class="shiki');
+    expect(body).toContain('<script src="/assets/mermaid.js" type="module">');
+  });
+
+  it('does not link the mermaid script on an md page with no mermaid fence', async () => {
+    const artifact = store.createArtifact({
+      content: '# No Diagram\n\nJust text and a ```ts\nconst x = 1;\n``` fence.\n',
+      description: 'No mermaid here',
+      project: 'display-route',
+      title: 'No Diagram',
+      type: 'md',
+    });
+
+    const res = await testApp.request(`/a/${artifact.id}`);
+
+    const body = await res.text();
+    expect(body).not.toContain('/assets/mermaid.js');
+  });
+
+  it('renders a table of contents between the metadata header and the content for 2+ headings', async () => {
+    const artifact = store.createArtifact({
+      content: '# Title\n\n## Section One\n\ntext\n\n## Section Two\n\nmore text\n',
+      description: 'Has multiple headings',
+      project: 'display-route',
+      title: 'Multi Heading',
+      type: 'md',
+    });
+
+    const res = await testApp.request(`/a/${artifact.id}`);
+
+    const body = await res.text();
+    expect(body).toContain('class="toc"');
+    expect(body).toContain('href="#heading-section-one"');
+    expect(body).toContain('href="#heading-section-two"');
+    // Between metadata header and content: the header's description text
+    // appears before the TOC, and the TOC appears before the rendered body.
+    const descriptionIndex = body.indexOf('Has multiple headings');
+    const tocIndex = body.indexOf('class="toc"');
+    const contentIndex = body.indexOf('Section One</h2>');
+    expect(descriptionIndex).toBeLessThan(tocIndex);
+    expect(tocIndex).toBeLessThan(contentIndex);
+  });
+
+  it('omits the table of contents for an md page with fewer than 2 headings', async () => {
+    const artifact = store.createArtifact({
+      content: '# Only Heading\n\nJust one heading and some text.\n',
+      description: 'Single heading',
+      project: 'display-route',
+      title: 'Single Heading',
+      type: 'md',
+    });
+
+    const res = await testApp.request(`/a/${artifact.id}`);
+
+    const body = await res.text();
+    expect(body).not.toContain('class="toc"');
   });
 
   it('renders a txt artifact inside the layout, with content escaped', async () => {
