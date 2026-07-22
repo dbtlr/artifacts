@@ -1,16 +1,9 @@
 import type { FC } from 'hono/jsx';
 
 import type { ArtifactWithContent } from '../data/store.js';
+import { formatDate } from '../format-date.js';
 
 type ArtifactPageProps = { artifact: ArtifactWithContent };
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
-}
 
 // Renders md/txt artifacts inside the standard chrome. This is a placeholder
 // for `md`: the real pipeline (server-side markdown, shiki syntax

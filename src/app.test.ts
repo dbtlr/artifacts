@@ -28,6 +28,160 @@ describe('app', () => {
   });
 });
 
+describe('homepage and project list', () => {
+  let dataDir: string;
+  let store: ArtifactStore;
+  let testApp: ReturnType<typeof createApp>;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), 'artifacts-list-'));
+    store = createArtifactStore(dataDir);
+    testApp = createApp(store);
+  });
+
+  afterEach(async () => {
+    await rm(dataDir, { force: true, recursive: true });
+  });
+
+  describe('get /', () => {
+    it('shows a friendly empty state on a fresh install', async () => {
+      const res = await testApp.request('/');
+
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain('/assets/app.css');
+      expect(body).toContain('No artifacts yet');
+      expect(body).not.toContain('<a href="/a/');
+    });
+
+    it('lists all artifacts newest-first with links to /a/:id and /p/:project', async () => {
+      const first = store.createArtifact({
+        content: 'a',
+        description: 'First one',
+        project: 'artifacts',
+        title: 'First',
+        type: 'txt',
+      });
+      const second = store.createArtifact({
+        content: 'b',
+        description: 'Second one',
+        project: 'side project',
+        title: 'Second',
+        type: 'txt',
+      });
+
+      const res = await testApp.request('/');
+
+      expect(res.status).toBe(200);
+      const body = await res.text();
+
+      // Newest first: second appears before first.
+      expect(body.indexOf(second.title)).toBeLessThan(body.indexOf(first.title));
+
+      expect(body).toContain(`href="/a/${first.id}"`);
+      expect(body).toContain(`href="/a/${second.id}"`);
+      expect(body).toContain('href="/p/artifacts"');
+      // A project name with a space must be percent-encoded in the link.
+      expect(body).toContain(`href="/p/${encodeURIComponent('side project')}"`);
+      expect(body).toContain('href="/p/side%20project"');
+
+      expect(body).toContain('First one');
+      expect(body).toContain('Second one');
+    });
+
+    it('escapes HTML-ish title, project, and description text', async () => {
+      store.createArtifact({
+        content: 'x',
+        description: '<img src=x onerror=alert(1)>',
+        project: '<b>bold project</b>',
+        title: '<script>alert("xss")</script>',
+        type: 'txt',
+      });
+
+      const res = await testApp.request('/');
+
+      const body = await res.text();
+      expect(body).not.toContain('<script>alert("xss")</script>');
+      expect(body).not.toContain('<img src=x onerror=alert(1)>');
+      expect(body).not.toContain('<b>bold project</b>');
+      expect(body).toContain('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
+      expect(body).toContain('&lt;img src=x onerror=alert(1)&gt;');
+      expect(body).toContain('&lt;b&gt;bold project&lt;/b&gt;');
+    });
+  });
+
+  describe('get /p/:project', () => {
+    it('filters to the given project and decodes a url-encoded project name', async () => {
+      const inProject = store.createArtifact({
+        content: 'a',
+        description: 'In the target project',
+        project: 'side project',
+        title: 'In Project',
+        type: 'txt',
+      });
+      const otherProject = store.createArtifact({
+        content: 'b',
+        description: 'In a different project',
+        project: 'other',
+        title: 'Other Project',
+        type: 'txt',
+      });
+
+      const res = await testApp.request(`/p/${encodeURIComponent('side project')}`);
+
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain(`href="/a/${inProject.id}"`);
+      expect(body).not.toContain(`href="/a/${otherProject.id}"`);
+      expect(body).toContain('side project');
+      expect(body).not.toContain('Other Project');
+    });
+
+    it('filters to a project name containing a slash', async () => {
+      const nested = store.createArtifact({
+        content: 'a',
+        description: 'Nested project',
+        project: 'team/sub-project',
+        title: 'Nested',
+        type: 'txt',
+      });
+
+      const res = await testApp.request(`/p/${encodeURIComponent('team/sub-project')}`);
+
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain(`href="/a/${nested.id}"`);
+    });
+
+    it('links back to all artifacts and shows the project name in the header', async () => {
+      store.createArtifact({
+        content: 'a',
+        description: 'd',
+        project: 'artifacts',
+        title: 'A',
+        type: 'txt',
+      });
+
+      const res = await testApp.request('/p/artifacts');
+
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain('href="/"');
+      expect(body).toContain('artifacts');
+    });
+
+    it('shows the empty-state list UI (not a 404) for an unknown project', async () => {
+      const res = await testApp.request('/p/does-not-exist');
+
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain('/assets/app.css');
+      expect(body).toContain('No artifacts');
+      expect(body).not.toContain('<a href="/a/');
+    });
+  });
+});
+
 describe('get /a/:id', () => {
   let dataDir: string;
   let store: ArtifactStore;

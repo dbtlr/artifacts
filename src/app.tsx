@@ -10,6 +10,7 @@ import { ArtifactPage } from './components/artifact-page.js';
 import { HomePage } from './components/home-page.js';
 import { Layout } from './components/layout.js';
 import { NotFoundPage } from './components/not-found-page.js';
+import { ProjectPage } from './components/project-page.js';
 import type { ArtifactStore } from './data/store.js';
 import { getDefaultArtifactStore } from './data/store.js';
 import { createMcpServer } from './mcp/server.js';
@@ -44,13 +45,30 @@ export function createApp(store?: ArtifactStore): Hono {
     }),
   );
 
-  app.get('/', (c) =>
-    c.html(
+  app.get('/', (c) => {
+    const artifacts = resolveStore().listArtifacts();
+    return c.html(
       <Layout title="Artifacts">
-        <HomePage />
+        <HomePage artifacts={artifacts} />
       </Layout>,
-    ),
-  );
+    );
+  });
+
+  // Hono's c.req.param() already URL-decodes a segment that contains a `%`
+  // (see hono/dist/request.js), so `project` here is the raw project name —
+  // matching what ArtifactList encoded into the /p/:project link. A project
+  // with zero artifacts (typo, or one that was never created) still renders
+  // the ordinary list UI with an empty state — it's a filter, not a lookup,
+  // so there's nothing 404-worthy about it coming back empty.
+  app.get('/p/:project', (c) => {
+    const project = c.req.param('project');
+    const artifacts = resolveStore().listArtifacts({ project });
+    return c.html(
+      <Layout title={`${project} · Artifacts`}>
+        <ProjectPage artifacts={artifacts} project={project} />
+      </Layout>,
+    );
+  });
 
   // html artifacts are served as-is — CLAUDE.md: "HTML documents are
   // displayed as is" (same-origin script execution is an accepted risk,
