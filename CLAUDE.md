@@ -21,3 +21,7 @@ An Artifact should have a title, a project, and short description added with it,
 A list of artifacts, as well as the date they were added should be maintained on the homepage. Most recent artifacts at the top.
 
 Artifact metadata is maintained in a local sqlite database (not managed by git).
+
+## How We Work (addendum)
+
+This project currently has no upstream repo, which means norm PR workflows are not required for this repository. We still work in worktrees, to assist in agent isolation, however merging happens directly to main
