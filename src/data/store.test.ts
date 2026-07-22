@@ -20,13 +20,20 @@ afterEach(() => {
   rmSync(dir, { force: true, recursive: true });
 });
 
-// A second connection to the same db file, holding an exclusive transaction,
-// makes any write from the store's own connection fail deterministically with
-// "database is locked" — a real sqlite failure, not a mock, that exercises
-// the store's write-then-persist rollback paths.
-function lockDatabaseFile(dbPath: string): { release: () => void } {
+// A second connection to the same db file, switched to WAL and holding an
+// IMMEDIATE (write) lock, makes any *write* from the store's own connection
+// fail deterministically with "database is locked" — while leaving reads
+// (SELECT) unaffected. That distinction matters: a plain `BEGIN EXCLUSIVE`
+// also blocks the store's own reads, so createArtifact/updateArtifact would
+// fail at their first getRow() lookup, before ever touching a file — making
+// any rollback/cleanup assertion vacuously true. WAL + BEGIN IMMEDIATE forces
+// the failure specifically at the INSERT/UPDATE statement, which only runs
+// after the file has already been written/renamed, so these tests genuinely
+// exercise the cleanup/rollback code.
+function lockDatabaseForWrites(dbPath: string): { release: () => void } {
   const lock = new DatabaseSync(dbPath);
-  lock.exec('BEGIN EXCLUSIVE');
+  lock.exec('PRAGMA journal_mode = WAL');
+  lock.exec('BEGIN IMMEDIATE');
   return {
     release: () => {
       lock.exec('COMMIT');
@@ -90,9 +97,14 @@ describe('createArtifact', () => {
   );
 
   it('cleans up the content file when the row insert fails', () => {
-    const lock = lockDatabaseFile(join(dir, 'artifacts.db'));
+    const lock = lockDatabaseForWrites(join(dir, 'artifacts.db'));
 
     try {
+      // Reads still succeed under this lock (see lockDatabaseForWrites), so
+      // generateId()'s getRow() lookup passes and execution reaches
+      // writeFileSync before the INSERT below is the thing that fails.
+      expect(store.listArtifacts()).toEqual([]);
+
       expect(() =>
         store.createArtifact({
           content: 'orphan?',
@@ -102,11 +114,11 @@ describe('createArtifact', () => {
           type: 'txt',
         }),
       ).toThrow('database is locked');
-
-      expect(readdirSync(join(dir, 'artifacts'))).toEqual([]);
     } finally {
       lock.release();
     }
+
+    expect(readdirSync(join(dir, 'artifacts'))).toEqual([]);
   });
 });
 
@@ -242,9 +254,12 @@ describe('updateArtifact', () => {
       title: 'Draft',
       type: 'txt',
     });
-    const lock = lockDatabaseFile(join(dir, 'artifacts.db'));
+    const lock = lockDatabaseForWrites(join(dir, 'artifacts.db'));
 
     try {
+      // Proves the read (getRow) inside updateArtifact isn't what's failing.
+      expect(store.getArtifact(created.id)?.content).toBe('original');
+
       expect(() => store.updateArtifact(created.id, { content: 'new' })).toThrow(
         'database is locked',
       );
@@ -264,10 +279,37 @@ describe('updateArtifact', () => {
       title: 'Draft',
       type: 'txt',
     });
-    const lock = lockDatabaseFile(join(dir, 'artifacts.db'));
+    const lock = lockDatabaseForWrites(join(dir, 'artifacts.db'));
 
     try {
+      expect(store.getArtifact(created.id)?.content).toBe('plain');
+
       expect(() => store.updateArtifact(created.id, { type: 'md' })).toThrow('database is locked');
+    } finally {
+      lock.release();
+    }
+
+    expect(store.getArtifact(created.id)?.type).toBe('txt');
+    expect(store.getArtifact(created.id)?.content).toBe('plain');
+    expect(readdirSync(join(dir, 'artifacts'))).toEqual([`${created.id}.txt`]);
+  });
+
+  it('restores both the original path and content when a content+type update fails', () => {
+    const created = store.createArtifact({
+      content: 'plain',
+      description: 'v1',
+      project: 'demo',
+      title: 'Draft',
+      type: 'txt',
+    });
+    const lock = lockDatabaseForWrites(join(dir, 'artifacts.db'));
+
+    try {
+      expect(store.getArtifact(created.id)?.content).toBe('plain');
+
+      expect(() =>
+        store.updateArtifact(created.id, { content: '<p>hi</p>', type: 'html' }),
+      ).toThrow('database is locked');
     } finally {
       lock.release();
     }

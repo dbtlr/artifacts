@@ -284,6 +284,9 @@ export function createArtifactStore(dir: string): ArtifactStore {
     try {
       updateStatement.run(title, project, description, nextType, updatedAt, id);
     } catch (error) {
+      // If rollbackFile itself throws (e.g. disk failure mid-restore), that
+      // new error replaces and masks `error` here — accepted as a
+      // catastrophe-only edge case, not worth the complexity of chaining both.
       rollbackFile?.();
       throw error;
     }
