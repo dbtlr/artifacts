@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -n server,assets -c blue,magenta \"tsx watch src/server.ts\" \"vite build --watch\"",
-    "build": "vite build",
-    "start": "tsx src/server.ts",
+    "build": "vp pack && vite build",
+    "start": "node dist/server.js",
     "lint": "vp lint",
     "fmt": "vp fmt --check",
     "test": "vp test run"
