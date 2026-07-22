@@ -27,5 +27,19 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --prod
 COPY --from=builder /app/dist ./dist
 
+# Run as the non-root `node` user baked into the base image (uid/gid 1000)
+# rather than root. Everything under /app is read-only for this process
+# except the bind-mounted data dir, whose write access is verified in
+# docker-compose.yaml's data volume comment / deploy verification.
+USER node
+
 EXPOSE 3000
+
+# Belt-and-suspenders liveness/readiness probe: hits `/` so caddy-docker-proxy
+# (or any orchestrator watching container health) doesn't route to the
+# container before Node has actually bound the port, closing the cold-start
+# 502 window. wget is the busybox one bundled in node:*-alpine.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -qO- http://localhost:3000/ || exit 1
+
 CMD ["node", "dist/server.js"]

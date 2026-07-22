@@ -30,9 +30,18 @@ services:
   artifacts:
     build: .
     restart: unless-stopped
+    # Node runs as PID 1 in the container and doesn't reap/forward signals on
+    # its own; without a real init, `docker stop` blocks for the full grace
+    # period and gets SIGKILLed (a mid-write sqlite corruption risk). `init:
+    # true` runs tini as PID 1 so SIGTERM reaches Node and it exits cleanly.
+    init: true
     networks:
       - caddy
     volumes:
+      # Relative to wherever this compose file's checkout lives — fine for
+      # ad hoc verification from any worktree, but production should run
+      # this from the stable main checkout (not a disposable worktree) so
+      # ./data doesn't get orphaned when the worktree is removed.
       - ./data:/app/data
     environment:
       - ARTIFACTS_DATA_DIR=/app/data
