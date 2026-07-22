@@ -54,10 +54,18 @@ let highlighterPromise: Promise<HighlighterCore> | undefined;
 // the highlighter loads the oniguruma wasm engine plus every grammar/theme
 // above, so it must happen exactly once per process, not once per request.
 // The in-flight promise itself is memoized so concurrent first requests
-// share one build instead of racing separate ones.
-function getHighlighter(): Promise<HighlighterCore> {
+// share one build instead of racing separate ones. A failed build clears the
+// memoized promise instead of permanently caching the rejection, so a
+// transient failure (e.g. a wasm load hiccup) can succeed on the next
+// request rather than wedging every future render.
+async function getHighlighter(): Promise<HighlighterCore> {
   highlighterPromise ??= buildHighlighter();
-  return highlighterPromise;
+  try {
+    return await highlighterPromise;
+  } catch (error) {
+    highlighterPromise = undefined;
+    throw error;
+  }
 }
 
 async function buildHighlighter(): Promise<HighlighterCore> {
