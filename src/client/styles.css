@@ -15,6 +15,9 @@
 .shiki span {
   background-color: var(--shiki-light-bg);
   color: var(--shiki-light);
+  font-style: var(--shiki-light-font-style);
+  font-weight: var(--shiki-light-font-weight);
+  text-decoration: var(--shiki-light-text-decoration);
 }
 
 @media (prefers-color-scheme: dark) {
