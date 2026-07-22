@@ -1,6 +1,7 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
@@ -18,6 +19,21 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(dir, { force: true, recursive: true });
 });
+
+// A second connection to the same db file, holding an exclusive transaction,
+// makes any write from the store's own connection fail deterministically with
+// "database is locked" — a real sqlite failure, not a mock, that exercises
+// the store's write-then-persist rollback paths.
+function lockDatabaseFile(dbPath: string): { release: () => void } {
+  const lock = new DatabaseSync(dbPath);
+  lock.exec('BEGIN EXCLUSIVE');
+  return {
+    release: () => {
+      lock.exec('COMMIT');
+      lock.close();
+    },
+  };
+}
 
 describe('createArtifact', () => {
   it('writes a content file and a matching row, and returns the artifact', () => {
@@ -51,6 +67,46 @@ describe('createArtifact', () => {
     ).toThrow('Invalid artifact type');
 
     expect(store.listArtifacts()).toEqual([]);
+    expect(readdirSync(join(dir, 'artifacts'))).toEqual([]);
+  });
+
+  it.each(['title', 'project', 'description'] as const)(
+    'rejects a blank %s and leaves no orphan file behind',
+    (field) => {
+      expect(() =>
+        store.createArtifact({
+          content: 'x',
+          description: 'd',
+          project: 'p',
+          title: 't',
+          type: 'txt',
+          [field]: '   ',
+        }),
+      ).toThrow(`Invalid artifact ${field}`);
+
+      expect(store.listArtifacts()).toEqual([]);
+      expect(readdirSync(join(dir, 'artifacts'))).toEqual([]);
+    },
+  );
+
+  it('cleans up the content file when the row insert fails', () => {
+    const lock = lockDatabaseFile(join(dir, 'artifacts.db'));
+
+    try {
+      expect(() =>
+        store.createArtifact({
+          content: 'orphan?',
+          description: 'd',
+          project: 'p',
+          title: 't',
+          type: 'txt',
+        }),
+      ).toThrow('database is locked');
+
+      expect(readdirSync(join(dir, 'artifacts'))).toEqual([]);
+    } finally {
+      lock.release();
+    }
   });
 });
 
@@ -162,6 +218,64 @@ describe('updateArtifact', () => {
       'Invalid artifact type',
     );
   });
+
+  it.each(['title', 'project', 'description'] as const)('rejects a blank %s patch', (field) => {
+    const created = store.createArtifact({
+      content: 'plain',
+      description: 'v1',
+      project: 'demo',
+      title: 'Draft',
+      type: 'txt',
+    });
+
+    expect(() => store.updateArtifact(created.id, { [field]: '   ' })).toThrow(
+      `Invalid artifact ${field}`,
+    );
+    expect(store.getArtifact(created.id)?.[field]).toBe(created[field]);
+  });
+
+  it('restores the original content file when the row update fails', () => {
+    const created = store.createArtifact({
+      content: 'original',
+      description: 'v1',
+      project: 'demo',
+      title: 'Draft',
+      type: 'txt',
+    });
+    const lock = lockDatabaseFile(join(dir, 'artifacts.db'));
+
+    try {
+      expect(() => store.updateArtifact(created.id, { content: 'new' })).toThrow(
+        'database is locked',
+      );
+    } finally {
+      lock.release();
+    }
+
+    expect(store.getArtifact(created.id)?.content).toBe('original');
+    expect(readdirSync(join(dir, 'artifacts'))).toEqual([`${created.id}.txt`]);
+  });
+
+  it('restores the original file path when a type-changing update fails', () => {
+    const created = store.createArtifact({
+      content: 'plain',
+      description: 'v1',
+      project: 'demo',
+      title: 'Draft',
+      type: 'txt',
+    });
+    const lock = lockDatabaseFile(join(dir, 'artifacts.db'));
+
+    try {
+      expect(() => store.updateArtifact(created.id, { type: 'md' })).toThrow('database is locked');
+    } finally {
+      lock.release();
+    }
+
+    expect(store.getArtifact(created.id)?.type).toBe('txt');
+    expect(store.getArtifact(created.id)?.content).toBe('plain');
+    expect(readdirSync(join(dir, 'artifacts'))).toEqual([`${created.id}.txt`]);
+  });
 });
 
 describe('removeArtifact', () => {
@@ -223,6 +337,32 @@ describe('listArtifacts', () => {
 
   it('returns an empty list when nothing has been created', () => {
     expect(store.listArtifacts()).toEqual([]);
+  });
+
+  it('breaks a created_at tie by insertion order, newest first', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+      const first = store.createArtifact({
+        content: 'a',
+        description: 'first',
+        project: 'demo',
+        title: 'First',
+        type: 'txt',
+      });
+      const second = store.createArtifact({
+        content: 'b',
+        description: 'second',
+        project: 'demo',
+        title: 'Second',
+        type: 'txt',
+      });
+
+      expect(first.createdAt).toBe(second.createdAt);
+      expect(store.listArtifacts().map((artifact) => artifact.id)).toEqual([second.id, first.id]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
