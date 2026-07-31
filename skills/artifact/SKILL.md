@@ -62,7 +62,7 @@ None of these are mandatory — write plain markdown when a document doesn't fit
 
 This skill assumes:
 
-1. The Artifacts MCP server is registered: `claude mcp add --transport http artifacts https://artifacts.valhalla.local/mcp --scope user` (adjust the host to your deployment).
-2. This skill directory is symlinked into the skills path Claude reads, e.g.: `ln -s <repo>/skills/artifact ~/.claude/skills/artifact`.
+1. The Artifacts MCP server is registered in the agent client using the deployment's `/mcp` URL.
+2. This skill directory is installed in the client-specific personal skills directory.
 
 Neither step is something the agent does mid-task — both are one-time environment setup performed by the person operating the agent.

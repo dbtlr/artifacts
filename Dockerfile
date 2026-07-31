@@ -38,9 +38,8 @@ USER node
 EXPOSE ${ARTIFACTS_PORT}
 
 # Liveness probe: hits `/` so `docker ps` and any orchestrator that gates on
-# container health can see the server is actually bound. Note caddy-docker-proxy
-# itself does not gate upstreams on health status; Caddy's own retries cover the
-# brief cold-start window. wget is the busybox one bundled in node:*-alpine.
+# container health can see the server is actually bound. wget is the busybox
+# implementation bundled in node:*-alpine.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- "http://localhost:${ARTIFACTS_PORT}/" || exit 1
 

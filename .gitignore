@@ -8,4 +8,5 @@ docker-compose.yaml
 node_modules/
 dist/
 build/
+/backups/
 /data/

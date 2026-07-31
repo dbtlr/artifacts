@@ -263,7 +263,7 @@ describe('public base url override', () => {
   });
 
   it('builds returned URLs from ARTIFACTS_PUBLIC_BASE_URL, trimming a trailing slash', async () => {
-    process.env.ARTIFACTS_PUBLIC_BASE_URL = 'https://artifacts.valhalla.local/';
+    process.env.ARTIFACTS_PUBLIC_BASE_URL = 'https://artifacts.example/';
 
     const added = await callTool(
       'add_artifact',
@@ -271,7 +271,7 @@ describe('public base url override', () => {
       artifactSchema,
     );
 
-    expect(added.url).toBe(`https://artifacts.valhalla.local/a/${added.id}`);
+    expect(added.url).toBe(`https://artifacts.example/a/${added.id}`);
 
     await callTool('remove_artifact', { id: added.id }, removeResultSchema);
   });
