@@ -31,6 +31,7 @@ describe('buildArtifactUrl', () => {
     '   ',
     'artifacts.example',
     'ftp://artifacts.example',
+    'https://user:secret@artifacts.example',
     'https://artifacts.example/?token=secret',
     'https://artifacts.example/#section',
     'not a URL',

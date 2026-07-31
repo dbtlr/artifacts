@@ -19,14 +19,16 @@ function resolveBaseUrl(): string {
   if (
     (url.protocol !== 'http:' && url.protocol !== 'https:') ||
     url.hash !== '' ||
+    url.password !== '' ||
     url.search !== '' ||
+    url.username !== '' ||
     base === ''
   ) {
     throw new Error(
       `ARTIFACTS_PUBLIC_BASE_URL must be an absolute HTTP(S) URL, got ${JSON.stringify(raw)}`,
     );
   }
-  return base.replace(/\/+$/u, '');
+  return url.toString().replace(/\/+$/u, '');
 }
 
 // The display route (/a/<id>) lands in a later task; this stays importable
