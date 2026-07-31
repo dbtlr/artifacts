@@ -31,7 +31,8 @@ pnpm docker:check
 pnpm docker:start
 ```
 
-Open <http://localhost:4242>. The MCP endpoint is <http://localhost:4242/mcp>.
+Wait until `docker ps` reports the `artifacts` container as healthy, then open
+<http://localhost:4242>. The MCP endpoint is <http://localhost:4242/mcp>.
 
 ```sh
 pnpm docker:logs
