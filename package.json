@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prepare": "vp config --no-agent",
     "dev": "concurrently -n server,assets -c blue,magenta \"tsx watch src/server.ts\" \"vite build --watch\"",
     "build": "vp pack && vite build",
     "start": "node dist/server.js",
