@@ -3,12 +3,38 @@ import { fileURLToPath } from 'node:url';
 
 // Mirrors src/app.tsx's STATIC_ROOT resolution: both the dev entry (this
 // module) and the packed bundle (dist/server.js) live exactly one directory
-// below the repo root, so `../data` reaches the same directory from either
-// location regardless of process.cwd(). Kept out of src/data/ on purpose —
-// tsdown bundles local imports into a single dist/server.js, which collapses
-// any deeper nesting, so only a module already one level below root resolves
-// correctly in both dev and the packed build. ARTIFACTS_DATA_DIR overrides it
-// outright for deployments with a different layout (e.g. a Docker bind mount).
+// below the repo root. Kept out of src/data/ because tsdown collapses deeper
+// module nesting in the bundle.
 const moduleDir = dirname(fileURLToPath(import.meta.url));
+const developmentDataDir = join(moduleDir, '..', 'data', 'development');
 
-export const DEFAULT_DATA_DIR = process.env.ARTIFACTS_DATA_DIR ?? join(moduleDir, '..', 'data');
+export type StoragePaths = { databasePath: string; filesDir: string };
+
+function resolvePathOverride(
+  name: 'ARTIFACTS_DATABASE_PATH' | 'ARTIFACTS_FILES_DIR',
+  value: string | undefined,
+  fallback: string,
+): string {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (value.trim() === '') {
+    throw new Error(`${name} must not be blank`);
+  }
+  return value.trim();
+}
+
+export function resolveStoragePaths(env: NodeJS.ProcessEnv = process.env): StoragePaths {
+  return {
+    databasePath: resolvePathOverride(
+      'ARTIFACTS_DATABASE_PATH',
+      env.ARTIFACTS_DATABASE_PATH,
+      join(developmentDataDir, 'database', 'artifacts.db'),
+    ),
+    filesDir: resolvePathOverride(
+      'ARTIFACTS_FILES_DIR',
+      env.ARTIFACTS_FILES_DIR,
+      join(developmentDataDir, 'files'),
+    ),
+  };
+}

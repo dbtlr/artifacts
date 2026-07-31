@@ -1,8 +1,12 @@
 .atlas.toml
 .autostart
 .claude/settings.local.json
+.env
+.env.development
+docker-compose.yaml
 
 node_modules/
 dist/
 build/
+/backups/
 /data/

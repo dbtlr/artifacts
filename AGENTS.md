@@ -1,0 +1,1 @@
+Artifacts is unversioned pre-alpha software; keep changes minimal and preserve its no-auth, trusted-network boundary. Before submitting, run `pnpm fmt`, `pnpm lint`, `pnpm test`, and `pnpm build`; Docker changes also require `pnpm docker:check` and an image build.

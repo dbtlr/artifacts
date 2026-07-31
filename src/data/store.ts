@@ -1,11 +1,12 @@
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { SQLOutputValue } from 'node:sqlite';
 import { DatabaseSync } from 'node:sqlite';
 
 import { nanoid } from 'nanoid';
 
-import { DEFAULT_DATA_DIR } from '../data-dir.js';
+import { resolveStoragePaths } from '../data-dir.js';
+import type { StoragePaths } from '../data-dir.js';
 
 export type ArtifactType = 'html' | 'md' | 'txt';
 
@@ -124,14 +125,13 @@ function toArtifact(row: ArtifactRow): Artifact {
   };
 }
 
-// Creates the sqlite database and content directory (if missing) under `dir`
-// and returns a store bound to them. Schema creation is idempotent (CREATE
-// TABLE/INDEX IF NOT EXISTS) so repeated opens of the same directory are safe.
-export function createArtifactStore(dir: string): ArtifactStore {
-  const artifactsDir = join(dir, 'artifacts');
-  mkdirSync(artifactsDir, { recursive: true });
+// Creates the independently configured SQLite database and content directory
+// if missing, then returns a store bound to both. Schema creation is idempotent.
+export function createArtifactStore({ databasePath, filesDir }: StoragePaths): ArtifactStore {
+  mkdirSync(filesDir, { recursive: true });
+  mkdirSync(dirname(databasePath), { recursive: true });
 
-  const db = new DatabaseSync(join(dir, 'artifacts.db'));
+  const db = new DatabaseSync(databasePath);
   db.exec(`
     CREATE TABLE IF NOT EXISTS artifacts (
       id TEXT PRIMARY KEY,
@@ -161,8 +161,7 @@ export function createArtifactStore(dir: string): ArtifactStore {
     'SELECT * FROM artifacts WHERE project = ? ORDER BY created_at DESC, rowid DESC',
   );
 
-  const artifactPath = (id: string, type: ArtifactType): string =>
-    join(artifactsDir, `${id}.${type}`);
+  const artifactPath = (id: string, type: ArtifactType): string => join(filesDir, `${id}.${type}`);
 
   function getRow(id: string): ArtifactRow | undefined {
     const record = selectStatement.get(id);
@@ -336,6 +335,6 @@ let defaultStore: ArtifactStore | undefined;
 // Lazy so importing this module never touches the filesystem on its own —
 // only the app calling getDefaultArtifactStore() does.
 export function getDefaultArtifactStore(): ArtifactStore {
-  defaultStore ??= createArtifactStore(DEFAULT_DATA_DIR);
+  defaultStore ??= createArtifactStore(resolveStoragePaths());
   return defaultStore;
 }
