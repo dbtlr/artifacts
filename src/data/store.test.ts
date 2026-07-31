@@ -13,7 +13,10 @@ let store: ArtifactStore;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'artifacts-store-'));
-  store = createArtifactStore(dir);
+  store = createArtifactStore({
+    databasePath: join(dir, 'artifacts.db'),
+    filesDir: join(dir, 'artifacts'),
+  });
 });
 
 afterEach(() => {
@@ -43,6 +46,23 @@ function lockDatabaseForWrites(dbPath: string): { release: () => void } {
 }
 
 describe('createArtifact', () => {
+  it('stores content and SQLite metadata at independent configured paths', () => {
+    const databasePath = join(dir, 'database', 'metadata.sqlite');
+    const filesDir = join(dir, 'files');
+    const separateStore = createArtifactStore({ databasePath, filesDir });
+
+    const artifact = separateStore.createArtifact({
+      content: 'independent storage',
+      description: 'Storage isolation proof',
+      project: 'artifacts',
+      title: 'Separate paths',
+      type: 'txt',
+    });
+
+    expect(existsSync(databasePath)).toBe(true);
+    expect(readFileSync(join(filesDir, `${artifact.id}.txt`), 'utf8')).toBe('independent storage');
+  });
+
   it('writes a content file and a matching row, and returns the artifact', () => {
     const artifact = store.createArtifact({
       content: '# Plan\n',
@@ -409,19 +429,26 @@ describe('listArtifacts', () => {
 });
 
 describe('getDefaultArtifactStore', () => {
-  const originalDataDir = process.env.ARTIFACTS_DATA_DIR;
+  const originalDatabasePath = process.env.ARTIFACTS_DATABASE_PATH;
+  const originalFilesDir = process.env.ARTIFACTS_FILES_DIR;
   let base: string;
 
   beforeEach(() => {
     base = mkdtempSync(join(tmpdir(), 'artifacts-default-'));
-    process.env.ARTIFACTS_DATA_DIR = join(base, 'data');
+    process.env.ARTIFACTS_DATABASE_PATH = join(base, 'database', 'artifacts.db');
+    process.env.ARTIFACTS_FILES_DIR = join(base, 'files');
   });
 
   afterEach(() => {
-    if (originalDataDir === undefined) {
-      delete process.env.ARTIFACTS_DATA_DIR;
+    if (originalDatabasePath === undefined) {
+      delete process.env.ARTIFACTS_DATABASE_PATH;
     } else {
-      process.env.ARTIFACTS_DATA_DIR = originalDataDir;
+      process.env.ARTIFACTS_DATABASE_PATH = originalDatabasePath;
+    }
+    if (originalFilesDir === undefined) {
+      delete process.env.ARTIFACTS_FILES_DIR;
+    } else {
+      process.env.ARTIFACTS_FILES_DIR = originalFilesDir;
     }
     rmSync(base, { force: true, recursive: true });
     vi.resetModules();
@@ -430,12 +457,15 @@ describe('getDefaultArtifactStore', () => {
   it('creates nothing on import, and lazily creates + memoizes the default store on first use', async () => {
     vi.resetModules();
     const freshStore = await import('./store.js');
-    const lazyDataDir = join(base, 'data');
+    const databasePath = join(base, 'database', 'artifacts.db');
+    const filesDir = join(base, 'files');
 
-    expect(existsSync(lazyDataDir)).toBe(false);
+    expect(existsSync(databasePath)).toBe(false);
+    expect(existsSync(filesDir)).toBe(false);
 
     const first = freshStore.getDefaultArtifactStore();
-    expect(existsSync(join(lazyDataDir, 'artifacts.db'))).toBe(true);
+    expect(existsSync(databasePath)).toBe(true);
+    expect(existsSync(filesDir)).toBe(true);
 
     const second = freshStore.getDefaultArtifactStore();
     expect(second).toBe(first);

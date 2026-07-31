@@ -35,7 +35,10 @@ describe('homepage and project list', () => {
 
   beforeEach(async () => {
     dataDir = await mkdtemp(join(tmpdir(), 'artifacts-list-'));
-    store = createArtifactStore(dataDir);
+    store = createArtifactStore({
+      databasePath: join(dataDir, 'artifacts.db'),
+      filesDir: join(dataDir, 'artifacts'),
+    });
     testApp = createApp(store);
   });
 
@@ -189,7 +192,10 @@ describe('get /a/:id', () => {
 
   beforeEach(async () => {
     dataDir = await mkdtemp(join(tmpdir(), 'artifacts-app-'));
-    store = createArtifactStore(dataDir);
+    store = createArtifactStore({
+      databasePath: join(dataDir, 'artifacts.db'),
+      filesDir: join(dataDir, 'artifacts'),
+    });
     testApp = createApp(store);
   });
 
@@ -372,11 +378,14 @@ describe('mcp add_artifact -> display round-trip', () => {
   let server: ServerType;
   let client: Client;
   let baseOrigin: string;
-  const originalPublicBaseUrl = process.env.PUBLIC_BASE_URL;
+  const originalPublicBaseUrl = process.env.ARTIFACTS_PUBLIC_BASE_URL;
 
   beforeAll(async () => {
     dataDir = await mkdtemp(join(tmpdir(), 'artifacts-round-trip-'));
-    store = createArtifactStore(dataDir);
+    store = createArtifactStore({
+      databasePath: join(dataDir, 'artifacts.db'),
+      filesDir: join(dataDir, 'artifacts'),
+    });
     const roundTripApp = createApp(store);
 
     server = serve({ fetch: roundTripApp.fetch, port: 0 });
@@ -386,7 +395,7 @@ describe('mcp add_artifact -> display round-trip', () => {
       throw new Error('expected serve() to bind a network address');
     }
     baseOrigin = `http://localhost:${String(address.port)}`;
-    process.env.PUBLIC_BASE_URL = baseOrigin;
+    process.env.ARTIFACTS_PUBLIC_BASE_URL = baseOrigin;
 
     client = new Client({ name: 'artifacts-round-trip-client', version: '0.0.0' });
     await client.connect(new StreamableHTTPClientTransport(new URL(`${baseOrigin}/mcp`)));
@@ -397,9 +406,9 @@ describe('mcp add_artifact -> display round-trip', () => {
     await promisify(server.close.bind(server))();
     await rm(dataDir, { force: true, recursive: true });
     if (originalPublicBaseUrl === undefined) {
-      delete process.env.PUBLIC_BASE_URL;
+      delete process.env.ARTIFACTS_PUBLIC_BASE_URL;
     } else {
-      process.env.PUBLIC_BASE_URL = originalPublicBaseUrl;
+      process.env.ARTIFACTS_PUBLIC_BASE_URL = originalPublicBaseUrl;
     }
   });
 

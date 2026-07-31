@@ -7,8 +7,7 @@
 # those files. tsdown bundles everything into a single dist/server.js, so at
 # runtime that file's location IS "one level below the app root". Keep
 # WORKDIR and the COPY layout below such that dist/server.js ends up at
-# <WORKDIR>/dist/server.js, dist/public/ stays alongside it, and (if not
-# overridden by ARTIFACTS_DATA_DIR) data/ sits at <WORKDIR>/data.
+# <WORKDIR>/dist/server.js and dist/public/ stays alongside it.
 
 FROM node:24-alpine AS builder
 WORKDIR /app
@@ -23,14 +22,16 @@ FROM node:24-alpine AS runner
 WORKDIR /app
 RUN corepack enable
 ENV NODE_ENV=production
+ENV ARTIFACTS_DATABASE_PATH=/app/data/database/artifacts.db
+ENV ARTIFACTS_FILES_DIR=/app/data/files
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 COPY --from=builder /app/dist ./dist
+RUN mkdir -p /app/data/database /app/data/files && chown -R node:node /app/data
 
 # Run as the non-root `node` user baked into the base image (uid/gid 1000)
-# rather than root. Everything under /app is read-only for this process
-# except the bind-mounted data dir, whose write access is verified in
-# docker-compose.yaml's data volume comment / deploy verification.
+# rather than root. Everything under /app is read-only for this process except
+# the two persistence paths, which are prepared for independent mounts.
 USER node
 
 EXPOSE 3000

@@ -4,6 +4,8 @@ data
 .git
 .gitignore
 .github
+.env
+.env.development
 
 # worktree/tooling droppings
 .mimir.toml
