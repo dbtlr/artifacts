@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { access, stat } from 'node:fs/promises';
 import { isAbsolute, win32 } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 export type DockerConfig = {
@@ -233,6 +234,43 @@ async function removeContainerIfExists(run: DockerRun, name: string): Promise<vo
   await runRequired(run, ['container', 'rm', name]);
 }
 
+async function waitForHealthyContainer(
+  run: DockerRun,
+  name: string,
+  attemptsRemaining = 30,
+): Promise<void> {
+  const result = await run(
+    [
+      'container',
+      'inspect',
+      '--format',
+      '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}',
+      name,
+    ],
+    { allowFailure: true },
+  );
+  if (result.exitCode !== 0) {
+    throw new Error(`Replacement container disappeared before it became healthy: ${name}`);
+  }
+  const [status, health] = result.output.trim().split(/\s+/u);
+  if (status !== 'running') {
+    throw new Error(
+      `Replacement container entered ${status ?? 'an unknown state'} before it became healthy.`,
+    );
+  }
+  if (health === 'healthy') {
+    return;
+  }
+  if (health === 'unhealthy') {
+    throw new Error('Replacement container became unhealthy during startup.');
+  }
+  if (attemptsRemaining <= 1) {
+    throw new Error('Replacement container did not become healthy within 30 seconds.');
+  }
+  await delay(1000);
+  await waitForHealthyContainer(run, name, attemptsRemaining - 1);
+}
+
 async function replaceBareContainer(
   run: DockerRun,
   config: DockerConfig,
@@ -265,10 +303,7 @@ async function replaceBareContainer(
     await runRequired(run, ['rename', REPLACEMENT_CONTAINER_NAME, CONTAINER_NAME]);
     replacementPromoted = true;
     await runRequired(run, ['start', CONTAINER_NAME]);
-    const replacement = await containerState(run, CONTAINER_NAME);
-    if (!replacement.running) {
-      throw new Error('Replacement container did not remain running after start.');
-    }
+    await waitForHealthyContainer(run, CONTAINER_NAME);
     await runRequired(run, ['container', 'rm', PREVIOUS_CONTAINER_NAME]);
   } catch (error) {
     try {

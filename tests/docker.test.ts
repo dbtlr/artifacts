@@ -241,13 +241,17 @@ describe('Docker operator actions', () => {
     const run: DockerRun = async (args) => {
       calls.push(args);
       const inspectedName = args.at(-1);
+      const isHealthInspection = args.includes(
+        '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}',
+      );
+      let output = '';
+      if (args[0] === 'container' && args[1] === 'inspect' && inspectedName === 'artifacts') {
+        output = isHealthInspection ? 'running healthy\n' : 'true\n';
+      }
       return {
         exitCode:
           args[0] === 'container' && args[1] === 'inspect' && inspectedName !== 'artifacts' ? 1 : 0,
-        output:
-          args[0] === 'container' && args[1] === 'inspect' && inspectedName === 'artifacts'
-            ? 'true\n'
-            : '',
+        output,
       };
     };
 
@@ -289,7 +293,13 @@ describe('Docker operator actions', () => {
       ['rename', 'artifacts', 'artifacts-previous'],
       ['rename', 'artifacts-replacement', 'artifacts'],
       ['start', 'artifacts'],
-      ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts'],
+      [
+        'container',
+        'inspect',
+        '--format',
+        '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}',
+        'artifacts',
+      ],
       ['container', 'rm', 'artifacts-previous'],
     ]);
   });
