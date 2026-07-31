@@ -13,7 +13,12 @@ export type DockerConfig = {
 };
 
 export type DockerAction = 'build' | 'check' | 'logs' | 'start' | 'stop';
-export type DockerRunResult = { errorCode?: string; exitCode: number; output: string };
+export type DockerRunResult = {
+  errorCode?: string;
+  exitCode: number;
+  output: string;
+  stdout?: string;
+};
 export type DockerRun = (
   args: string[],
   options?: { allowFailure?: boolean; stream?: boolean },
@@ -380,8 +385,12 @@ async function startFreshBareContainer(run: DockerRun, config: DockerConfig): Pr
   let createdContainerId: string | undefined;
   try {
     const result = await runRequired(run, buildBareRunArgs(config));
-    createdContainerId = result.output.trim();
-    await waitForHealthyContainer(run, CONTAINER_NAME);
+    const containerId = (result.stdout ?? result.output).trim();
+    if (containerId === '') {
+      throw new Error('Docker started the container but did not return its container ID.');
+    }
+    createdContainerId = containerId;
+    await waitForHealthyContainer(run, createdContainerId);
   } catch (error) {
     try {
       if (createdContainerId !== undefined) {
@@ -510,6 +519,7 @@ const runDocker: DockerRun = async (args, options = {}) => {
     return {
       exitCode: typeof exitCode === 'number' ? exitCode : 1,
       output: `${stdout}${stderr}`,
+      stdout,
     };
   } catch (error) {
     return {

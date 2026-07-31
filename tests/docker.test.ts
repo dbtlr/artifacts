@@ -212,7 +212,11 @@ describe('Docker operator actions', () => {
       calls.push(args);
       if (args[0] === 'run') {
         containerExists = true;
-        return { exitCode: 0, output: 'fresh-container-id\n' };
+        return {
+          exitCode: 0,
+          output: 'fresh-container-id\nwarning from Docker\n',
+          stdout: 'fresh-container-id\n',
+        };
       }
       if (args[0] === 'container' && args[1] === 'inspect') {
         const name = args.at(-1);
@@ -237,6 +241,13 @@ describe('Docker operator actions', () => {
     ).rejects.toThrow(/became unhealthy during startup/u);
 
     expect(containerExists).toBe(false);
+    expect(calls).toContainEqual([
+      'container',
+      'inspect',
+      '--format',
+      '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}',
+      'fresh-container-id',
+    ]);
     expect(calls).toContainEqual(['stop', 'fresh-container-id']);
     expect(calls).toContainEqual(['container', 'rm', 'fresh-container-id']);
   });
