@@ -35,6 +35,18 @@ describe('resolveStoragePaths', () => {
     });
   });
 
+  it('trims surrounding whitespace from path overrides', () => {
+    expect(
+      resolveStoragePaths({
+        ARTIFACTS_DATABASE_PATH: ' /srv/artifacts/metadata.db ',
+        ARTIFACTS_FILES_DIR: ' /srv/artifacts/files ',
+      }),
+    ).toEqual({
+      databasePath: '/srv/artifacts/metadata.db',
+      filesDir: '/srv/artifacts/files',
+    });
+  });
+
   it.each(['ARTIFACTS_FILES_DIR', 'ARTIFACTS_DATABASE_PATH'] as const)(
     'rejects a blank %s override',
     (name) => {

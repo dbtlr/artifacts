@@ -32,7 +32,9 @@ RUN mkdir -p /app/data/database /app/data/files && chown -R node:node /app/data
 
 # Run as the non-root `node` user baked into the base image (uid/gid 1000)
 # rather than root. Everything under /app is read-only for this process except
-# the two persistence paths, which are prepared for independent mounts.
+# the two persistence paths, which are prepared for independent named volumes.
+# Host bind mounts retain host ownership and must be writable by this user; the
+# Docker operator probes that access before replacing a running container.
 USER node
 
 EXPOSE ${ARTIFACTS_PORT}

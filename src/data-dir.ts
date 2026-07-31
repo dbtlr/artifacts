@@ -21,7 +21,7 @@ function resolvePathOverride(
   if (value.trim() === '') {
     throw new Error(`${name} must not be blank`);
   }
-  return value;
+  return value.trim();
 }
 
 export function resolveStoragePaths(env: NodeJS.ProcessEnv = process.env): StoragePaths {

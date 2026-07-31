@@ -25,6 +25,8 @@ type DockerActionOptions = {
 };
 
 const CONTAINER_NAME = 'artifacts';
+const PREVIOUS_CONTAINER_NAME = 'artifacts-previous';
+const REPLACEMENT_CONTAINER_NAME = 'artifacts-replacement';
 const IMAGE_NAME = 'artifacts:local';
 const DEFAULT_PORT = 4242;
 
@@ -117,6 +119,11 @@ export function buildBareRunArgs(config: DockerConfig): string[] {
   ];
 }
 
+function buildBareCreateArgs(config: DockerConfig): string[] {
+  const runArgs = buildBareRunArgs(config);
+  return ['create', '--name', REPLACEMENT_CONTAINER_NAME, ...runArgs.slice(4)];
+}
+
 export async function validateBindMounts(config: DockerConfig): Promise<void> {
   const mounts = [
     ['ARTIFACTS_DATABASE_MOUNT', config.databaseMount],
@@ -147,6 +154,42 @@ export async function validateBindMounts(config: DockerConfig): Promise<void> {
   );
 }
 
+async function validateBindMountWritability(config: DockerConfig, run: DockerRun): Promise<void> {
+  const mounts = [
+    ['ARTIFACTS_DATABASE_MOUNT', config.databaseMount],
+    ['ARTIFACTS_FILES_MOUNT', config.filesMount],
+  ] as const;
+
+  await Promise.all(
+    mounts.map(async ([name, source]) => {
+      if (!isAbsolute(source) && !win32.isAbsolute(source)) {
+        return;
+      }
+      const result = await run(
+        [
+          'run',
+          '--rm',
+          '--user',
+          '1000:1000',
+          '--entrypoint',
+          'sh',
+          '--mount',
+          mountArgument(source, '/probe'),
+          IMAGE_NAME,
+          '-c',
+          'probe=/probe/.artifacts-write-probe-$$; : > "$probe" && rm "$probe"',
+        ],
+        { allowFailure: true },
+      );
+      if (result.exitCode !== 0) {
+        throw new Error(
+          `${name} must be writable by the container's node user (uid 1000): ${source}\n${result.output}`.trim(),
+        );
+      }
+    }),
+  );
+}
+
 export function formatStartMessage(composeFileExists: boolean, env: NodeJS.ProcessEnv): string {
   if (composeFileExists) {
     return 'Artifacts is running through docker-compose.yaml.\n';
@@ -164,6 +207,92 @@ async function runRequired(
     throw new Error(`Docker command failed: docker ${args.join(' ')}\n${result.output}`.trim());
   }
   return result;
+}
+
+async function containerState(
+  run: DockerRun,
+  name: string,
+): Promise<{ exists: boolean; running: boolean }> {
+  const result = await run(['container', 'inspect', '--format', '{{.State.Running}}', name], {
+    allowFailure: true,
+  });
+  return {
+    exists: result.exitCode === 0,
+    running: result.exitCode === 0 && result.output.trim() === 'true',
+  };
+}
+
+async function removeContainerIfExists(run: DockerRun, name: string): Promise<void> {
+  const state = await containerState(run, name);
+  if (!state.exists) {
+    return;
+  }
+  if (state.running) {
+    await runRequired(run, ['stop', name]);
+  }
+  await runRequired(run, ['container', 'rm', name]);
+}
+
+async function replaceBareContainer(
+  run: DockerRun,
+  config: DockerConfig,
+  existingWasRunning: boolean,
+): Promise<void> {
+  const previous = await containerState(run, PREVIOUS_CONTAINER_NAME);
+  if (previous.exists) {
+    throw new Error(
+      `Cannot replace ${CONTAINER_NAME} while recovery container ${PREVIOUS_CONTAINER_NAME} exists. Inspect and recover or remove it first.`,
+    );
+  }
+  await removeContainerIfExists(run, REPLACEMENT_CONTAINER_NAME);
+  try {
+    await runRequired(run, buildBareCreateArgs(config));
+  } catch (error) {
+    await removeContainerIfExists(run, REPLACEMENT_CONTAINER_NAME);
+    throw error;
+  }
+
+  let oldStopped = false;
+  let oldRenamed = false;
+  let replacementPromoted = false;
+  try {
+    if (existingWasRunning) {
+      await runRequired(run, ['stop', CONTAINER_NAME]);
+      oldStopped = true;
+    }
+    await runRequired(run, ['rename', CONTAINER_NAME, PREVIOUS_CONTAINER_NAME]);
+    oldRenamed = true;
+    await runRequired(run, ['rename', REPLACEMENT_CONTAINER_NAME, CONTAINER_NAME]);
+    replacementPromoted = true;
+    await runRequired(run, ['start', CONTAINER_NAME]);
+    const replacement = await containerState(run, CONTAINER_NAME);
+    if (!replacement.running) {
+      throw new Error('Replacement container did not remain running after start.');
+    }
+    await runRequired(run, ['container', 'rm', PREVIOUS_CONTAINER_NAME]);
+  } catch (error) {
+    try {
+      await removeContainerIfExists(
+        run,
+        replacementPromoted ? CONTAINER_NAME : REPLACEMENT_CONTAINER_NAME,
+      );
+      if (oldRenamed) {
+        await runRequired(run, ['rename', PREVIOUS_CONTAINER_NAME, CONTAINER_NAME]);
+      }
+      if (existingWasRunning && (oldStopped || oldRenamed)) {
+        await runRequired(run, ['start', CONTAINER_NAME]);
+      }
+    } catch (rollbackError) {
+      throw new Error(
+        `Replacement failed (${error instanceof Error ? error.message : String(error)}) and automatic rollback also failed. Inspect ${CONTAINER_NAME}, ${PREVIOUS_CONTAINER_NAME}, and ${REPLACEMENT_CONTAINER_NAME} before retrying.`,
+        { cause: rollbackError },
+      );
+    }
+    throw new Error(
+      `Replacement failed; the previous ${CONTAINER_NAME} container was restored.\n${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
 }
 
 async function preflight(run: DockerRun, needsCompose: boolean): Promise<void> {
@@ -221,17 +350,13 @@ export async function executeDockerAction(
   if (action === 'start') {
     await validateBindMounts(config);
     await runRequired(run, ['build', '--tag', IMAGE_NAME, '.']);
-    const existing = await run(
-      ['container', 'inspect', '--format', '{{.State.Running}}', CONTAINER_NAME],
-      { allowFailure: true },
-    );
-    if (existing.exitCode === 0) {
-      if (existing.output.trim() === 'true') {
-        await runRequired(run, ['stop', CONTAINER_NAME]);
-      }
-      await runRequired(run, ['container', 'rm', CONTAINER_NAME]);
+    await validateBindMountWritability(config, run);
+    const existing = await containerState(run, CONTAINER_NAME);
+    if (existing.exists) {
+      await replaceBareContainer(run, config, existing.running);
+    } else {
+      await runRequired(run, buildBareRunArgs(config));
     }
-    await runRequired(run, buildBareRunArgs(config));
     return;
   }
   if (action === 'stop') {

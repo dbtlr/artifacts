@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -205,13 +205,49 @@ describe('Docker operator actions', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('rebuilds and safely replaces an existing bare container on repeated start', async () => {
+  it('rejects bind mounts the container user cannot write before replacing a container', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'artifacts-docker-bind-test-'));
+    const files = join(directory, 'files');
+    const database = join(directory, 'database');
+    await Promise.all([mkdir(files), mkdir(database)]);
     const calls: string[][] = [];
     const run: DockerRun = async (args) => {
       calls.push(args);
       return {
-        exitCode: 0,
-        output: args[0] === 'container' && args[1] === 'inspect' ? 'true\n' : '',
+        exitCode: args[0] === 'run' && args.includes('--entrypoint') ? 1 : 0,
+        output: args[0] === 'run' ? 'permission denied' : '',
+      };
+    };
+
+    try {
+      await expect(
+        executeDockerAction('start', {
+          composeFileExists: false,
+          env: {
+            ARTIFACTS_DATABASE_MOUNT: database,
+            ARTIFACTS_FILES_MOUNT: files,
+          },
+          run,
+        }),
+      ).rejects.toThrow(/must be writable by the container's node user \(uid 1000\)/u);
+      expect(calls.some((args) => args[0] === 'container' && args[1] === 'inspect')).toBe(false);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it('rebuilds and safely replaces an existing bare container on repeated start', async () => {
+    const calls: string[][] = [];
+    const run: DockerRun = async (args) => {
+      calls.push(args);
+      const inspectedName = args.at(-1);
+      return {
+        exitCode:
+          args[0] === 'container' && args[1] === 'inspect' && inspectedName !== 'artifacts' ? 1 : 0,
+        output:
+          args[0] === 'container' && args[1] === 'inspect' && inspectedName === 'artifacts'
+            ? 'true\n'
+            : '',
       };
     };
 
@@ -226,10 +262,71 @@ describe('Docker operator actions', () => {
       ['info'],
       ['build', '--tag', 'artifacts:local', '.'],
       ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts'],
+      ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts-previous'],
+      ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts-replacement'],
+      [
+        'create',
+        '--name',
+        'artifacts-replacement',
+        '--init',
+        '--restart',
+        'unless-stopped',
+        '--publish',
+        '127.0.0.1:4242:4242',
+        '--env',
+        'NODE_ENV=production',
+        '--env',
+        'ARTIFACTS_PORT=4242',
+        '--env',
+        'ARTIFACTS_PUBLIC_BASE_URL=http://localhost:4242',
+        '--mount',
+        'type=volume,source=artifacts-files,target=/app/data/files',
+        '--mount',
+        'type=volume,source=artifacts-database,target=/app/data/database',
+        'artifacts:local',
+      ],
       ['stop', 'artifacts'],
-      ['container', 'rm', 'artifacts'],
-      buildBareRunArgs(resolveDockerConfig({})),
+      ['rename', 'artifacts', 'artifacts-previous'],
+      ['rename', 'artifacts-replacement', 'artifacts'],
+      ['start', 'artifacts'],
+      ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts'],
+      ['container', 'rm', 'artifacts-previous'],
     ]);
+  });
+
+  it('restores a running container when its replacement fails to start', async () => {
+    const calls: string[][] = [];
+    let replacementStartAttempts = 0;
+    const run: DockerRun = async (args) => {
+      calls.push(args);
+      if (args[0] === 'start' && args[1] === 'artifacts') {
+        replacementStartAttempts += 1;
+        if (replacementStartAttempts === 1) {
+          return { exitCode: 1, output: 'replacement failed' };
+        }
+      }
+      if (args[0] === 'container' && args[1] === 'inspect') {
+        const name = args.at(-1);
+        if (name === 'artifacts-previous' || name === 'artifacts-replacement') {
+          return { exitCode: 1, output: '' };
+        }
+        return { exitCode: 0, output: 'true\n' };
+      }
+      return { exitCode: 0, output: '' };
+    };
+
+    await expect(
+      executeDockerAction('start', {
+        composeFileExists: false,
+        env: {},
+        run,
+      }),
+    ).rejects.toThrow(/replacement failed/u);
+
+    expect(calls).toContainEqual(['rename', 'artifacts', 'artifacts-previous']);
+    expect(calls).toContainEqual(['rename', 'artifacts-previous', 'artifacts']);
+    expect(calls.at(-1)).toEqual(['start', 'artifacts']);
+    expect(replacementStartAttempts).toBe(2);
   });
 
   it('treats stopping an absent bare container as a successful no-op', async () => {

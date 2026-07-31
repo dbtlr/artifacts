@@ -97,7 +97,9 @@ override Docker defaults.
 | `ARTIFACTS_DATABASE_MOUNT` | `artifacts-database` | Separate Docker volume name or existing absolute host directory for SQLite. |
 
 Named volumes survive container replacement and `pnpm docker:stop`. The files and database mounts
-must be different. Absolute bind-mount directories must exist before startup.
+must be different. Absolute bind-mount directories must exist and be writable from the container by
+the non-root `node` user (uid 1000); `pnpm docker:start` probes both before replacing an existing
+container.
 
 For a consistent backup, stop the service and treat the SQLite database and stored files as one
 backup set. With the default named volumes, export both into a newly created `backups` directory:
