@@ -378,6 +378,23 @@ async function replaceBareContainer(
   }
 }
 
+async function startFreshBareContainer(run: DockerRun, config: DockerConfig): Promise<void> {
+  try {
+    await runRequired(run, buildBareRunArgs(config));
+    await waitForHealthyContainer(run, CONTAINER_NAME);
+  } catch (error) {
+    try {
+      await removeContainerIfExists(run, CONTAINER_NAME);
+    } catch (cleanupError) {
+      throw new Error(
+        `Fresh start failed (${error instanceof Error ? error.message : String(error)}) and the failed ${CONTAINER_NAME} container could not be removed. Inspect it before retrying.`,
+        { cause: cleanupError },
+      );
+    }
+    throw error;
+  }
+}
+
 async function preflight(run: DockerRun, needsCompose: boolean): Promise<void> {
   const cli = await run(['--version'], { allowFailure: true });
   if (cli.errorCode === 'ENOENT') {
@@ -439,7 +456,7 @@ export async function executeDockerAction(
     if (existing.exists) {
       await replaceBareContainer(run, config, existing.running);
     } else {
-      await runRequired(run, buildBareRunArgs(config));
+      await startFreshBareContainer(run, config);
     }
     return;
   }

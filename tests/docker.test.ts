@@ -205,6 +205,42 @@ describe('Docker operator actions', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('removes an unhealthy container from a failed fresh start', async () => {
+    let containerExists = false;
+    const calls: string[][] = [];
+    const run: DockerRun = async (args) => {
+      calls.push(args);
+      if (args[0] === 'run') {
+        containerExists = true;
+        return { exitCode: 0, output: '' };
+      }
+      if (args[0] === 'container' && args[1] === 'inspect') {
+        const name = args.at(-1);
+        if (name !== 'artifacts' || !containerExists) {
+          return { exitCode: 1, output: '' };
+        }
+        if (
+          args.includes('{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}')
+        ) {
+          return { exitCode: 0, output: 'running unhealthy\n' };
+        }
+        return { exitCode: 0, output: 'true\n' };
+      }
+      if (args[0] === 'container' && args[1] === 'rm' && args[2] === 'artifacts') {
+        containerExists = false;
+      }
+      return { exitCode: 0, output: '' };
+    };
+
+    await expect(
+      executeDockerAction('start', { composeFileExists: false, env: {}, run }),
+    ).rejects.toThrow(/became unhealthy during startup/u);
+
+    expect(containerExists).toBe(false);
+    expect(calls).toContainEqual(['stop', 'artifacts']);
+    expect(calls).toContainEqual(['container', 'rm', 'artifacts']);
+  });
+
   it('rejects bind mounts the container user cannot write before replacing a container', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'artifacts-docker-bind-test-'));
     const files = join(directory, 'files');
