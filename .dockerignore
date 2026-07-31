@@ -4,8 +4,14 @@ data
 .git
 .gitignore
 .github
-.env
-.env.development
+.env*
+docker-compose.yaml
+scripts
+skills
+tests
+README.md
+CLAUDE.md
+AGENTS.md
 
 # worktree/tooling droppings
 .mimir.toml
