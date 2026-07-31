@@ -80,7 +80,7 @@ async function callTool<T>(
 beforeAll(async () => {
   delete process.env.ARTIFACTS_PUBLIC_BASE_URL;
   dataDir = await mkdtemp(join(tmpdir(), 'artifacts-mcp-'));
-  store = createArtifactStore({
+  store = await createArtifactStore({
     databasePath: join(dataDir, 'artifacts.db'),
     filesDir: join(dataDir, 'artifacts'),
   });

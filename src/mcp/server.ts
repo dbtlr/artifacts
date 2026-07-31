@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
-import type { ArtifactStore } from '../data/store.js';
+import type { ArtifactService } from '../data/store.js';
 import { buildArtifactUrl } from '../urls.js';
 
 const ARTIFACT_TYPE = z.enum(['html', 'md', 'txt']);
@@ -23,7 +23,7 @@ function toolError(message: string): CallToolResult {
 // it just wires the five tools to whichever store instance the caller hands
 // it, so the same code path serves the default store in production and a
 // temp-directory store in tests.
-export function createMcpServer(store: ArtifactStore): McpServer {
+export function createMcpServer(service: ArtifactService): McpServer {
   const server = new McpServer({ name: 'artifacts', version: '0.1.0' });
 
   server.registerTool(
@@ -43,7 +43,7 @@ export function createMcpServer(store: ArtifactStore): McpServer {
     },
     (args) => {
       try {
-        const artifact = store.createArtifact(args);
+        const artifact = service.createArtifact(args);
         return jsonResult({ ...artifact, url: buildArtifactUrl(artifact.id) });
       } catch (error) {
         return toolError(errorMessage(error));
@@ -68,7 +68,7 @@ export function createMcpServer(store: ArtifactStore): McpServer {
     },
     ({ id, ...patch }) => {
       try {
-        const updated = store.updateArtifact(id, patch);
+        const updated = service.updateArtifact(id, patch);
         if (!updated) {
           return toolError(`No artifact found with id ${JSON.stringify(id)}`);
         }
@@ -89,7 +89,7 @@ export function createMcpServer(store: ArtifactStore): McpServer {
     },
     ({ id }) => {
       try {
-        const existed = store.removeArtifact(id);
+        const existed = service.removeArtifact(id);
         return jsonResult({ existed, id });
       } catch (error) {
         return toolError(errorMessage(error));
@@ -110,7 +110,7 @@ export function createMcpServer(store: ArtifactStore): McpServer {
     },
     ({ project }) => {
       try {
-        return jsonResult(store.listArtifacts({ project }));
+        return jsonResult(service.listArtifacts({ project }));
       } catch (error) {
         return toolError(errorMessage(error));
       }
@@ -127,7 +127,7 @@ export function createMcpServer(store: ArtifactStore): McpServer {
     },
     ({ id }) => {
       try {
-        const artifact = store.getArtifact(id);
+        const artifact = service.getArtifact(id);
         if (!artifact) {
           return toolError(`No artifact found with id ${JSON.stringify(id)}`);
         }

@@ -11,9 +11,9 @@ import { createArtifactStore } from './store.js';
 let dir: string;
 let store: ArtifactStore;
 
-beforeEach(() => {
+beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'artifacts-store-'));
-  store = createArtifactStore({
+  store = await createArtifactStore({
     databasePath: join(dir, 'artifacts.db'),
     filesDir: join(dir, 'artifacts'),
   });
@@ -46,10 +46,10 @@ function lockDatabaseForWrites(dbPath: string): { release: () => void } {
 }
 
 describe('createArtifact', () => {
-  it('stores content and SQLite metadata at independent configured paths', () => {
+  it('stores content and SQLite metadata at independent configured paths', async () => {
     const databasePath = join(dir, 'database', 'metadata.sqlite');
     const filesDir = join(dir, 'files');
-    const separateStore = createArtifactStore({ databasePath, filesDir });
+    const separateStore = await createArtifactStore({ databasePath, filesDir });
 
     const artifact = separateStore.createArtifact({
       content: 'independent storage',
@@ -463,11 +463,11 @@ describe('getDefaultArtifactStore', () => {
     expect(existsSync(databasePath)).toBe(false);
     expect(existsSync(filesDir)).toBe(false);
 
-    const first = freshStore.getDefaultArtifactStore();
+    const first = await freshStore.getDefaultArtifactStore();
     expect(existsSync(databasePath)).toBe(true);
     expect(existsSync(filesDir)).toBe(true);
 
-    const second = freshStore.getDefaultArtifactStore();
+    const second = await freshStore.getDefaultArtifactStore();
     expect(second).toBe(first);
   });
 });

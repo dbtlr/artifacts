@@ -35,7 +35,7 @@ describe('homepage and project list', () => {
 
   beforeEach(async () => {
     dataDir = await mkdtemp(join(tmpdir(), 'artifacts-list-'));
-    store = createArtifactStore({
+    store = await createArtifactStore({
       databasePath: join(dataDir, 'artifacts.db'),
       filesDir: join(dataDir, 'artifacts'),
     });
@@ -192,7 +192,7 @@ describe('get /a/:id', () => {
 
   beforeEach(async () => {
     dataDir = await mkdtemp(join(tmpdir(), 'artifacts-app-'));
-    store = createArtifactStore({
+    store = await createArtifactStore({
       databasePath: join(dataDir, 'artifacts.db'),
       filesDir: join(dataDir, 'artifacts'),
     });
@@ -382,7 +382,7 @@ describe('mcp add_artifact -> display round-trip', () => {
 
   beforeAll(async () => {
     dataDir = await mkdtemp(join(tmpdir(), 'artifacts-round-trip-'));
-    store = createArtifactStore({
+    store = await createArtifactStore({
       databasePath: join(dataDir, 'artifacts.db'),
       filesDir: join(dataDir, 'artifacts'),
     });
