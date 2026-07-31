@@ -212,11 +212,11 @@ describe('Docker operator actions', () => {
       calls.push(args);
       if (args[0] === 'run') {
         containerExists = true;
-        return { exitCode: 0, output: '' };
+        return { exitCode: 0, output: 'fresh-container-id\n' };
       }
       if (args[0] === 'container' && args[1] === 'inspect') {
         const name = args.at(-1);
-        if (name !== 'artifacts' || !containerExists) {
+        if (!['artifacts', 'fresh-container-id'].includes(name ?? '') || !containerExists) {
           return { exitCode: 1, output: '' };
         }
         if (
@@ -226,7 +226,7 @@ describe('Docker operator actions', () => {
         }
         return { exitCode: 0, output: 'true\n' };
       }
-      if (args[0] === 'container' && args[1] === 'rm' && args[2] === 'artifacts') {
+      if (args[0] === 'container' && args[1] === 'rm' && args[2] === 'fresh-container-id') {
         containerExists = false;
       }
       return { exitCode: 0, output: '' };
@@ -237,8 +237,33 @@ describe('Docker operator actions', () => {
     ).rejects.toThrow(/became unhealthy during startup/u);
 
     expect(containerExists).toBe(false);
-    expect(calls).toContainEqual(['stop', 'artifacts']);
-    expect(calls).toContainEqual(['container', 'rm', 'artifacts']);
+    expect(calls).toContainEqual(['stop', 'fresh-container-id']);
+    expect(calls).toContainEqual(['container', 'rm', 'fresh-container-id']);
+  });
+
+  it('does not remove a container created by another operator after the fresh-start check', async () => {
+    const calls: string[][] = [];
+    let rivalCreated = false;
+    const run: DockerRun = async (args) => {
+      calls.push(args);
+      if (args[0] === 'run' && args.includes('--name') && args.includes('artifacts')) {
+        rivalCreated = true;
+        return { exitCode: 1, output: 'Conflict. The container name is already in use.' };
+      }
+      if (args[0] === 'container' && args[1] === 'inspect') {
+        return { exitCode: rivalCreated ? 0 : 1, output: rivalCreated ? 'true\n' : '' };
+      }
+      return {
+        exitCode: 0,
+        output: '',
+      };
+    };
+
+    await expect(
+      executeDockerAction('start', { composeFileExists: false, env: {}, run }),
+    ).rejects.toThrow(/container name is already in use/u);
+
+    expect(calls).not.toContainEqual(['container', 'rm', 'artifacts']);
   });
 
   it('rejects bind mounts the container user cannot write before replacing a container', async () => {

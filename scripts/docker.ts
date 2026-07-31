@@ -377,12 +377,16 @@ async function replaceBareContainer(
 }
 
 async function startFreshBareContainer(run: DockerRun, config: DockerConfig): Promise<void> {
+  let createdContainerId: string | undefined;
   try {
-    await runRequired(run, buildBareRunArgs(config));
+    const result = await runRequired(run, buildBareRunArgs(config));
+    createdContainerId = result.output.trim();
     await waitForHealthyContainer(run, CONTAINER_NAME);
   } catch (error) {
     try {
-      await removeContainerIfExists(run, CONTAINER_NAME);
+      if (createdContainerId !== undefined) {
+        await removeContainerIfExists(run, createdContainerId);
+      }
     } catch (cleanupError) {
       throw new Error(
         `Fresh start failed (${error instanceof Error ? error.message : String(error)}) and the failed ${CONTAINER_NAME} container could not be removed. Inspect it before retrying.`,
