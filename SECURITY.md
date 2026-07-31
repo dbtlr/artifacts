@@ -14,8 +14,7 @@ that the application itself is not directly reachable. Never store secrets in ar
 
 ## Reporting a vulnerability
 
-Please use GitHub's private vulnerability reporting for this repository. Include affected behavior,
-reproduction steps, impact, and any suggested mitigation. Do not open a public issue for an
-unresolved vulnerability.
+Email [hi@dbtlr.com](mailto:hi@dbtlr.com). Include affected behavior, reproduction steps, impact,
+and any suggested mitigation. Do not open a public issue for an unresolved vulnerability.
 
 Because the project is pre-alpha, response and remediation timelines are best effort.
