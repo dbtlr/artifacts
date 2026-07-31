@@ -250,22 +250,20 @@ async function waitForHealthyContainer(
     { allowFailure: true },
   );
   if (result.exitCode !== 0) {
-    throw new Error(`Replacement container disappeared before it became healthy: ${name}`);
+    throw new Error(`Container disappeared before it became healthy: ${name}`);
   }
   const [status, health] = result.output.trim().split(/\s+/u);
   if (status !== 'running') {
-    throw new Error(
-      `Replacement container entered ${status ?? 'an unknown state'} before it became healthy.`,
-    );
+    throw new Error(`Container entered ${status ?? 'an unknown state'} before it became healthy.`);
   }
   if (health === 'healthy') {
     return;
   }
   if (health === 'unhealthy') {
-    throw new Error('Replacement container became unhealthy during startup.');
+    throw new Error('Container became unhealthy during startup.');
   }
   if (attemptsRemaining <= 1) {
-    throw new Error('Replacement container did not become healthy within 30 seconds.');
+    throw new Error('Container did not become healthy within 30 seconds.');
   }
   await delay(1000);
   await waitForHealthyContainer(run, name, attemptsRemaining - 1);
