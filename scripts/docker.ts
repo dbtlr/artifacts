@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { access } from 'node:fs/promises';
+import { access, stat } from 'node:fs/promises';
 import { isAbsolute, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -52,6 +52,9 @@ function resolveMount(name: string, raw: string | undefined, fallback: string): 
   }
   if (raw.trim() === '') {
     throw new Error(`${name} must not be blank`);
+  }
+  if (raw.includes(',')) {
+    throw new Error(`${name} must not contain a comma`);
   }
   if (!isAbsolute(raw) && !win32.isAbsolute(raw) && !/^[a-zA-Z0-9][a-zA-Z0-9_.-]+$/u.test(raw)) {
     throw new Error(`${name} must be a Docker volume name or an absolute host path`);
@@ -112,6 +115,43 @@ export function buildBareRunArgs(config: DockerConfig): string[] {
     mountArgument(config.databaseMount, '/app/data/database'),
     IMAGE_NAME,
   ];
+}
+
+export async function validateBindMounts(config: DockerConfig): Promise<void> {
+  const mounts = [
+    ['ARTIFACTS_DATABASE_MOUNT', config.databaseMount],
+    ['ARTIFACTS_FILES_MOUNT', config.filesMount],
+  ] as const;
+
+  await Promise.all(
+    mounts.map(async ([name, source]) => {
+      if (!isAbsolute(source) && !win32.isAbsolute(source)) {
+        return;
+      }
+      let sourceStat;
+      try {
+        sourceStat = await stat(source);
+      } catch (error) {
+        if (isErrnoException(error) && error.code === 'ENOENT') {
+          throw new Error(`${name} path does not exist: ${source}`, { cause: error });
+        }
+        throw new Error(
+          `${name} path cannot be inspected: ${source}\n${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        );
+      }
+      if (!sourceStat.isDirectory()) {
+        throw new Error(`${name} must be a directory: ${source}`);
+      }
+    }),
+  );
+}
+
+export function formatStartMessage(composeFileExists: boolean, env: NodeJS.ProcessEnv): string {
+  if (composeFileExists) {
+    return 'Artifacts is running through docker-compose.yaml.\n';
+  }
+  return `Artifacts is running at ${resolveDockerConfig(env).publicBaseUrl}\n`;
 }
 
 async function runRequired(
@@ -179,6 +219,7 @@ export async function executeDockerAction(
     return;
   }
   if (action === 'start') {
+    await validateBindMounts(config);
     await runRequired(run, ['build', '--tag', IMAGE_NAME, '.']);
     const existing = await run(
       ['container', 'inspect', '--format', '{{.State.Running}}', CONTAINER_NAME],
@@ -275,16 +316,16 @@ async function main(): Promise<void> {
   if (!isDockerAction(action)) {
     throw new Error('Usage: tsx scripts/docker.ts <check|build|start|stop|logs>');
   }
+  const composeFileExists = await fileExists('docker-compose.yaml');
   await executeDockerAction(action, {
-    composeFileExists: await fileExists('docker-compose.yaml'),
+    composeFileExists,
     env: process.env,
     run: runDocker,
   });
   if (action === 'check') {
     process.stdout.write('Docker is ready.\n');
   } else if (action === 'start') {
-    const { publicBaseUrl } = resolveDockerConfig(process.env);
-    process.stdout.write(`Artifacts is running at ${publicBaseUrl}\n`);
+    process.stdout.write(formatStartMessage(composeFileExists, process.env));
   }
 }
 

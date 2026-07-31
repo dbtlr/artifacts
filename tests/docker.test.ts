@@ -1,6 +1,16 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vite-plus/test';
 
-import { buildBareRunArgs, executeDockerAction, resolveDockerConfig } from '../scripts/docker.js';
+import {
+  buildBareRunArgs,
+  executeDockerAction,
+  formatStartMessage,
+  resolveDockerConfig,
+  validateBindMounts,
+} from '../scripts/docker.js';
 import type { DockerRun, DockerRunResult } from '../scripts/docker.js';
 
 function successfulRunner(calls: string[][]): DockerRun {
@@ -103,6 +113,45 @@ describe('bare Docker command construction', () => {
       );
     },
   );
+
+  it('rejects mount sources that cannot be represented safely by Docker --mount', () => {
+    expect(() => resolveDockerConfig({ ARTIFACTS_FILES_MOUNT: '/tmp/files,old' })).toThrow(
+      /ARTIFACTS_FILES_MOUNT must not contain a comma/u,
+    );
+  });
+
+  it('rejects missing and non-directory bind mounts before Docker commands run', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'artifacts-docker-test-'));
+    const file = join(directory, 'database-file');
+    await writeFile(file, 'not a directory');
+
+    try {
+      await expect(
+        validateBindMounts(
+          resolveDockerConfig({ ARTIFACTS_FILES_MOUNT: join(directory, 'missing') }),
+        ),
+      ).rejects.toThrow(/ARTIFACTS_FILES_MOUNT path does not exist/u);
+      await expect(
+        validateBindMounts(resolveDockerConfig({ ARTIFACTS_DATABASE_MOUNT: file })),
+      ).rejects.toThrow(/ARTIFACTS_DATABASE_MOUNT must be a directory/u);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+});
+
+describe('Docker operator output', () => {
+  it('does not resolve or report bare-only configuration after a Compose start', () => {
+    expect(formatStartMessage(true, { ARTIFACTS_FILES_MOUNT: ' ' })).toBe(
+      'Artifacts is running through docker-compose.yaml.\n',
+    );
+  });
+
+  it('reports the configured URL after a bare Docker start', () => {
+    expect(
+      formatStartMessage(false, { ARTIFACTS_PUBLIC_BASE_URL: 'https://artifacts.example' }),
+    ).toBe('Artifacts is running at https://artifacts.example\n');
+  });
 });
 
 describe('Docker operator actions', () => {
