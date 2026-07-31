@@ -268,6 +268,9 @@ describe('Docker operator actions', () => {
       ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts'],
       ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts-previous'],
       ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts-replacement'],
+      ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts'],
+      ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts-previous'],
+      ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts-replacement'],
       [
         'create',
         '--name',
@@ -320,6 +323,11 @@ describe('Docker operator actions', () => {
         if (name === 'artifacts-previous' || name === 'artifacts-replacement') {
           return { exitCode: 1, output: '' };
         }
+        if (
+          args.includes('{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}')
+        ) {
+          return { exitCode: 0, output: 'running healthy\n' };
+        }
         return { exitCode: 0, output: 'true\n' };
       }
       return { exitCode: 0, output: '' };
@@ -335,8 +343,106 @@ describe('Docker operator actions', () => {
 
     expect(calls).toContainEqual(['rename', 'artifacts', 'artifacts-previous']);
     expect(calls).toContainEqual(['rename', 'artifacts-previous', 'artifacts']);
-    expect(calls.at(-1)).toEqual(['start', 'artifacts']);
+    expect(calls.at(-1)).toEqual([
+      'container',
+      'inspect',
+      '--format',
+      '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}',
+      'artifacts',
+    ]);
     expect(replacementStartAttempts).toBe(2);
+  });
+
+  it('proves the restored container healthy after an unhealthy replacement', async () => {
+    let healthInspections = 0;
+    const run: DockerRun = async (args) => {
+      if (args[0] === 'container' && args[1] === 'inspect') {
+        const name = args.at(-1);
+        if (name === 'artifacts-previous' || name === 'artifacts-replacement') {
+          return { exitCode: 1, output: '' };
+        }
+        if (
+          args.includes('{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}')
+        ) {
+          healthInspections += 1;
+          return {
+            exitCode: 0,
+            output: healthInspections === 1 ? 'running unhealthy\n' : 'running healthy\n',
+          };
+        }
+        return { exitCode: 0, output: 'true\n' };
+      }
+      return { exitCode: 0, output: '' };
+    };
+
+    await expect(
+      executeDockerAction('start', { composeFileExists: false, env: {}, run }),
+    ).rejects.toThrow(/previous artifacts container was restored/u);
+
+    expect(healthInspections).toBe(2);
+  });
+
+  it('recovers an interrupted replacement before attempting another one', async () => {
+    const calls: string[][] = [];
+    const containers = new Map([
+      ['artifacts-previous', { health: 'healthy', running: false }],
+      ['artifacts-replacement', { health: 'starting', running: false }],
+    ]);
+    const run: DockerRun = async (args) => {
+      calls.push(args);
+      if (args[0] === 'container' && args[1] === 'inspect') {
+        const name = args.at(-1) ?? '';
+        const container = containers.get(name);
+        if (container === undefined) {
+          return { exitCode: 1, output: '' };
+        }
+        const healthFormat = args.includes(
+          '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}',
+        );
+        return {
+          exitCode: 0,
+          output: healthFormat
+            ? `${container.running ? 'running' : 'exited'} ${container.health}\n`
+            : `${String(container.running)}\n`,
+        };
+      }
+      if (args[0] === 'container' && args[1] === 'rm') {
+        containers.delete(args[2] ?? '');
+      } else if (args[0] === 'rename') {
+        const source = args[1] ?? '';
+        const target = args[2] ?? '';
+        const container = containers.get(source);
+        if (container !== undefined) {
+          containers.delete(source);
+          containers.set(target, container);
+        }
+      } else if (args[0] === 'start') {
+        const container = containers.get(args[1] ?? '');
+        if (container !== undefined) {
+          container.running = true;
+          container.health = 'healthy';
+        }
+      } else if (args[0] === 'create') {
+        return { exitCode: 1, output: 'create failed after recovery' };
+      }
+      return { exitCode: 0, output: '' };
+    };
+
+    await expect(
+      executeDockerAction('start', { composeFileExists: false, env: {}, run }),
+    ).rejects.toThrow(/create failed after recovery/u);
+
+    expect(containers.get('artifacts')).toEqual({ health: 'healthy', running: true });
+    expect(containers.has('artifacts-previous')).toBe(false);
+    expect(containers.has('artifacts-replacement')).toBe(false);
+    expect(calls).toContainEqual(['rename', 'artifacts-previous', 'artifacts']);
+    expect(calls).toContainEqual([
+      'container',
+      'inspect',
+      '--format',
+      '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}',
+      'artifacts',
+    ]);
   });
 
   it('treats stopping an absent bare container as a successful no-op', async () => {

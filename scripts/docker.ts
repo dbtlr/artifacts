@@ -271,6 +271,53 @@ async function waitForHealthyContainer(
   await waitForHealthyContainer(run, name, attemptsRemaining - 1);
 }
 
+async function reconcileReplacementState(run: DockerRun): Promise<void> {
+  const [canonical, previous, replacement] = await Promise.all([
+    containerState(run, CONTAINER_NAME),
+    containerState(run, PREVIOUS_CONTAINER_NAME),
+    containerState(run, REPLACEMENT_CONTAINER_NAME),
+  ]);
+
+  if (!previous.exists) {
+    if (replacement.exists) {
+      await removeContainerIfExists(run, REPLACEMENT_CONTAINER_NAME);
+    }
+    return;
+  }
+
+  if (!canonical.exists) {
+    if (replacement.exists) {
+      await removeContainerIfExists(run, REPLACEMENT_CONTAINER_NAME);
+    }
+    await runRequired(run, ['rename', PREVIOUS_CONTAINER_NAME, CONTAINER_NAME]);
+    if (!previous.running) {
+      await runRequired(run, ['start', CONTAINER_NAME]);
+    }
+    await waitForHealthyContainer(run, CONTAINER_NAME);
+    return;
+  }
+
+  try {
+    await waitForHealthyContainer(run, CONTAINER_NAME);
+  } catch {
+    await removeContainerIfExists(run, CONTAINER_NAME);
+    if (replacement.exists) {
+      await removeContainerIfExists(run, REPLACEMENT_CONTAINER_NAME);
+    }
+    await runRequired(run, ['rename', PREVIOUS_CONTAINER_NAME, CONTAINER_NAME]);
+    if (!previous.running) {
+      await runRequired(run, ['start', CONTAINER_NAME]);
+    }
+    await waitForHealthyContainer(run, CONTAINER_NAME);
+    return;
+  }
+
+  if (replacement.exists) {
+    await removeContainerIfExists(run, REPLACEMENT_CONTAINER_NAME);
+  }
+  await removeContainerIfExists(run, PREVIOUS_CONTAINER_NAME);
+}
+
 async function replaceBareContainer(
   run: DockerRun,
   config: DockerConfig,
@@ -316,6 +363,7 @@ async function replaceBareContainer(
       }
       if (existingWasRunning && (oldStopped || oldRenamed)) {
         await runRequired(run, ['start', CONTAINER_NAME]);
+        await waitForHealthyContainer(run, CONTAINER_NAME);
       }
     } catch (rollbackError) {
       throw new Error(
@@ -386,6 +434,7 @@ export async function executeDockerAction(
     await validateBindMounts(config);
     await runRequired(run, ['build', '--tag', IMAGE_NAME, '.']);
     await validateBindMountWritability(config, run);
+    await reconcileReplacementState(run);
     const existing = await containerState(run, CONTAINER_NAME);
     if (existing.exists) {
       await replaceBareContainer(run, config, existing.running);
