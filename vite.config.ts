@@ -65,4 +65,7 @@ export default defineConfig({
     }),
     tailwindcss(),
   ],
+  staged: {
+    '*': 'vp check --fix',
+  },
 });
