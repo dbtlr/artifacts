@@ -102,8 +102,12 @@ function matchesIfNoneMatch(header: string | undefined, etag: string): boolean {
 }
 
 function contentDisposition(filename: string): string {
-  const quoted = filename.replaceAll('"', String.raw`\"`);
-  return `inline; filename="${quoted}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+  const quoted = filename.replaceAll(/[^\x20-\x7e]/gu, '_').replaceAll('"', String.raw`\"`);
+  const encoded = encodeURIComponent(filename).replaceAll(
+    /['()*]/gu,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `inline; filename="${quoted}"; filename*=UTF-8''${encoded}`;
 }
 
 function legacyArtifact(artifact: ArtifactWithContent): LegacyArtifactWithContent {
@@ -193,6 +197,7 @@ export function createApp(store?: ArtifactStore | AppServices): Hono {
       const headers: Record<string, string> = {
         'Cache-Control': 'no-cache',
         'Content-Disposition': contentDisposition(artifact.filename!),
+        'Content-Length': String(artifact.content.byteLength),
         'Content-Type': artifact.mediaType,
         ETag: etag,
         'X-Content-Type-Options': 'nosniff',
@@ -207,12 +212,7 @@ export function createApp(store?: ArtifactStore | AppServices): Hono {
       return new Response(
         c.req.method === 'HEAD' ? null : new Uint8Array(artifact.content).buffer,
         {
-          headers: {
-            ...headers,
-            ...(c.req.method === 'HEAD'
-              ? { 'Content-Length': String(artifact.content.byteLength) }
-              : {}),
-          },
+          headers,
           status: 200,
         },
       );

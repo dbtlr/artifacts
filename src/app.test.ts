@@ -443,7 +443,23 @@ describe('binary artifacts in browser routes', () => {
     );
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
     expect(res.headers.get('cache-control')).toBe('no-cache');
+    expect(res.headers.get('content-length')).toBe(String(bytes.byteLength));
     expect(res.headers.get('etag')).toMatch(/^"[A-Za-z0-9_-]+"$/u);
+  });
+
+  it('uses an ASCII fallback and RFC 5987 encoding for non-ASCII filenames', async () => {
+    const artifact = createBinary(
+      Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      'image/png',
+      "雪!draft(1)*'.png",
+    );
+
+    const res = await testApp.request(`/a/${artifact.id}`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-disposition')).toBe(
+      `inline; filename="_!draft(1)*'.png"; filename*=UTF-8''%E9%9B%AA!draft%281%29%2A%27.png`,
+    );
   });
 
   it('returns 304 without a body when If-None-Match contains the current ETag', async () => {
@@ -477,7 +493,7 @@ describe('binary artifacts in browser routes', () => {
     expect(head.headers.get('content-type')).toBe(get.headers.get('content-type'));
     expect(head.headers.get('content-disposition')).toBe(get.headers.get('content-disposition'));
     expect(head.headers.get('etag')).toBe(get.headers.get('etag'));
-    expect(head.headers.get('content-length')).toBe(String(bytes.byteLength));
+    expect(head.headers.get('content-length')).toBe(get.headers.get('content-length'));
   });
 
   it('applies a restrictive CSP to SVG responses', async () => {
