@@ -14,7 +14,7 @@ import { z } from 'zod';
 
 import { app, createApp } from './app.js';
 import type { ArtifactStore } from './data/store.js';
-import { createArtifactStore, createByteNativeArtifactService } from './data/store.js';
+import { createArtifactStore } from './data/store.js';
 
 describe('app', () => {
   it('renders the homepage with the stylesheet linked', async () => {
@@ -386,11 +386,7 @@ describe('mcp add_artifact -> display round-trip', () => {
       databasePath: join(dataDir, 'artifacts.db'),
       filesDir: join(dataDir, 'artifacts'),
     });
-    const mcpService = await createByteNativeArtifactService({
-      databasePath: join(dataDir, 'artifacts.db'),
-      filesDir: join(dataDir, 'artifacts'),
-    });
-    const roundTripApp = createApp(store, mcpService);
+    const roundTripApp = createApp(store);
 
     server = serve({ fetch: roundTripApp.fetch, port: 0 });
     await once(server, 'listening');

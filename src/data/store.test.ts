@@ -6,7 +6,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import type { ArtifactStore } from './store.js';
-import { createArtifactStore, createByteNativeArtifactService } from './store.js';
+import {
+  adaptLegacyArtifactStore,
+  createArtifactStore,
+  createByteNativeArtifactService,
+} from './store.js';
 
 let dir: string;
 let store: ArtifactStore;
@@ -21,6 +25,41 @@ beforeEach(async () => {
 
 afterEach(() => {
   rmSync(dir, { force: true, recursive: true });
+});
+
+describe('adaptLegacyArtifactStore', () => {
+  it('finds metadata without reading artifact content', () => {
+    const artifact = {
+      createdAt: '2026-01-01T00:00:00.000Z',
+      description: 'metadata only',
+      id: 'metadata-id',
+      project: 'artifacts',
+      title: 'Metadata',
+      type: 'txt' as const,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const getArtifact = vi.fn(() => {
+      throw new Error('content must not be read');
+    });
+    const legacyStore: ArtifactStore = {
+      createArtifact: vi.fn(),
+      getArtifact,
+      listArtifacts: vi.fn(() => [artifact]),
+      removeArtifact: vi.fn(),
+      updateArtifact: vi.fn(),
+    };
+
+    expect(adaptLegacyArtifactStore(legacyStore).findArtifact(artifact.id)).toEqual({
+      createdAt: artifact.createdAt,
+      description: artifact.description,
+      id: artifact.id,
+      mediaType: 'text/plain',
+      project: artifact.project,
+      title: artifact.title,
+      updatedAt: artifact.updatedAt,
+    });
+    expect(getArtifact).not.toHaveBeenCalled();
+  });
 });
 
 // A second connection to the same db file, switched to WAL and holding an

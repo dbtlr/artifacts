@@ -75,12 +75,8 @@ export function adaptLegacyArtifactStore(store: ArtifactStore): ArtifactService 
       );
     },
     findArtifact: (id) => {
-      const artifact = store.getArtifact(id);
-      if (artifact === null) {
-        return null;
-      }
-      const { content: _content, ...metadata } = artifact;
-      return fromLegacyArtifact(metadata);
+      const artifact = store.listArtifacts().find((candidate) => candidate.id === id);
+      return artifact === undefined ? null : fromLegacyArtifact(artifact);
     },
     getArtifact: get,
     listArtifacts: (query) => store.listArtifacts(query).map(fromLegacyArtifact),
