@@ -427,6 +427,9 @@ describe('listArtifacts', () => {
     expect(store.listArtifacts({ project: 'mixed' }).map(({ id }) => id)).toEqual([text.id]);
     expect(store.getArtifact(text.id)?.content).toBe('text');
     expect(store.getArtifact(binary.id)).toBeNull();
+    expect(store.updateArtifact(binary.id, { title: 'Hidden mutation' })).toBeNull();
+    expect(store.removeArtifact(binary.id)).toBe(false);
+    expect(byteNative.getArtifact(binary.id)?.title).toBe('Binary');
   });
 
   it('breaks a created_at tie by insertion order, newest first', () => {

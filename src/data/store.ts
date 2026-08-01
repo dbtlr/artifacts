@@ -22,7 +22,12 @@ function toLegacyArtifact(artifact: Artifact) {
   if (type === undefined) {
     return null;
   }
-  const { mediaType: _mediaType, ...metadataFields } = artifact;
+  const {
+    collection: _collection,
+    filename: _filename,
+    mediaType: _mediaType,
+    ...metadataFields
+  } = artifact;
   return { ...metadataFields, type };
 }
 
@@ -42,7 +47,10 @@ export async function createArtifactStore({
   databasePath,
   filesDir,
 }: StoragePaths): Promise<ArtifactStore> {
-  const service = await createByteNativeArtifactService({ databasePath, filesDir });
+  mkdirSync(dirname(databasePath), { recursive: true });
+  const metadata = await SqliteArtifactMetadataStore.open(databasePath);
+  const content = new FilesystemArtifactContentStore(filesDir);
+  const service = createArtifactService(metadata, content);
   return {
     createArtifact: (input) => {
       const { content: text, type, ...metadataFields } = input;
@@ -75,11 +83,21 @@ export async function createArtifactStore({
         .listArtifacts(query)
         .map(toLegacyArtifact)
         .filter((artifact) => artifact !== null),
-    removeArtifact: service.removeArtifact,
+    removeArtifact: (id) => {
+      const artifact = metadata.find(id);
+      if (artifact === null || legacyTypeFromMediaType(artifact.mediaType) === undefined) {
+        return false;
+      }
+      return service.removeArtifact(id);
+    },
     updateArtifact: (id, patch) => {
       const { content: text, type, ...metadataFields } = patch;
       if (type !== undefined) {
         assertLegacyType(type);
+      }
+      const existing = metadata.find(id);
+      if (existing === null || legacyTypeFromMediaType(existing.mediaType) === undefined) {
+        return null;
       }
       const updated = service.updateArtifact(id, {
         ...metadataFields,

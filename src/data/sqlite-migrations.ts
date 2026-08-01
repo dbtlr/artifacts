@@ -196,6 +196,14 @@ export const sqliteMigrations: RunnableMigration<DatabaseSync>[] = [
     },
     name: '0002-binary-artifact-schema',
     up: async ({ context: database }) => {
+      const unsupported = database
+        .prepare("SELECT id, type FROM artifacts WHERE type NOT IN ('html', 'md', 'txt') LIMIT 1")
+        .get();
+      if (unsupported !== undefined) {
+        throw new Error(
+          `Cannot migrate artifact ${JSON.stringify(String(unsupported.id))}: unsupported legacy type ${JSON.stringify(String(unsupported.type))}`,
+        );
+      }
       database.exec(`
         CREATE TABLE artifacts_binary (
           id TEXT PRIMARY KEY,
@@ -219,9 +227,10 @@ export const sqliteMigrations: RunnableMigration<DatabaseSync>[] = [
             WHEN 'html' THEN 'text/html'
             WHEN 'md' THEN 'text/markdown'
             WHEN 'txt' THEN 'text/plain'
+            ELSE 'unsupported-legacy-type'
           END,
           NULL, NULL, created_at, updated_at
-        FROM artifacts;
+        FROM artifacts ORDER BY rowid;
         DROP INDEX IF EXISTS idx_artifacts_created_at;
         DROP INDEX IF EXISTS idx_artifacts_project;
         DROP TABLE artifacts;

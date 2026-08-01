@@ -60,13 +60,21 @@ export type ArtifactService = {
   updateArtifact: (id: string, patch: UpdateArtifactInput) => Artifact | null;
 };
 
-export type LegacyArtifact = Omit<Artifact, 'mediaType'> & { type: ArtifactType };
+export type LegacyArtifact = Omit<Artifact, 'collection' | 'filename' | 'mediaType'> & {
+  type: ArtifactType;
+};
 export type LegacyArtifactWithContent = LegacyArtifact & { content: string };
-export type LegacyCreateArtifactInput = Omit<CreateArtifactInput, 'content' | 'mediaType'> & {
+export type LegacyCreateArtifactInput = Omit<
+  CreateArtifactInput,
+  'collection' | 'content' | 'filename' | 'mediaType'
+> & {
   content: string;
   type: ArtifactType;
 };
-export type LegacyUpdateArtifactInput = Omit<UpdateArtifactInput, 'content' | 'mediaType'> & {
+export type LegacyUpdateArtifactInput = Omit<
+  UpdateArtifactInput,
+  'collection' | 'content' | 'filename' | 'mediaType'
+> & {
   content?: string;
   type?: ArtifactType;
 };

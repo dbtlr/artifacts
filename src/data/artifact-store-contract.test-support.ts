@@ -13,8 +13,10 @@ const first: Artifact = {
 };
 
 const second: Artifact = {
+  collection: 'Reports',
   createdAt: '2026-01-02T00:00:00.000Z',
   description: 'second',
+  filename: 'notes.md',
   id: 'second',
   mediaType: 'text/markdown',
   project: 'beta',
@@ -36,6 +38,8 @@ export function metadataStoreContract(
       expect(store.find('missing')).toBeNull();
       expect(store.list().map(({ id }) => id)).toEqual([second.id, first.id]);
       expect(store.list({ project: 'alpha' })).toEqual([first]);
+      expect(store.list({ collection: 'reports' })).toEqual([second]);
+      expect(store.list({ collection: 'missing' })).toEqual([]);
 
       const updated = { ...first, title: 'Updated', updatedAt: '2026-01-03T00:00:00.000Z' };
       expect(store.update(updated)).toBe(true);

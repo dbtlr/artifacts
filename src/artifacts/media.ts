@@ -142,7 +142,19 @@ export function hasValidSignature(mediaType: MediaType, bytes: Uint8Array): bool
           .decode(bytes)
           .replace(/^\uFEFF/u, '')
           .trimStart();
-        return /^(?:<\?xml[^>]*>\s*)?<svg(?:\s|>)/iu.test(source);
+        return /^(?:<\?xml[^>]*\?>\s*|<!--(?:[\s\S]*?)-->\s*|<!DOCTYPE[^>]*>\s*)*<svg(?:\s|>)/iu.test(
+          source,
+        );
+      } catch {
+        return false;
+      }
+    }
+    case 'text/html':
+    case 'text/markdown':
+    case 'text/plain': {
+      try {
+        new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        return true;
       } catch {
         return false;
       }

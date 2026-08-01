@@ -79,6 +79,9 @@ function assertValidContent(mediaType: MediaType, bytes: Uint8Array): void {
     throw new Error('Binary artifact content must not be empty');
   }
   if (!hasValidSignature(mediaType, bytes)) {
+    if (definition.renderingMode !== 'binary') {
+      throw new Error(`Artifact content is not valid UTF-8 for media type ${mediaType}`);
+    }
     throw new Error(`Artifact content signature does not match media type ${mediaType}`);
   }
 }
