@@ -160,33 +160,36 @@ describe('SQLite migrations', () => {
 
   it('refuses unsupported legacy types deterministically, including null', async () => {
     const database = new DatabaseSync(databasePath);
-    database.exec(`
-      CREATE TABLE artifacts (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        project TEXT NOT NULL,
-        description TEXT NOT NULL,
-        type TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      INSERT INTO artifacts VALUES ('bad-first', 'Bad', 'p', 'd', 'exe', 'created', 'updated');
-      INSERT INTO artifacts VALUES ('bad-second', 'Bad', 'p', 'd', 'wat', 'created', 'updated');
-      INSERT INTO artifacts VALUES ('bad-null', 'Bad', 'p', 'd', NULL, 'created', 'updated');
-    `);
+    try {
+      database.exec(`
+        CREATE TABLE artifacts (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          project TEXT NOT NULL,
+          description TEXT NOT NULL,
+          type TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        INSERT INTO artifacts VALUES ('bad-first', 'Bad', 'p', 'd', 'exe', 'created', 'updated');
+        INSERT INTO artifacts VALUES ('bad-second', 'Bad', 'p', 'd', 'wat', 'created', 'updated');
+        INSERT INTO artifacts VALUES ('bad-null', 'Bad', 'p', 'd', NULL, 'created', 'updated');
+      `);
 
-    await expect(runSqliteMigrations(database)).rejects.toThrow(
-      'artifact "bad-first": unsupported legacy type "exe"',
-    );
-    database.prepare("DELETE FROM artifacts WHERE id IN ('bad-first', 'bad-second')").run();
-    await expect(runSqliteMigrations(database)).rejects.toThrow(
-      'artifact "bad-null": unsupported legacy type "null"',
-    );
-    expect(database.prepare('SELECT type FROM artifacts WHERE id = ?').get('bad-null')).toEqual({
-      type: null,
-    });
-    expect(tableNames(database)).not.toContain('artifacts_binary');
-    database.close();
+      await expect(runSqliteMigrations(database)).rejects.toThrow(
+        'artifact "bad-first": unsupported legacy type "exe"',
+      );
+      database.prepare("DELETE FROM artifacts WHERE id IN ('bad-first', 'bad-second')").run();
+      await expect(runSqliteMigrations(database)).rejects.toThrow(
+        'artifact "bad-null": unsupported legacy type "null"',
+      );
+      expect(database.prepare('SELECT type FROM artifacts WHERE id = ?').get('bad-null')).toEqual({
+        type: null,
+      });
+      expect(tableNames(database)).not.toContain('artifacts_binary');
+    } finally {
+      database.close();
+    }
   });
 
   it('rolls back migration effects when a migration fails before history is recorded', async () => {
