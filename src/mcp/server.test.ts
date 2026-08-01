@@ -286,6 +286,38 @@ describe('binary payloads and collections', () => {
     }
   });
 
+  it('deduplicates collection names with SQLite-compatible ASCII case folding', async () => {
+    const collections = ['IMAGES', 'images', 'ÄLBUM', 'älbum'];
+    const artifactIds: string[] = [];
+    try {
+      await collections.reduce(async (previous, collection, index) => {
+        await previous;
+        const artifact = await callTool(
+          'add_artifact',
+          {
+            collection,
+            content: `collection ${String(index)}`,
+            description: 'Collection folding fixture',
+            mediaType: 'text/plain',
+            project: 'mcp-tests',
+            title: `Collection ${String(index)}`,
+          },
+          artifactSchema,
+        );
+        artifactIds.push(artifact.id);
+      }, Promise.resolve());
+
+      const listed = await callTool('list_collections', {}, z.array(z.string()));
+      expect(listed.filter((collection) => collection.toLowerCase() === 'images')).toHaveLength(1);
+      expect(listed).toContain('ÄLBUM');
+      expect(listed).toContain('älbum');
+    } finally {
+      await Promise.all(
+        artifactIds.map((id) => callTool('remove_artifact', { id }, removeResultSchema)),
+      );
+    }
+  });
+
   it('does not read bytes for metadata-only retrieval', async () => {
     const added = await callTool(
       'add_artifact',

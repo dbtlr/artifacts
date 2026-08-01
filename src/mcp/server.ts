@@ -38,6 +38,11 @@ function toolError(message: string): CallToolResult {
   return { content: [{ text: message, type: 'text' }], isError: true };
 }
 
+// Match SQLite NOCASE: collection filtering folds ASCII letters only.
+function foldCollectionName(value: string): string {
+  return value.replaceAll(/[A-Z]/gu, (character) => character.toLowerCase());
+}
+
 function resolveMediaType(
   mediaType: string | undefined,
   type: ArtifactType | undefined,
@@ -266,7 +271,7 @@ export function createMcpServer(service: ArtifactService): McpServer {
         const collections = new Map<string, string>();
         for (const artifact of service.listArtifacts()) {
           if (artifact.collection !== undefined) {
-            collections.set(artifact.collection.toLocaleLowerCase(), artifact.collection);
+            collections.set(foldCollectionName(artifact.collection), artifact.collection);
           }
         }
         return jsonResult([...collections.values()].toSorted((a, b) => a.localeCompare(b)));
