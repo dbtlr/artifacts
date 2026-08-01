@@ -1,9 +1,9 @@
 import type { FC } from 'hono/jsx';
 
-import type { Artifact } from '../data/store.js';
+import type { LegacyArtifact } from '../data/store.js';
 import { formatDate } from '../format-date.js';
 
-type ArtifactListProps = { artifacts: Artifact[]; emptyMessage: string };
+type ArtifactListProps = { artifacts: LegacyArtifact[]; emptyMessage: string };
 
 // Shared by the homepage (all artifacts) and /p/:project (filtered) —
 // `store.listArtifacts` already returns newest-first, so this just renders

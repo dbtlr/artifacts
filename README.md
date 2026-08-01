@@ -114,6 +114,12 @@ docker run --rm --mount source=artifacts-database,target=/source,readonly --moun
 For bind mounts, copy the two configured directories while the service is stopped. Restore both
 sources from the same backup before restarting.
 
+Database migrations run automatically at startup. The binary-artifact schema can be downgraded
+only while every row is still a legacy text document and neither filename nor collection metadata
+has been stored. Once binary rows or new metadata exist, the guarded down migration refuses without
+changing the database; restore both persistence sources from the same pre-migration snapshot
+instead. Pre-migration builds cannot safely read an upgraded database.
+
 Direct development uses `.env.development` and intentionally separate paths:
 
 | Variable | Default |

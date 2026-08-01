@@ -1,9 +1,9 @@
 import type { FC } from 'hono/jsx';
 
-import type { Artifact } from '../data/store.js';
+import type { LegacyArtifact } from '../data/store.js';
 import { ArtifactList } from './artifact-list.js';
 
-type ProjectPageProps = { artifacts: Artifact[]; project: string };
+type ProjectPageProps = { artifacts: LegacyArtifact[]; project: string };
 
 export const ProjectPage: FC<ProjectPageProps> = ({ artifacts, project }) => (
   <main>

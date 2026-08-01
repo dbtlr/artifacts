@@ -7,9 +7,9 @@ const artifact: Artifact = {
   createdAt: '2026-01-01T00:00:00.000Z',
   description: 'description',
   id: 'artifact-id',
+  mediaType: 'text/plain',
   project: 'artifacts',
   title: 'Title',
-  type: 'txt',
   updatedAt: '2026-01-01T00:00:00.000Z',
 };
 
@@ -24,7 +24,6 @@ function createRaceFixture() {
     update: () => false,
   };
   const content: ArtifactContentStore = {
-    move: () => undefined,
     read: () => new TextEncoder().encode('original'),
     remove: () => {
       removed = true;
@@ -40,7 +39,9 @@ describe('ArtifactService lost metadata races', () => {
     const fixture = createRaceFixture();
     const service = createArtifactService(fixture.metadata, fixture.content);
 
-    expect(service.updateArtifact(artifact.id, { content: 'replacement' })).toBeNull();
+    expect(
+      service.updateArtifact(artifact.id, { content: new TextEncoder().encode('replacement') }),
+    ).toBeNull();
     expect(fixture.writes.map((bytes) => new TextDecoder().decode(bytes))).toEqual([
       'replacement',
       'original',
@@ -78,11 +79,11 @@ describe('ArtifactService lost metadata races', () => {
 
     expect(() =>
       service.createArtifact({
-        content: 'content',
+        content: new TextEncoder().encode('content'),
         description: 'description',
+        mediaType: 'text/plain',
         project: 'artifacts',
         title: 'Title',
-        type: 'txt',
       }),
     ).toThrow(createError);
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining(cleanupError.message));

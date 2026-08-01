@@ -199,7 +199,7 @@ describe('updateArtifact', () => {
     expect(existsSync(join(dir, 'artifacts', `${created.id}.txt`))).toBe(true);
   });
 
-  it('renames the content file when the type changes', () => {
+  it('requires replacement content when the type changes', () => {
     const created = store.createArtifact({
       content: 'plain',
       description: 'v1',
@@ -208,12 +208,12 @@ describe('updateArtifact', () => {
       type: 'txt',
     });
 
-    const updated = store.updateArtifact(created.id, { type: 'md' });
+    expect(() => store.updateArtifact(created.id, { type: 'md' })).toThrow(
+      'requires replacement content',
+    );
 
-    expect(updated?.type).toBe('md');
-    expect(updated?.createdAt).toBe(created.createdAt);
-    expect(existsSync(join(dir, 'artifacts', `${created.id}.txt`))).toBe(false);
-    expect(existsSync(join(dir, 'artifacts', `${created.id}.md`))).toBe(true);
+    expect(existsSync(join(dir, 'artifacts', `${created.id}.txt`))).toBe(true);
+    expect(existsSync(join(dir, 'artifacts', `${created.id}.md`))).toBe(false);
     expect(store.getArtifact(created.id)?.content).toBe('plain');
   });
 
@@ -304,7 +304,9 @@ describe('updateArtifact', () => {
     try {
       expect(store.getArtifact(created.id)?.content).toBe('plain');
 
-      expect(() => store.updateArtifact(created.id, { type: 'md' })).toThrow('database is locked');
+      expect(() => store.updateArtifact(created.id, { content: '# plain', type: 'md' })).toThrow(
+        'database is locked',
+      );
     } finally {
       lock.release();
     }

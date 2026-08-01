@@ -9,7 +9,11 @@ import type { RunnableMigration } from 'umzug';
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 
 import { SqliteArtifactMetadataStore } from './sqlite-artifact-metadata-store.js';
-import { runSqliteMigrations, SqliteMigrationStorage } from './sqlite-migrations.js';
+import {
+  revertLastSqliteMigration,
+  runSqliteMigrations,
+  SqliteMigrationStorage,
+} from './sqlite-migrations.js';
 
 let directory: string;
 let databasePath: string;
@@ -63,10 +67,14 @@ describe('SQLite migrations', () => {
 
     const store = await SqliteArtifactMetadataStore.open(databasePath);
 
-    expect(store.find('legacy')).toMatchObject({ id: 'legacy', title: 'Legacy', type: 'txt' });
+    expect(store.find('legacy')).toMatchObject({
+      id: 'legacy',
+      mediaType: 'text/plain',
+      title: 'Legacy',
+    });
     const database = new DatabaseSync(databasePath);
     expect(database.prepare('SELECT COUNT(*) AS count FROM artifact_migrations').get()).toEqual({
-      count: 1,
+      count: 2,
     });
     database.close();
   });
@@ -77,7 +85,63 @@ describe('SQLite migrations', () => {
     const database = new DatabaseSync(databasePath);
 
     expect(database.prepare('SELECT COUNT(*) AS count FROM artifact_migrations').get()).toEqual({
+      count: 2,
+    });
+    database.close();
+  });
+
+  it('downgrades when every row remains representable by the legacy schema', async () => {
+    const database = new DatabaseSync(databasePath);
+    await runSqliteMigrations(database);
+    database
+      .prepare(
+        `INSERT INTO artifacts
+          (id, title, project, description, media_type, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run('text', 'Text', 'artifacts', 'safe', 'text/plain', 'created', 'updated');
+
+    await revertLastSqliteMigration(database);
+
+    expect(database.prepare('SELECT id, type FROM artifacts').get()).toEqual({
+      id: 'text',
+      type: 'txt',
+    });
+    expect(database.prepare('SELECT COUNT(*) AS count FROM artifact_migrations').get()).toEqual({
       count: 1,
+    });
+    database.close();
+  });
+
+  it('refuses destructive downgrade without changing schema, rows, or history', async () => {
+    const database = new DatabaseSync(databasePath);
+    await runSqliteMigrations(database);
+    database
+      .prepare(
+        `INSERT INTO artifacts
+          (id, title, project, description, media_type, filename, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        'binary',
+        'Binary',
+        'artifacts',
+        'unsafe to downgrade',
+        'image/png',
+        'preview.png',
+        'created',
+        'updated',
+      );
+
+    await expect(revertLastSqliteMigration(database)).rejects.toThrow(
+      'restore a pre-migration snapshot',
+    );
+
+    expect(database.prepare('SELECT media_type FROM artifacts WHERE id = ?').get('binary')).toEqual(
+      { media_type: 'image/png' },
+    );
+    expect(database.prepare('SELECT COUNT(*) AS count FROM artifact_migrations').get()).toEqual({
+      count: 2,
     });
     database.close();
   });

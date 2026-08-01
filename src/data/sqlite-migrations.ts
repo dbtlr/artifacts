@@ -107,6 +107,20 @@ export async function runSqliteMigrations(
   await migrator.up();
 }
 
+export async function revertLastSqliteMigration(
+  database: DatabaseSync,
+  migrations: RunnableMigration<DatabaseSync>[] = sqliteMigrations,
+): Promise<void> {
+  const storage = new SqliteMigrationStorage(database);
+  const migrator = new Umzug({
+    context: database,
+    logger: undefined,
+    migrations: transactionalMigrations(migrations, storage),
+    storage,
+  });
+  await migrator.down();
+}
+
 export const sqliteMigrations: RunnableMigration<DatabaseSync>[] = [
   {
     down: async ({ context: database }) => {
@@ -132,6 +146,89 @@ export const sqliteMigrations: RunnableMigration<DatabaseSync>[] = [
         );
         CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project);
         CREATE INDEX IF NOT EXISTS idx_artifacts_created_at ON artifacts(created_at);
+      `);
+    },
+  },
+  {
+    down: async ({ context: database }) => {
+      const incompatible = database
+        .prepare(
+          `SELECT id FROM artifacts
+           WHERE media_type NOT IN ('text/html', 'text/markdown', 'text/plain')
+              OR collection IS NOT NULL
+              OR filename IS NOT NULL
+           LIMIT 1`,
+        )
+        .get();
+      if (incompatible !== undefined) {
+        throw new Error(
+          'Cannot downgrade binary artifact schema: current data is not representable by the legacy schema; restore a pre-migration snapshot instead',
+        );
+      }
+      database.exec(`
+        CREATE TABLE artifacts_legacy (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          project TEXT NOT NULL,
+          description TEXT NOT NULL,
+          type TEXT NOT NULL CHECK (type IN ('html','md','txt')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        INSERT INTO artifacts_legacy
+          (id, title, project, description, type, created_at, updated_at)
+        SELECT id, title, project, description,
+          CASE media_type
+            WHEN 'text/html' THEN 'html'
+            WHEN 'text/markdown' THEN 'md'
+            WHEN 'text/plain' THEN 'txt'
+          END,
+          created_at, updated_at
+        FROM artifacts;
+        DROP INDEX IF EXISTS idx_artifacts_collection;
+        DROP INDEX IF EXISTS idx_artifacts_created_at;
+        DROP INDEX IF EXISTS idx_artifacts_project;
+        DROP TABLE artifacts;
+        ALTER TABLE artifacts_legacy RENAME TO artifacts;
+        CREATE INDEX idx_artifacts_project ON artifacts(project);
+        CREATE INDEX idx_artifacts_created_at ON artifacts(created_at);
+      `);
+    },
+    name: '0002-binary-artifact-schema',
+    up: async ({ context: database }) => {
+      database.exec(`
+        CREATE TABLE artifacts_binary (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          project TEXT NOT NULL,
+          description TEXT NOT NULL,
+          media_type TEXT NOT NULL CHECK (media_type IN (
+            'text/html', 'text/markdown', 'text/plain',
+            'image/png', 'image/jpeg', 'image/gif', 'image/webp',
+            'image/svg+xml', 'application/pdf'
+          )),
+          collection TEXT COLLATE NOCASE,
+          filename TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        INSERT INTO artifacts_binary
+          (id, title, project, description, media_type, collection, filename, created_at, updated_at)
+        SELECT id, title, project, description,
+          CASE type
+            WHEN 'html' THEN 'text/html'
+            WHEN 'md' THEN 'text/markdown'
+            WHEN 'txt' THEN 'text/plain'
+          END,
+          NULL, NULL, created_at, updated_at
+        FROM artifacts;
+        DROP INDEX IF EXISTS idx_artifacts_created_at;
+        DROP INDEX IF EXISTS idx_artifacts_project;
+        DROP TABLE artifacts;
+        ALTER TABLE artifacts_binary RENAME TO artifacts;
+        CREATE INDEX idx_artifacts_project ON artifacts(project);
+        CREATE INDEX idx_artifacts_created_at ON artifacts(created_at);
+        CREATE INDEX idx_artifacts_collection ON artifacts(collection COLLATE NOCASE);
       `);
     },
   },
