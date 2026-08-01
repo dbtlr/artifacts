@@ -63,13 +63,32 @@ Claude Code:
 claude mcp add --transport http --scope user artifacts http://localhost:4242/mcp
 ```
 
-The server exposes `add_artifact`, `update_artifact`, `remove_artifact`, `list_artifacts`, and
-`get_artifact`.
+The server exposes `add_artifact`, `update_artifact`, `remove_artifact`, `list_artifacts`,
+`list_collections`, and `get_artifact`.
+
+Text artifacts use `content`; binary artifacts use canonical `mediaType`, a safe `filename`, and
+strictly encoded `contentBase64`. Binary content is omitted from add, update, list, and ordinary get
+responses. Pass `includeContent: true` to `get_artifact` when the bytes are actually needed. The
+decoded size limit is 10 MiB, and the HTTP body guard may reject an oversized base64 request before
+an MCP tool result can be returned.
+
+Use an optional shared `collection` to keep a document and its independent image or PDF artifacts
+discoverable together. `list_artifacts` filters collections case-insensitively, while
+`list_collections` returns their stored display names. An embedding workflow is:
+
+1. Add the binary artifact and retain the absolute `url` returned by the server.
+2. Put that URL in an HTML `<img>` element or Markdown image expression.
+3. Add or update the containing document with the same collection.
+
+Updating a binary artifact in place preserves its URL. Removing one can break every document that
+embeds it; collections group artifacts for discovery but do not create ownership or cascading
+deletion.
 
 ### Optional artifact skill
 
-The bundled skill teaches an agent when to create or update a document and includes templates. From
-the repository root, install it for the client you use:
+The bundled skill teaches an agent when to create or update documents and files, how to embed
+returned file URLs, and how to rediscover related artifacts through collections. From the repository
+root, install it for the client you use:
 
 Codex:
 
@@ -174,11 +193,17 @@ pnpm build
 
 Artifacts is a Node.js 24 TypeScript application built on Hono. The same process serves the web UI,
 artifact routes, static assets, and the streamable HTTP MCP endpoint at `/mcp`. Metadata lives in
-SQLite while document bodies live in a separate files directory. Markdown is rendered on the server
+SQLite while byte-native content lives in a separate files directory. The MCP adapter uses bounded
+base64 for binary transport; base64 is not part of the storage or service model. Markdown is rendered on the server
 with syntax highlighting; Mermaid diagrams are rendered in the browser. Allowlisted images and PDFs
 are served directly from `/a/:id`; SVG responses receive an additional restrictive content security
 policy. The Docker image is a two-stage Alpine build that runs as the non-root `node` user and writes
 only to its two persistence mounts.
+
+The metadata and content adapters are deliberately narrow seams for a future hosting requirement,
+not a configurable backend system. PostgreSQL, object storage, multipart browser uploads, presigned
+uploads, tenancy, permissions, and public hosting remain out of scope. Artifacts is a trusted-network
+preview tool, not a general-purpose file-sharing service.
 
 ## Security and license
 
