@@ -108,4 +108,42 @@ describe('ArtifactService lost metadata races', () => {
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining(cleanupError.message));
     stderr.mockRestore();
   });
+
+  it('removes replacement content when deleting the old media path fails', () => {
+    const previous: Artifact = { ...artifact, filename: 'old.png', mediaType: 'image/png' };
+    const writes: string[] = [];
+    const removals: string[] = [];
+    const service = createArtifactService(
+      {
+        create: () => undefined,
+        find: () => previous,
+        list: () => [previous],
+        remove: () => false,
+        update: () => {
+          throw new Error('metadata update must not run');
+        },
+      },
+      {
+        read: () => Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
+        remove: (_id, mediaType) => {
+          removals.push(mediaType);
+          if (mediaType === 'image/png') {
+            throw new Error('old path removal failed');
+          }
+          return true;
+        },
+        write: (_id, mediaType) => writes.push(mediaType),
+      },
+    );
+
+    expect(() =>
+      service.updateArtifact(previous.id, {
+        content: new TextEncoder().encode('%PDF-1.7'),
+        filename: 'new.pdf',
+        mediaType: 'application/pdf',
+      }),
+    ).toThrow('old path removal failed');
+    expect(writes).toEqual(['application/pdf', 'image/png']);
+    expect(removals).toEqual(['image/png', 'application/pdf']);
+  });
 });

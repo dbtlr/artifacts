@@ -20,7 +20,7 @@ function assertLegacyType(type: string): asserts type is 'html' | 'md' | 'txt' {
 function toLegacyArtifact(artifact: Artifact) {
   const type = legacyTypeFromMediaType(artifact.mediaType);
   if (type === undefined) {
-    throw new Error(`Binary artifact ${artifact.id} is not supported by the text adapter`);
+    return null;
   }
   const { mediaType: _mediaType, ...metadataFields } = artifact;
   return { ...metadataFields, type };
@@ -53,7 +53,7 @@ export async function createArtifactStore({
           content: new TextEncoder().encode(text),
           mediaType: mediaTypeFromLegacyType(type),
         }),
-      );
+      )!;
     },
     getArtifact: (id) => {
       const artifact = service.getArtifact(id);
@@ -61,12 +61,20 @@ export async function createArtifactStore({
         return null;
       }
       const { content: bytes, ...metadataFields } = artifact;
+      const legacy = toLegacyArtifact(metadataFields);
+      if (legacy === null) {
+        return null;
+      }
       return {
-        ...toLegacyArtifact(metadataFields),
+        ...legacy,
         content: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
       };
     },
-    listArtifacts: (query) => service.listArtifacts(query).map(toLegacyArtifact),
+    listArtifacts: (query) =>
+      service
+        .listArtifacts(query)
+        .map(toLegacyArtifact)
+        .filter((artifact) => artifact !== null),
     removeArtifact: service.removeArtifact,
     updateArtifact: (id, patch) => {
       const { content: text, type, ...metadataFields } = patch;

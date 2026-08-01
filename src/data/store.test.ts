@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import type { ArtifactStore } from './store.js';
-import { createArtifactStore } from './store.js';
+import { createArtifactStore, createByteNativeArtifactService } from './store.js';
 
 let dir: string;
 let store: ArtifactStore;
@@ -401,6 +401,32 @@ describe('listArtifacts', () => {
 
   it('returns an empty list when nothing has been created', () => {
     expect(store.listArtifacts()).toEqual([]);
+  });
+
+  it('preserves legacy text reads when binary rows coexist', async () => {
+    const text = store.createArtifact({
+      content: 'text',
+      description: 'legacy text',
+      project: 'mixed',
+      title: 'Text',
+      type: 'txt',
+    });
+    const byteNative = await createByteNativeArtifactService({
+      databasePath: join(dir, 'artifacts.db'),
+      filesDir: join(dir, 'artifacts'),
+    });
+    const binary = byteNative.createArtifact({
+      content: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      description: 'binary',
+      filename: 'preview.png',
+      mediaType: 'image/png',
+      project: 'mixed',
+      title: 'Binary',
+    });
+
+    expect(store.listArtifacts({ project: 'mixed' }).map(({ id }) => id)).toEqual([text.id]);
+    expect(store.getArtifact(text.id)?.content).toBe('text');
+    expect(store.getArtifact(binary.id)).toBeNull();
   });
 
   it('breaks a created_at tie by insertion order, newest first', () => {

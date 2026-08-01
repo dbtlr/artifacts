@@ -215,15 +215,20 @@ export function createArtifactService(
     if (patch.content !== undefined) {
       const previousBytes = content.read(id, previous.mediaType);
       content.write(id, next.mediaType, patch.content);
-      if (next.mediaType !== previous.mediaType) {
-        content.remove(id, previous.mediaType);
-      }
       rollbackContent = () => {
         content.write(id, previous.mediaType, previousBytes);
         if (next.mediaType !== previous.mediaType) {
           content.remove(id, next.mediaType);
         }
       };
+      if (next.mediaType !== previous.mediaType) {
+        try {
+          content.remove(id, previous.mediaType);
+        } catch (error) {
+          runRollback('update', rollbackContent);
+          throw error;
+        }
+      }
     }
 
     try {
