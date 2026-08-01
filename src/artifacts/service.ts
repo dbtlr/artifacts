@@ -42,6 +42,15 @@ function decodeText(content: Uint8Array): string {
   return new TextDecoder('utf-8', { fatal: true }).decode(content);
 }
 
+function reportCleanupFailure(action: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  try {
+    process.stderr.write(`Artifact ${action} cleanup failed: ${message}\n`);
+  } catch {
+    // Reporting must not replace the operation result being preserved.
+  }
+}
+
 export function createArtifactService(
   metadata: ArtifactMetadataStore,
   content: ArtifactContentStore,
@@ -80,7 +89,11 @@ export function createArtifactService(
     try {
       metadata.create(artifact);
     } catch (error) {
-      content.remove(id, input.type);
+      try {
+        content.remove(id, input.type);
+      } catch (cleanupError) {
+        reportCleanupFailure('create', cleanupError);
+      }
       throw error;
     }
     return artifact;
@@ -161,7 +174,14 @@ export function createArtifactService(
     if (!metadata.remove(id)) {
       return false;
     }
-    content.remove(id, artifact.type);
+    try {
+      content.remove(id, artifact.type);
+    } catch (error) {
+      // Metadata deletion is already committed. Report the orphan for
+      // operators to clean up without turning a successful removal into a
+      // misleading failure that cannot succeed on retry.
+      reportCleanupFailure('remove', error);
+    }
     return true;
   }
 

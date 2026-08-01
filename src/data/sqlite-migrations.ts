@@ -27,7 +27,11 @@ export class SqliteMigrationStorage implements UmzugStorage<DatabaseSync> {
   }
 
   rollback(): void {
-    this.database.exec('ROLLBACK');
+    try {
+      this.database.exec('ROLLBACK');
+    } catch {
+      // Preserve the migration error that triggered cleanup.
+    }
   }
 
   logMigration({ name }: MigrationParams<DatabaseSync>): Promise<void> {

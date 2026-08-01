@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -469,5 +469,18 @@ describe('getDefaultArtifactStore', () => {
 
     const second = await freshStore.getDefaultArtifactStore();
     expect(second).toBe(first);
+  });
+
+  it('retries after a transient initialization failure', async () => {
+    vi.resetModules();
+    const freshStore = await import('./store.js');
+    const databasePath = join(base, 'database', 'artifacts.db');
+    mkdirSync(databasePath, { recursive: true });
+
+    await expect(freshStore.getDefaultArtifactStore()).rejects.toBeInstanceOf(Error);
+    rmSync(databasePath, { force: true, recursive: true });
+
+    await expect(freshStore.getDefaultArtifactStore()).resolves.toBeDefined();
+    expect(existsSync(databasePath)).toBe(true);
   });
 });

@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,7 +9,7 @@ import type { RunnableMigration } from 'umzug';
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 
 import { SqliteArtifactMetadataStore } from './sqlite-artifact-metadata-store.js';
-import { runSqliteMigrations } from './sqlite-migrations.js';
+import { runSqliteMigrations, SqliteMigrationStorage } from './sqlite-migrations.js';
 
 let directory: string;
 let databasePath: string;
@@ -100,5 +102,52 @@ describe('SQLite migrations', () => {
     database.close();
 
     await expect(SqliteArtifactMetadataStore.open(databasePath)).resolves.toBeDefined();
+  });
+
+  it('preserves a migration-body error when its transaction is already gone', async () => {
+    const database = new DatabaseSync(databasePath);
+    const failingMigration: RunnableMigration<DatabaseSync> = {
+      name: 'self-rolled-back-migration',
+      up: async ({ context }) => {
+        context.exec('ROLLBACK');
+        throw new Error('primary migration failure');
+      },
+    };
+
+    await expect(runSqliteMigrations(database, [failingMigration])).rejects.toThrow(
+      'primary migration failure',
+    );
+    database.close();
+  });
+
+  it('preserves the history-write error when no transaction is available to roll back', async () => {
+    const database = new DatabaseSync(databasePath);
+    const storage = new SqliteMigrationStorage(database);
+    database
+      .prepare('INSERT INTO artifact_migrations (name, executed_at) VALUES (?, ?)')
+      .run('duplicate', new Date().toISOString());
+
+    await expect(storage.logMigration({ context: database, name: 'duplicate' })).rejects.toThrow(
+      'UNIQUE constraint failed',
+    );
+    database.close();
+  });
+
+  it('waits for a concurrent startup writer instead of failing immediately', async () => {
+    const lockScript = `
+      const { DatabaseSync } = require('node:sqlite');
+      const database = new DatabaseSync(process.argv[1]);
+      database.exec('CREATE TABLE lock_fixture (id TEXT); BEGIN IMMEDIATE');
+      process.stdout.write('locked');
+      setTimeout(() => { database.exec('COMMIT'); database.close(); }, 100);
+    `;
+    const lockProcess = spawn(process.execPath, ['-e', lockScript, databasePath], {
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    const exit = once(lockProcess, 'exit');
+    await once(lockProcess.stdout, 'data');
+
+    await expect(SqliteArtifactMetadataStore.open(databasePath)).resolves.toBeDefined();
+    await exit;
   });
 });

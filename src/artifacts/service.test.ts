@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vite-plus/test';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 import { createArtifactService } from './service.js';
 import type { Artifact, ArtifactContentStore, ArtifactMetadataStore } from './types.js';
@@ -53,5 +53,58 @@ describe('ArtifactService lost metadata races', () => {
 
     expect(service.removeArtifact(artifact.id)).toBe(false);
     expect(fixture.removed()).toBe(false);
+  });
+
+  it('preserves a create error when compensating content cleanup also fails', () => {
+    const fixture = createRaceFixture();
+    const createError = new Error('metadata create failed');
+    const cleanupError = new Error('content cleanup failed');
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const service = createArtifactService(
+      {
+        ...fixture.metadata,
+        create: () => {
+          throw createError;
+        },
+        find: () => null,
+      },
+      {
+        ...fixture.content,
+        remove: () => {
+          throw cleanupError;
+        },
+      },
+    );
+
+    expect(() =>
+      service.createArtifact({
+        content: 'content',
+        description: 'description',
+        project: 'artifacts',
+        title: 'Title',
+        type: 'txt',
+      }),
+    ).toThrow(createError);
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining(cleanupError.message));
+    stderr.mockRestore();
+  });
+
+  it('reports orphan cleanup but returns success after metadata removal commits', () => {
+    const fixture = createRaceFixture();
+    const cleanupError = new Error('content cleanup failed');
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const service = createArtifactService(
+      { ...fixture.metadata, remove: () => true },
+      {
+        ...fixture.content,
+        remove: () => {
+          throw cleanupError;
+        },
+      },
+    );
+
+    expect(service.removeArtifact(artifact.id)).toBe(true);
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining(cleanupError.message));
+    stderr.mockRestore();
   });
 });

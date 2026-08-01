@@ -19,6 +19,8 @@ type ArtifactRow = {
   updated_at: string;
 };
 
+const SQLITE_BUSY_TIMEOUT_MS = 1_000;
+
 function isArtifactType(value: string): value is ArtifactType {
   return value === 'html' || value === 'md' || value === 'txt';
 }
@@ -59,7 +61,7 @@ export class SqliteArtifactMetadataStore implements ArtifactMetadataStore {
   }
 
   static async open(databasePath: string): Promise<SqliteArtifactMetadataStore> {
-    const database = new DatabaseSync(databasePath);
+    const database = new DatabaseSync(databasePath, { timeout: SQLITE_BUSY_TIMEOUT_MS });
     try {
       await runSqliteMigrations(database);
       return new SqliteArtifactMetadataStore(database);

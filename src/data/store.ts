@@ -24,7 +24,16 @@ export async function createArtifactStore({
 
 let defaultStore: Promise<ArtifactService> | undefined;
 
+async function createDefaultArtifactStore(): Promise<ArtifactService> {
+  try {
+    return await createArtifactStore(resolveStoragePaths());
+  } catch (error) {
+    defaultStore = undefined;
+    throw error;
+  }
+}
+
 export function getDefaultArtifactStore(): Promise<ArtifactService> {
-  defaultStore ??= createArtifactStore(resolveStoragePaths());
+  defaultStore ??= createDefaultArtifactStore();
   return defaultStore;
 }
