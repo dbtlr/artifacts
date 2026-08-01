@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import type { ArtifactStore } from './store.js';
-import { createArtifactStore } from './store.js';
+import { createArtifactStore, createByteNativeArtifactService } from './store.js';
 
 let dir: string;
 let store: ArtifactStore;
@@ -199,7 +199,7 @@ describe('updateArtifact', () => {
     expect(existsSync(join(dir, 'artifacts', `${created.id}.txt`))).toBe(true);
   });
 
-  it('renames the content file when the type changes', () => {
+  it('requires replacement content when the type changes', () => {
     const created = store.createArtifact({
       content: 'plain',
       description: 'v1',
@@ -208,12 +208,12 @@ describe('updateArtifact', () => {
       type: 'txt',
     });
 
-    const updated = store.updateArtifact(created.id, { type: 'md' });
+    expect(() => store.updateArtifact(created.id, { type: 'md' })).toThrow(
+      'requires replacement content',
+    );
 
-    expect(updated?.type).toBe('md');
-    expect(updated?.createdAt).toBe(created.createdAt);
-    expect(existsSync(join(dir, 'artifacts', `${created.id}.txt`))).toBe(false);
-    expect(existsSync(join(dir, 'artifacts', `${created.id}.md`))).toBe(true);
+    expect(existsSync(join(dir, 'artifacts', `${created.id}.txt`))).toBe(true);
+    expect(existsSync(join(dir, 'artifacts', `${created.id}.md`))).toBe(false);
     expect(store.getArtifact(created.id)?.content).toBe('plain');
   });
 
@@ -304,7 +304,9 @@ describe('updateArtifact', () => {
     try {
       expect(store.getArtifact(created.id)?.content).toBe('plain');
 
-      expect(() => store.updateArtifact(created.id, { type: 'md' })).toThrow('database is locked');
+      expect(() => store.updateArtifact(created.id, { content: '# plain', type: 'md' })).toThrow(
+        'database is locked',
+      );
     } finally {
       lock.release();
     }
@@ -399,6 +401,35 @@ describe('listArtifacts', () => {
 
   it('returns an empty list when nothing has been created', () => {
     expect(store.listArtifacts()).toEqual([]);
+  });
+
+  it('preserves legacy text reads when binary rows coexist', async () => {
+    const text = store.createArtifact({
+      content: 'text',
+      description: 'legacy text',
+      project: 'mixed',
+      title: 'Text',
+      type: 'txt',
+    });
+    const byteNative = await createByteNativeArtifactService({
+      databasePath: join(dir, 'artifacts.db'),
+      filesDir: join(dir, 'artifacts'),
+    });
+    const binary = byteNative.createArtifact({
+      content: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      description: 'binary',
+      filename: 'preview.png',
+      mediaType: 'image/png',
+      project: 'mixed',
+      title: 'Binary',
+    });
+
+    expect(store.listArtifacts({ project: 'mixed' }).map(({ id }) => id)).toEqual([text.id]);
+    expect(store.getArtifact(text.id)?.content).toBe('text');
+    expect(store.getArtifact(binary.id)).toBeNull();
+    expect(store.updateArtifact(binary.id, { title: 'Hidden mutation' })).toBeNull();
+    expect(store.removeArtifact(binary.id)).toBe(false);
+    expect(byteNative.getArtifact(binary.id)?.title).toBe('Binary');
   });
 
   it('breaks a created_at tie by insertion order, newest first', () => {

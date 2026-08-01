@@ -1,7 +1,7 @@
 import { raw } from 'hono/html';
 import type { FC } from 'hono/jsx';
 
-import type { ArtifactWithContent } from '../data/store.js';
+import type { LegacyArtifactWithContent } from '../data/store.js';
 import { formatDate } from '../format-date.js';
 import type { RenderedMarkdown } from '../markdown.js';
 
@@ -14,7 +14,7 @@ const MERMAID_SCRIPT_SRC = '/assets/mermaid.js';
 // `artifact.type === 'md'` — rendering is async (see markdown.ts), so it
 // happens once in the route handler rather than inside this component.
 // `txt` always leaves it undefined and keeps the plain <pre> path.
-type ArtifactPageProps = { artifact: ArtifactWithContent; rendered?: RenderedMarkdown };
+type ArtifactPageProps = { artifact: LegacyArtifactWithContent; rendered?: RenderedMarkdown };
 
 export const ArtifactPage: FC<ArtifactPageProps> = ({ artifact, rendered }) => (
   <article>

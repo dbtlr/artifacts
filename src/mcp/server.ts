@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
-import type { ArtifactService } from '../data/store.js';
+import type { ArtifactStore } from '../data/store.js';
 import { buildArtifactUrl } from '../urls.js';
 
 const ARTIFACT_TYPE = z.enum(['html', 'md', 'txt']);
@@ -23,7 +23,7 @@ function toolError(message: string): CallToolResult {
 // it just wires the five tools to whichever store instance the caller hands
 // it, so the same code path serves the default store in production and a
 // temp-directory store in tests.
-export function createMcpServer(service: ArtifactService): McpServer {
+export function createMcpServer(service: ArtifactStore): McpServer {
   const server = new McpServer({ name: 'artifacts', version: '0.1.0' });
 
   server.registerTool(

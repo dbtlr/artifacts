@@ -7,9 +7,9 @@ const artifact: Artifact = {
   createdAt: '2026-01-01T00:00:00.000Z',
   description: 'description',
   id: 'artifact-id',
+  mediaType: 'text/plain',
   project: 'artifacts',
   title: 'Title',
-  type: 'txt',
   updatedAt: '2026-01-01T00:00:00.000Z',
 };
 
@@ -24,7 +24,6 @@ function createRaceFixture() {
     update: () => false,
   };
   const content: ArtifactContentStore = {
-    move: () => undefined,
     read: () => new TextEncoder().encode('original'),
     remove: () => {
       removed = true;
@@ -40,7 +39,9 @@ describe('ArtifactService lost metadata races', () => {
     const fixture = createRaceFixture();
     const service = createArtifactService(fixture.metadata, fixture.content);
 
-    expect(service.updateArtifact(artifact.id, { content: 'replacement' })).toBeNull();
+    expect(
+      service.updateArtifact(artifact.id, { content: new TextEncoder().encode('replacement') }),
+    ).toBeNull();
     expect(fixture.writes.map((bytes) => new TextDecoder().decode(bytes))).toEqual([
       'replacement',
       'original',
@@ -78,11 +79,11 @@ describe('ArtifactService lost metadata races', () => {
 
     expect(() =>
       service.createArtifact({
-        content: 'content',
+        content: new TextEncoder().encode('content'),
         description: 'description',
+        mediaType: 'text/plain',
         project: 'artifacts',
         title: 'Title',
-        type: 'txt',
       }),
     ).toThrow(createError);
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining(cleanupError.message));
@@ -106,5 +107,48 @@ describe('ArtifactService lost metadata races', () => {
     expect(service.removeArtifact(artifact.id)).toBe(true);
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining(cleanupError.message));
     stderr.mockRestore();
+  });
+
+  it('removes replacement content when deleting the old media path fails', () => {
+    const previous: Artifact = { ...artifact, filename: 'old.png', mediaType: 'image/png' };
+    const writes: string[] = [];
+    const removals: string[] = [];
+    const service = createArtifactService(
+      {
+        create: () => undefined,
+        find: () => previous,
+        list: () => [previous],
+        remove: () => false,
+        update: () => {
+          throw new Error('metadata update must not run');
+        },
+      },
+      {
+        read: () => Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
+        remove: (_id, mediaType) => {
+          removals.push(mediaType);
+          if (mediaType === 'image/png') {
+            throw new Error('old path removal failed');
+          }
+          return true;
+        },
+        write: (_id, mediaType) => {
+          writes.push(mediaType);
+          if (mediaType === 'image/png') {
+            throw new Error('redundant old-path rewrite must not run');
+          }
+        },
+      },
+    );
+
+    expect(() =>
+      service.updateArtifact(previous.id, {
+        content: new TextEncoder().encode('%PDF-1.7'),
+        filename: 'new.pdf',
+        mediaType: 'application/pdf',
+      }),
+    ).toThrow('old path removal failed');
+    expect(writes).toEqual(['application/pdf']);
+    expect(removals).toEqual(['image/png', 'application/pdf']);
   });
 });

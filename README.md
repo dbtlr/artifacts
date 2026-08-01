@@ -3,9 +3,11 @@
 [![CI](https://github.com/dbtlr/artifacts/actions/workflows/verify.yml/badge.svg)](https://github.com/dbtlr/artifacts/actions/workflows/verify.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Artifacts turns agent-generated Markdown, HTML, and text into persistent links. It exposes a
-streamable HTTP MCP server for creating and managing documents, plus a small server-rendered web
-interface for reading and finding them.
+Artifacts turns agent-generated Markdown, HTML, and text into persistent links. Its byte-native
+storage core also recognizes PNG, JPEG, GIF, WebP, SVG, and PDF files up to 10 MiB each; binary MCP
+transport and browser serving are not exposed yet. It includes a streamable HTTP MCP server for
+creating and managing documents, plus a small server-rendered web interface for reading and finding
+them.
 
 > [!WARNING]
 > Artifacts is unversioned pre-alpha software. It has no compatibility guarantees: configuration,
@@ -113,6 +115,15 @@ docker run --rm --mount source=artifacts-database,target=/source,readonly --moun
 
 For bind mounts, copy the two configured directories while the service is stopped. Restore both
 sources from the same backup before restarting.
+
+Database migrations run automatically at startup. The binary-artifact schema recognizes PNG,
+JPEG, GIF, WebP, SVG, and PDF content with a 10 MiB per-artifact limit. It can be downgraded
+only while every row is still a legacy text document and neither filename nor collection metadata
+has been stored. Once binary rows or new metadata exist, the guarded down migration refuses without
+changing the database; restore both persistence sources from the same pre-migration snapshot
+instead. Pre-migration builds cannot safely read an upgraded database. The down migration is a
+programmatic recovery primitive, not an operator CLI command; no supported `pnpm` command invokes
+it.
 
 Direct development uses `.env.development` and intentionally separate paths:
 

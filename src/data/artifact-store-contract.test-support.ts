@@ -6,19 +6,21 @@ const first: Artifact = {
   createdAt: '2026-01-01T00:00:00.000Z',
   description: 'first',
   id: 'first',
+  mediaType: 'text/plain',
   project: 'alpha',
   title: 'First',
-  type: 'txt',
   updatedAt: '2026-01-01T00:00:00.000Z',
 };
 
 const second: Artifact = {
+  collection: 'Reports',
   createdAt: '2026-01-02T00:00:00.000Z',
   description: 'second',
+  filename: 'notes.md',
   id: 'second',
+  mediaType: 'text/markdown',
   project: 'beta',
   title: 'Second',
-  type: 'md',
   updatedAt: '2026-01-02T00:00:00.000Z',
 };
 
@@ -36,6 +38,8 @@ export function metadataStoreContract(
       expect(store.find('missing')).toBeNull();
       expect(store.list().map(({ id }) => id)).toEqual([second.id, first.id]);
       expect(store.list({ project: 'alpha' })).toEqual([first]);
+      expect(store.list({ collection: 'reports' })).toEqual([second]);
+      expect(store.list({ collection: 'missing' })).toEqual([]);
 
       const updated = { ...first, title: 'Updated', updatedAt: '2026-01-03T00:00:00.000Z' };
       expect(store.update(updated)).toBe(true);
@@ -48,16 +52,14 @@ export function metadataStoreContract(
 
 export function contentStoreContract(name: string, createStore: () => ArtifactContentStore): void {
   describe(`${name} content contract`, () => {
-    it('round-trips arbitrary bytes and supports move and idempotent removal', () => {
+    it('round-trips arbitrary bytes and supports idempotent removal', () => {
       const store = createStore();
       const bytes = Uint8Array.from([0, 255, 1, 128, 10]);
 
-      store.write('asset', 'txt', bytes);
-      expect([...store.read('asset', 'txt')]).toEqual([...bytes]);
-      store.move('asset', 'txt', 'md');
-      expect([...store.read('asset', 'md')]).toEqual([...bytes]);
-      expect(store.remove('asset', 'md')).toBe(true);
-      expect(store.remove('asset', 'md')).toBe(false);
+      store.write('asset', 'text/plain', bytes);
+      expect([...store.read('asset', 'text/plain')]).toEqual([...bytes]);
+      expect(store.remove('asset', 'text/plain')).toBe(true);
+      expect(store.remove('asset', 'text/plain')).toBe(false);
     });
   });
 }

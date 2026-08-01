@@ -1,34 +1,42 @@
-export type ArtifactType = 'html' | 'md' | 'txt';
+import type { LegacyArtifactType as ArtifactType, MediaType } from './media.js';
+
+export type { LegacyArtifactType as ArtifactType, MediaType } from './media.js';
 
 export type Artifact = {
   createdAt: string;
   description: string;
   id: string;
+  collection?: string;
+  filename?: string;
+  mediaType: MediaType;
   project: string;
   title: string;
-  type: ArtifactType;
   updatedAt: string;
 };
 
-export type ArtifactWithContent = Artifact & { content: string };
+export type ArtifactWithContent = Artifact & { content: Uint8Array };
 
 export type CreateArtifactInput = {
-  content: string;
+  collection?: string;
+  content: Uint8Array;
   description: string;
+  filename?: string;
+  mediaType: MediaType;
   project: string;
   title: string;
-  type: ArtifactType;
 };
 
 export type UpdateArtifactInput = {
-  content?: string;
+  collection?: string | null;
+  content?: Uint8Array;
   description?: string;
+  filename?: string | null;
+  mediaType?: MediaType;
   project?: string;
   title?: string;
-  type?: ArtifactType;
 };
 
-export type ListArtifactsQuery = { project?: string };
+export type ListArtifactsQuery = { collection?: string; project?: string };
 
 export type ArtifactMetadataStore = {
   create: (artifact: Artifact) => void;
@@ -39,10 +47,9 @@ export type ArtifactMetadataStore = {
 };
 
 export type ArtifactContentStore = {
-  move: (id: string, fromType: ArtifactType, toType: ArtifactType) => void;
-  read: (id: string, type: ArtifactType) => Uint8Array;
-  remove: (id: string, type: ArtifactType) => boolean;
-  write: (id: string, type: ArtifactType, content: Uint8Array) => void;
+  read: (id: string, mediaType: MediaType) => Uint8Array;
+  remove: (id: string, mediaType: MediaType) => boolean;
+  write: (id: string, mediaType: MediaType, content: Uint8Array) => void;
 };
 
 export type ArtifactService = {
@@ -53,6 +60,31 @@ export type ArtifactService = {
   updateArtifact: (id: string, patch: UpdateArtifactInput) => Artifact | null;
 };
 
-// Compatibility name for callers while ART-24 moves persistence behind the
-// service boundary. New code should use ArtifactService.
-export type ArtifactStore = ArtifactService;
+export type LegacyArtifact = Omit<Artifact, 'collection' | 'filename' | 'mediaType'> & {
+  type: ArtifactType;
+};
+export type LegacyArtifactWithContent = LegacyArtifact & { content: string };
+export type LegacyCreateArtifactInput = Omit<
+  CreateArtifactInput,
+  'collection' | 'content' | 'filename' | 'mediaType'
+> & {
+  content: string;
+  type: ArtifactType;
+};
+export type LegacyUpdateArtifactInput = Omit<
+  UpdateArtifactInput,
+  'collection' | 'content' | 'filename' | 'mediaType'
+> & {
+  content?: string;
+  type?: ArtifactType;
+};
+
+// The text-only presentation adapter remains until ART-21 moves MCP to the
+// canonical mediaType/byte contract.
+export type ArtifactStore = {
+  createArtifact: (input: LegacyCreateArtifactInput) => LegacyArtifact;
+  getArtifact: (id: string) => LegacyArtifactWithContent | null;
+  listArtifacts: (query?: ListArtifactsQuery) => LegacyArtifact[];
+  removeArtifact: (id: string) => boolean;
+  updateArtifact: (id: string, patch: LegacyUpdateArtifactInput) => LegacyArtifact | null;
+};

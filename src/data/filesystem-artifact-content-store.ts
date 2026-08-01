@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { ArtifactContentStore, ArtifactType } from '../artifacts/types.js';
+import { mediaDefinition } from '../artifacts/media.js';
+import type { ArtifactContentStore, MediaType } from '../artifacts/types.js';
 
 function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error;
@@ -18,13 +19,13 @@ export class FilesystemArtifactContentStore implements ArtifactContentStore {
     mkdirSync(filesDir, { recursive: true });
   }
 
-  private path(id: string, type: ArtifactType): string {
+  private path(id: string, mediaType: MediaType): string {
     if (!SAFE_ARTIFACT_ID.test(id)) {
       throw new Error(
         `Invalid artifact id ${JSON.stringify(id)}: must be a plain filename segment`,
       );
     }
-    return join(this.filesDir, `${id}.${type}`);
+    return join(this.filesDir, `${id}.${mediaDefinition(mediaType).extension}`);
   }
 
   private removePath(path: string): boolean {
@@ -39,20 +40,16 @@ export class FilesystemArtifactContentStore implements ArtifactContentStore {
     }
   }
 
-  move(id: string, fromType: ArtifactType, toType: ArtifactType): void {
-    renameSync(this.path(id, fromType), this.path(id, toType));
+  read(id: string, mediaType: MediaType): Uint8Array {
+    return readFileSync(this.path(id, mediaType));
   }
 
-  read(id: string, type: ArtifactType): Uint8Array {
-    return readFileSync(this.path(id, type));
+  remove(id: string, mediaType: MediaType): boolean {
+    return this.removePath(this.path(id, mediaType));
   }
 
-  remove(id: string, type: ArtifactType): boolean {
-    return this.removePath(this.path(id, type));
-  }
-
-  write(id: string, type: ArtifactType, content: Uint8Array): void {
-    const target = this.path(id, type);
+  write(id: string, mediaType: MediaType, content: Uint8Array): void {
+    const target = this.path(id, mediaType);
     const temporary = `${target}.${process.pid.toString()}.${randomUUID()}.tmp`;
     try {
       writeFileSync(temporary, content);

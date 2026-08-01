@@ -11,7 +11,7 @@ import { HomePage } from './components/home-page.js';
 import { Layout } from './components/layout.js';
 import { NotFoundPage } from './components/not-found-page.js';
 import { ProjectPage } from './components/project-page.js';
-import type { ArtifactService } from './data/store.js';
+import type { ArtifactStore } from './data/store.js';
 import { getDefaultArtifactStore } from './data/store.js';
 import { renderMarkdownToHtml } from './markdown.js';
 import { createMcpServer } from './mcp/server.js';
@@ -31,9 +31,9 @@ const MAX_MCP_BODY_BYTES = 10 * 1024 * 1024;
 // default sqlite-backed store is only ever touched lazily, on the first
 // actual /mcp request — never merely by importing this module. Tests pass a
 // temp-directory store explicitly instead of touching the repo's data/.
-export function createApp(store?: ArtifactService): Hono {
+export function createApp(store?: ArtifactStore): Hono {
   const app = new Hono();
-  const resolveService = (): Promise<ArtifactService> =>
+  const resolveService = (): Promise<ArtifactStore> =>
     store === undefined ? getDefaultArtifactStore() : Promise.resolve(store);
 
   // Namespaced under /assets so dynamic routes (/mcp, /a/:id) can never be
