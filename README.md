@@ -4,10 +4,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Artifacts turns agent-generated Markdown, HTML, and text into persistent links. Its byte-native
-storage core also recognizes PNG, JPEG, GIF, WebP, SVG, and PDF files up to 10 MiB each; binary MCP
-transport and browser serving are not exposed yet. It includes a streamable HTTP MCP server for
-creating and managing documents, plus a small server-rendered web interface for reading and finding
-them.
+storage core also recognizes PNG, JPEG, GIF, WebP, SVG, and PDF files up to 10 MiB each. Images and
+PDFs use the same stable `/a/:id` links as documents and are served inline with content-type,
+filename, revalidation, and content-sniffing protections. It includes a streamable HTTP MCP server
+for creating and managing documents, plus a small server-rendered web interface for reading and
+finding them.
 
 > [!WARNING]
 > Artifacts is unversioned pre-alpha software. It has no compatibility guarantees: configuration,
@@ -174,9 +175,10 @@ pnpm build
 Artifacts is a Node.js 24 TypeScript application built on Hono. The same process serves the web UI,
 artifact routes, static assets, and the streamable HTTP MCP endpoint at `/mcp`. Metadata lives in
 SQLite while document bodies live in a separate files directory. Markdown is rendered on the server
-with syntax highlighting; Mermaid diagrams are rendered in the browser. The Docker image is a
-two-stage Alpine build that runs as the non-root `node` user and writes only to its two persistence
-mounts.
+with syntax highlighting; Mermaid diagrams are rendered in the browser. Allowlisted images and PDFs
+are served directly from `/a/:id`; SVG responses receive an additional restrictive content security
+policy. The Docker image is a two-stage Alpine build that runs as the non-root `node` user and writes
+only to its two persistence mounts.
 
 ## Security and license
 

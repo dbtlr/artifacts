@@ -1,9 +1,9 @@
 import type { FC } from 'hono/jsx';
 
-import type { LegacyArtifact } from '../data/store.js';
+import type { Artifact } from '../data/store.js';
 import { ArtifactList } from './artifact-list.js';
 
-type HomePageProps = { artifacts: LegacyArtifact[] };
+type HomePageProps = { artifacts: Artifact[] };
 
 export const HomePage: FC<HomePageProps> = ({ artifacts }) => (
   <main>

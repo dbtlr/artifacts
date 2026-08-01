@@ -261,6 +261,7 @@ export function createArtifactService(
 
   return {
     createArtifact,
+    findArtifact: (id) => metadata.find(id),
     getArtifact,
     listArtifacts: (query) => metadata.list(query),
     removeArtifact,

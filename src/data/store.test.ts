@@ -6,7 +6,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import type { ArtifactStore } from './store.js';
-import { createArtifactStore, createByteNativeArtifactService } from './store.js';
+import {
+  adaptLegacyArtifactStore,
+  createArtifactStore,
+  createByteNativeArtifactService,
+} from './store.js';
 
 let dir: string;
 let store: ArtifactStore;
@@ -21,6 +25,41 @@ beforeEach(async () => {
 
 afterEach(() => {
   rmSync(dir, { force: true, recursive: true });
+});
+
+describe('adaptLegacyArtifactStore', () => {
+  it('finds metadata without reading artifact content', () => {
+    const artifact = {
+      createdAt: '2026-01-01T00:00:00.000Z',
+      description: 'metadata only',
+      id: 'metadata-id',
+      project: 'artifacts',
+      title: 'Metadata',
+      type: 'txt' as const,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const getArtifact = vi.fn(() => {
+      throw new Error('content must not be read');
+    });
+    const legacyStore: ArtifactStore = {
+      createArtifact: vi.fn(),
+      getArtifact,
+      listArtifacts: vi.fn(() => [artifact]),
+      removeArtifact: vi.fn(),
+      updateArtifact: vi.fn(),
+    };
+
+    expect(adaptLegacyArtifactStore(legacyStore).findArtifact(artifact.id)).toEqual({
+      createdAt: artifact.createdAt,
+      description: artifact.description,
+      id: artifact.id,
+      mediaType: 'text/plain',
+      project: artifact.project,
+      title: artifact.title,
+      updatedAt: artifact.updatedAt,
+    });
+    expect(getArtifact).not.toHaveBeenCalled();
+  });
 });
 
 // A second connection to the same db file, switched to WAL and holding an
@@ -432,6 +471,21 @@ describe('listArtifacts', () => {
     expect(byteNative.getArtifact(binary.id)?.title).toBe('Binary');
   });
 
+  it('updates metadata and removes a text row when its content file is missing', () => {
+    const artifact = store.createArtifact({
+      content: 'missing later',
+      description: 'repairable metadata',
+      project: 'repairs',
+      title: 'Before',
+      type: 'txt',
+    });
+    rmSync(join(dir, 'artifacts', `${artifact.id}.txt`));
+
+    expect(store.updateArtifact(artifact.id, { title: 'After' })?.title).toBe('After');
+    expect(store.removeArtifact(artifact.id)).toBe(true);
+    expect(store.listArtifacts()).toEqual([]);
+  });
+
   it('breaks a created_at tie by insertion order, newest first', () => {
     vi.useFakeTimers();
     try {
@@ -500,6 +554,23 @@ describe('getDefaultArtifactStore', () => {
 
     const second = await freshStore.getDefaultArtifactStore();
     expect(second).toBe(first);
+  });
+
+  it('derives the default legacy store from the canonical default service', async () => {
+    vi.resetModules();
+    const freshStore = await import('./store.js');
+    const service = await freshStore.getDefaultByteNativeArtifactService();
+    const legacy = await freshStore.getDefaultArtifactStore();
+
+    const artifact = service.createArtifact({
+      content: new TextEncoder().encode('shared service'),
+      description: 'shared composition root',
+      mediaType: 'text/plain',
+      project: 'artifacts',
+      title: 'Shared',
+    });
+
+    expect(legacy.getArtifact(artifact.id)?.content).toBe('shared service');
   });
 
   it('retries after a transient initialization failure', async () => {
