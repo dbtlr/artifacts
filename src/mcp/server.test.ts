@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -20,17 +21,21 @@ import { z } from 'zod';
 // intercept without reimplementing part of the transport — booting on an
 // ephemeral port (PORT=0 pattern) is the smaller, more honest surface.
 import { createApp } from '../app.js';
-import type { ArtifactStore } from '../data/store.js';
-import { createArtifactStore } from '../data/store.js';
+import type { ArtifactService, ArtifactStore } from '../data/store.js';
+import { createArtifactStore, createByteNativeArtifactService } from '../data/store.js';
 
 const artifactSchema = z.object({
+  collection: z.string().optional(),
   content: z.string().optional(),
+  contentBase64: z.string().optional(),
   createdAt: z.string(),
   description: z.string(),
+  filename: z.string().optional(),
   id: z.string(),
+  mediaType: z.string(),
   project: z.string(),
   title: z.string(),
-  type: z.string(),
+  type: z.string().optional(),
   updatedAt: z.string(),
   url: z.string().optional(),
 });
@@ -38,6 +43,7 @@ const removeResultSchema = z.object({ existed: z.boolean(), id: z.string() });
 
 let dataDir: string;
 let store: ArtifactStore;
+let mcpService: ArtifactService;
 let server: ServerType;
 let client: Client;
 const originalPublicBaseUrl = process.env.ARTIFACTS_PUBLIC_BASE_URL;
@@ -84,7 +90,11 @@ beforeAll(async () => {
     databasePath: join(dataDir, 'artifacts.db'),
     filesDir: join(dataDir, 'artifacts'),
   });
-  const app = createApp(store);
+  mcpService = await createByteNativeArtifactService({
+    databasePath: join(dataDir, 'artifacts.db'),
+    filesDir: join(dataDir, 'artifacts'),
+  });
+  const app = createApp(store, mcpService);
 
   server = serve({ fetch: app.fetch, port: 0 });
   await once(server, 'listening');
@@ -110,13 +120,14 @@ afterAll(async () => {
 });
 
 describe('tools/list', () => {
-  it('advertises all five tools with input schemas', async () => {
+  it('advertises all six tools with input schemas', async () => {
     const { tools } = await client.listTools();
 
     expect(tools.map((tool) => tool.name).toSorted()).toEqual([
       'add_artifact',
       'get_artifact',
       'list_artifacts',
+      'list_collections',
       'remove_artifact',
       'update_artifact',
     ]);
@@ -143,7 +154,16 @@ describe('add -> get -> update -> remove', () => {
     expect(added.id).toHaveLength(10);
     expect(added.url).toBe(`http://localhost:3000/a/${added.id}`);
 
-    const fetched = await callTool('get_artifact', { id: added.id }, artifactSchema);
+    expect(added.mediaType).toBe('text/markdown');
+
+    const metadata = await callTool('get_artifact', { id: added.id }, artifactSchema);
+    expect(metadata.content).toBeUndefined();
+
+    const fetched = await callTool(
+      'get_artifact',
+      { id: added.id, includeContent: true },
+      artifactSchema,
+    );
     expect(fetched.content).toBe('# hello');
     expect(fetched.title).toBe('Round Trip');
 
@@ -156,7 +176,11 @@ describe('add -> get -> update -> remove', () => {
     expect(updated.project).toBe('mcp-tests');
     expect(updated.url).toBe(added.url);
 
-    const refetched = await callTool('get_artifact', { id: added.id }, artifactSchema);
+    const refetched = await callTool(
+      'get_artifact',
+      { id: added.id, includeContent: true },
+      artifactSchema,
+    );
     expect(refetched.content).toBe('# goodbye');
 
     const removed = await callTool('remove_artifact', { id: added.id }, removeResultSchema);
@@ -207,6 +231,115 @@ describe('list_artifacts', () => {
       await callTool('remove_artifact', { id: second.id }, removeResultSchema);
       await callTool('remove_artifact', { id: third.id }, removeResultSchema);
     }
+  });
+});
+
+describe('binary payloads and collections', () => {
+  const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
+
+  it('round-trips binary content only when explicitly requested', async () => {
+    const added = await callTool(
+      'add_artifact',
+      {
+        collection: 'Image Train',
+        contentBase64: png.toString('base64'),
+        description: 'A tiny PNG fixture',
+        filename: 'fixture.png',
+        mediaType: 'image/png',
+        project: 'mcp-tests',
+        title: 'Binary Round Trip',
+      },
+      artifactSchema,
+    );
+
+    try {
+      expect(added).toMatchObject({
+        collection: 'Image Train',
+        filename: 'fixture.png',
+        mediaType: 'image/png',
+      });
+      expect(added.contentBase64).toBeUndefined();
+
+      const metadata = await callTool('get_artifact', { id: added.id }, artifactSchema);
+      expect(metadata.contentBase64).toBeUndefined();
+
+      const fetched = await callTool(
+        'get_artifact',
+        { id: added.id, includeContent: true },
+        artifactSchema,
+      );
+      expect(fetched.contentBase64).toBe(png.toString('base64'));
+      expect(fetched.content).toBeUndefined();
+
+      const listed = await callTool(
+        'list_artifacts',
+        { collection: 'image train' },
+        z.array(artifactSchema),
+      );
+      expect(listed.map(({ id }) => id)).toContain(added.id);
+      expect(listed.find(({ id }) => id === added.id)?.url).toBe(added.url);
+
+      const collections = await callTool('list_collections', {}, z.array(z.string()));
+      expect(collections).toContain('Image Train');
+    } finally {
+      await callTool('remove_artifact', { id: added.id }, removeResultSchema);
+    }
+  });
+
+  it('does not read bytes for metadata-only retrieval', async () => {
+    const added = await callTool(
+      'add_artifact',
+      {
+        contentBase64: png.toString('base64'),
+        description: 'Content will be removed',
+        filename: 'missing.png',
+        mediaType: 'image/png',
+        project: 'mcp-tests',
+        title: 'Metadata Survives',
+      },
+      artifactSchema,
+    );
+    await rm(join(dataDir, 'artifacts', `${added.id}.png`));
+
+    const metadata = await callTool('get_artifact', { id: added.id }, artifactSchema);
+    expect(metadata.id).toBe(added.id);
+
+    const withContent = await callToolResult('get_artifact', {
+      id: added.id,
+      includeContent: true,
+    });
+    expect(withContent.isError).toBe(true);
+    await callTool('remove_artifact', { id: added.id }, removeResultSchema);
+  });
+
+  it.each([
+    ['both payloads', { content: 'x', contentBase64: 'eA==' }, 'mutually exclusive'],
+    ['text for binary', { content: 'x' }, 'contentBase64 is required'],
+    ['invalid base64', { contentBase64: 'not-base64' }, 'canonical base64'],
+    ['noncanonical pad bits', { contentBase64: 'Zh==' }, 'canonical base64'],
+  ])('rejects %s', async (_name, payload, message) => {
+    const result = await callToolResult('add_artifact', {
+      ...payload,
+      description: 'd',
+      filename: 'fixture.png',
+      mediaType: 'image/png',
+      project: 'p',
+      title: 't',
+    });
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain(message);
+  });
+
+  it('rejects base64 payloads for text media', async () => {
+    const result = await callToolResult('add_artifact', {
+      contentBase64: 'eA==',
+      description: 'd',
+      mediaType: 'text/plain',
+      project: 'p',
+      title: 't',
+    });
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain('content is required');
   });
 });
 
