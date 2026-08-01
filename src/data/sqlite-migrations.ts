@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 
+import { Umzug } from 'umzug';
 import type { MigrationParams, RunnableMigration, UmzugStorage } from 'umzug';
 
 const MIGRATIONS_TABLE = 'artifact_migrations';
@@ -21,17 +22,85 @@ export class SqliteMigrationStorage implements UmzugStorage<DatabaseSync> {
     return Promise.resolve(rows.map((row) => String(row.name)));
   }
 
+  begin(): void {
+    this.database.exec('BEGIN IMMEDIATE');
+  }
+
+  rollback(): void {
+    this.database.exec('ROLLBACK');
+  }
+
   logMigration({ name }: MigrationParams<DatabaseSync>): Promise<void> {
-    this.database
-      .prepare(`INSERT INTO ${MIGRATIONS_TABLE} (name, executed_at) VALUES (?, ?)`)
-      .run(name, new Date().toISOString());
-    return Promise.resolve();
+    try {
+      this.database
+        .prepare(`INSERT INTO ${MIGRATIONS_TABLE} (name, executed_at) VALUES (?, ?)`)
+        .run(name, new Date().toISOString());
+      this.database.exec('COMMIT');
+      return Promise.resolve();
+    } catch (error) {
+      this.rollback();
+      return Promise.reject(error);
+    }
   }
 
   unlogMigration({ name }: MigrationParams<DatabaseSync>): Promise<void> {
-    this.database.prepare(`DELETE FROM ${MIGRATIONS_TABLE} WHERE name = ?`).run(name);
-    return Promise.resolve();
+    try {
+      this.database.prepare(`DELETE FROM ${MIGRATIONS_TABLE} WHERE name = ?`).run(name);
+      this.database.exec('COMMIT');
+      return Promise.resolve();
+    } catch (error) {
+      this.rollback();
+      return Promise.reject(error);
+    }
   }
+}
+
+function transactionalMigrations(
+  migrations: RunnableMigration<DatabaseSync>[],
+  storage: SqliteMigrationStorage,
+): RunnableMigration<DatabaseSync>[] {
+  return migrations.map((migration) => {
+    const down = migration.down;
+    return {
+      down:
+        down === undefined
+          ? undefined
+          : async (params) => {
+              storage.begin();
+              try {
+                return await down(params);
+              } catch (error) {
+                storage.rollback();
+                throw error;
+              }
+            },
+      name: migration.name,
+      path: migration.path,
+      up: async (params) => {
+        storage.begin();
+        try {
+          return await migration.up(params);
+        } catch (error) {
+          storage.rollback();
+          throw error;
+        }
+      },
+    };
+  });
+}
+
+export async function runSqliteMigrations(
+  database: DatabaseSync,
+  migrations: RunnableMigration<DatabaseSync>[] = sqliteMigrations,
+): Promise<void> {
+  const storage = new SqliteMigrationStorage(database);
+  const migrator = new Umzug({
+    context: database,
+    logger: undefined,
+    migrations: transactionalMigrations(migrations, storage),
+    storage,
+  });
+  await migrator.up();
 }
 
 export const sqliteMigrations: RunnableMigration<DatabaseSync>[] = [

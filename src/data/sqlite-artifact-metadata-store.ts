@@ -1,15 +1,13 @@
 import type { SQLOutputValue } from 'node:sqlite';
 import { DatabaseSync } from 'node:sqlite';
 
-import { Umzug } from 'umzug';
-
 import type {
   Artifact,
   ArtifactMetadataStore,
   ArtifactType,
   ListArtifactsQuery,
 } from '../artifacts/types.js';
-import { SqliteMigrationStorage, sqliteMigrations } from './sqlite-migrations.js';
+import { runSqliteMigrations } from './sqlite-migrations.js';
 
 type ArtifactRow = {
   created_at: string;
@@ -63,13 +61,7 @@ export class SqliteArtifactMetadataStore implements ArtifactMetadataStore {
   static async open(databasePath: string): Promise<SqliteArtifactMetadataStore> {
     const database = new DatabaseSync(databasePath);
     try {
-      const migrator = new Umzug({
-        context: database,
-        logger: undefined,
-        migrations: sqliteMigrations,
-        storage: new SqliteMigrationStorage(database),
-      });
-      await migrator.up();
+      await runSqliteMigrations(database);
       return new SqliteArtifactMetadataStore(database);
     } catch (error) {
       database.close();

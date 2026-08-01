@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
+import type { RunnableMigration } from 'umzug';
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 
 import { SqliteArtifactMetadataStore } from './sqlite-artifact-metadata-store.js';
+import { runSqliteMigrations } from './sqlite-migrations.js';
 
 let directory: string;
 let databasePath: string;
@@ -76,5 +78,27 @@ describe('SQLite migrations', () => {
       count: 1,
     });
     database.close();
+  });
+
+  it('rolls back migration effects when a migration fails before history is recorded', async () => {
+    const database = new DatabaseSync(databasePath);
+    const failingMigration: RunnableMigration<DatabaseSync> = {
+      name: 'broken-migration',
+      up: async ({ context }) => {
+        context.exec('CREATE TABLE must_not_survive (id TEXT)');
+        throw new Error('injected migration failure');
+      },
+    };
+
+    await expect(runSqliteMigrations(database, [failingMigration])).rejects.toThrow(
+      'injected migration failure',
+    );
+    expect(tableNames(database)).not.toContain('must_not_survive');
+    expect(database.prepare('SELECT COUNT(*) AS count FROM artifact_migrations').get()).toEqual({
+      count: 0,
+    });
+    database.close();
+
+    await expect(SqliteArtifactMetadataStore.open(databasePath)).resolves.toBeDefined();
   });
 });

@@ -139,11 +139,16 @@ export function createArtifactService(
       rollbackContent = () => content.move(id, next.type, previous.type);
     }
 
+    let updated: boolean;
     try {
-      metadata.update(next);
+      updated = metadata.update(next);
     } catch (error) {
       rollbackContent?.();
       throw error;
+    }
+    if (!updated) {
+      rollbackContent?.();
+      return null;
     }
     return next;
   }
@@ -153,7 +158,9 @@ export function createArtifactService(
     if (!artifact) {
       return false;
     }
-    metadata.remove(id);
+    if (!metadata.remove(id)) {
+      return false;
+    }
     content.remove(id, artifact.type);
     return true;
   }
