@@ -13,8 +13,12 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { z } from 'zod';
 
 import { app, createApp } from './app.js';
-import type { ArtifactStore } from './data/store.js';
-import { createArtifactStore } from './data/store.js';
+import type { ArtifactService, ArtifactStore } from './data/store.js';
+import {
+  createArtifactStore,
+  createByteNativeArtifactService,
+  legacyArtifactStoreFromService,
+} from './data/store.js';
 
 describe('app', () => {
   it('renders the homepage with the stylesheet linked', async () => {
@@ -369,6 +373,125 @@ describe('get /a/:id', () => {
     const res = await testApp.request(`/a/${artifact.id}`);
 
     expect(res.status).toBe(500);
+  });
+});
+
+describe('binary artifacts in browser routes', () => {
+  let dataDir: string;
+  let service: ArtifactService;
+  let testApp: ReturnType<typeof createApp>;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), 'artifacts-binary-app-'));
+    service = await createByteNativeArtifactService({
+      databasePath: join(dataDir, 'artifacts.db'),
+      filesDir: join(dataDir, 'artifacts'),
+    });
+    testApp = createApp({ artifacts: service, mcp: legacyArtifactStoreFromService(service) });
+  });
+
+  afterEach(async () => {
+    await rm(dataDir, { force: true, recursive: true });
+  });
+
+  function createBinary(
+    content: Uint8Array,
+    mediaType: 'application/pdf' | 'image/png' | 'image/svg+xml',
+    filename: string,
+  ) {
+    return service.createArtifact({
+      collection: 'ART-22',
+      content,
+      description: 'Browser binary fixture',
+      filename,
+      mediaType,
+      project: 'browser-files',
+      title: 'Binary Preview',
+    });
+  }
+
+  it('lists binary artifacts with their minimal metadata and stable URL', async () => {
+    const artifact = createBinary(
+      Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      'image/png',
+      'preview.png',
+    );
+
+    const res = await testApp.request('/');
+    const body = await res.text();
+
+    expect(res.status).toBe(200);
+    expect(body).toContain(`href="/a/${artifact.id}"`);
+    expect(body).toContain('Binary Preview');
+    expect(body).toContain('browser-files');
+    expect(body).toContain('Browser binary fixture');
+    expect(body).not.toContain('preview.png');
+    expect(body).not.toContain('ART-22');
+  });
+
+  it('serves allowlisted image bytes with inline, sniffing, and revalidation headers', async () => {
+    const bytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
+    const artifact = createBinary(bytes, 'image/png', 'preview image.png');
+
+    const res = await testApp.request(`/a/${artifact.id}`);
+
+    expect(res.status).toBe(200);
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(bytes);
+    expect(res.headers.get('content-type')).toBe('image/png');
+    expect(res.headers.get('content-disposition')).toBe(
+      `inline; filename="preview image.png"; filename*=UTF-8''preview%20image.png`,
+    );
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('cache-control')).toBe('no-cache');
+    expect(res.headers.get('etag')).toMatch(/^"[A-Za-z0-9_-]+"$/u);
+  });
+
+  it('returns 304 without a body when If-None-Match contains the current ETag', async () => {
+    const artifact = createBinary(
+      new TextEncoder().encode('%PDF-1.7\nfixture'),
+      'application/pdf',
+      'report.pdf',
+    );
+    const first = await testApp.request(`/a/${artifact.id}`);
+    const etag = first.headers.get('etag')!;
+
+    const res = await testApp.request(`/a/${artifact.id}`, {
+      headers: { 'If-None-Match': `"other", ${etag}` },
+    });
+
+    expect(res.status).toBe(304);
+    await expect(res.text()).resolves.toBe('');
+    expect(res.headers.get('etag')).toBe(etag);
+    expect(res.headers.get('cache-control')).toBe('no-cache');
+  });
+
+  it('answers HEAD with GET-equivalent headers and no body', async () => {
+    const bytes = new TextEncoder().encode('%PDF-1.7\nfixture');
+    const artifact = createBinary(bytes, 'application/pdf', 'report.pdf');
+
+    const get = await testApp.request(`/a/${artifact.id}`);
+    const head = await testApp.request(`/a/${artifact.id}`, { method: 'HEAD' });
+
+    expect(head.status).toBe(200);
+    await expect(head.text()).resolves.toBe('');
+    expect(head.headers.get('content-type')).toBe(get.headers.get('content-type'));
+    expect(head.headers.get('content-disposition')).toBe(get.headers.get('content-disposition'));
+    expect(head.headers.get('etag')).toBe(get.headers.get('etag'));
+    expect(head.headers.get('content-length')).toBe(String(bytes.byteLength));
+  });
+
+  it('applies a restrictive CSP to SVG responses', async () => {
+    const artifact = createBinary(
+      new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>'),
+      'image/svg+xml',
+      'diagram.svg',
+    );
+
+    const res = await testApp.request(`/a/${artifact.id}`);
+
+    expect(res.headers.get('content-security-policy')).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    );
   });
 });
 

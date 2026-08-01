@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -6,13 +7,23 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 
+import { legacyTypeFromMediaType, mediaTypeFromLegacyType } from './artifacts/media.js';
 import { ArtifactPage } from './components/artifact-page.js';
 import { HomePage } from './components/home-page.js';
 import { Layout } from './components/layout.js';
 import { NotFoundPage } from './components/not-found-page.js';
 import { ProjectPage } from './components/project-page.js';
-import type { ArtifactStore } from './data/store.js';
-import { getDefaultArtifactStore } from './data/store.js';
+import type {
+  Artifact,
+  ArtifactService,
+  ArtifactStore,
+  ArtifactWithContent,
+  LegacyArtifactWithContent,
+} from './data/store.js';
+import {
+  getDefaultByteNativeArtifactService,
+  legacyArtifactStoreFromService,
+} from './data/store.js';
 import { renderMarkdownToHtml } from './markdown.js';
 import { createMcpServer } from './mcp/server.js';
 
@@ -31,10 +42,96 @@ const MAX_MCP_BODY_BYTES = 10 * 1024 * 1024;
 // default sqlite-backed store is only ever touched lazily, on the first
 // actual /mcp request — never merely by importing this module. Tests pass a
 // temp-directory store explicitly instead of touching the repo's data/.
-export function createApp(store?: ArtifactStore): Hono {
+type AppServices = { artifacts: ArtifactService; mcp: ArtifactStore };
+
+function toCanonicalArtifact(
+  artifact: ReturnType<ArtifactStore['listArtifacts']>[number],
+): Artifact {
+  const { type, ...fields } = artifact;
+  return { ...fields, mediaType: mediaTypeFromLegacyType(type) };
+}
+
+function canonicalFromLegacy(store: ArtifactStore): ArtifactService {
+  return {
+    createArtifact: (input) => {
+      const type = legacyTypeFromMediaType(input.mediaType);
+      if (type === undefined) {
+        throw new Error(`Unsupported legacy media type ${input.mediaType}`);
+      }
+      return toCanonicalArtifact(
+        store.createArtifact({
+          content: new TextDecoder('utf-8', { fatal: true }).decode(input.content),
+          description: input.description,
+          project: input.project,
+          title: input.title,
+          type,
+        }),
+      );
+    },
+    getArtifact: (id) => {
+      const artifact = store.getArtifact(id);
+      return artifact === null
+        ? null
+        : { ...toCanonicalArtifact(artifact), content: new TextEncoder().encode(artifact.content) };
+    },
+    listArtifacts: (query) => store.listArtifacts(query).map(toCanonicalArtifact),
+    removeArtifact: (id) => store.removeArtifact(id),
+    updateArtifact: () => {
+      throw new Error('Canonical updates are unavailable through the legacy test adapter');
+    },
+  };
+}
+
+async function defaultServices(): Promise<AppServices> {
+  const artifacts = await getDefaultByteNativeArtifactService();
+  return { artifacts, mcp: legacyArtifactStoreFromService(artifacts) };
+}
+
+function etagFor(artifact: ArtifactWithContent): string {
+  return `"${createHash('sha256').update(artifact.content).digest('base64url')}"`;
+}
+
+function matchesIfNoneMatch(header: string | undefined, etag: string): boolean {
+  if (header === undefined) {
+    return false;
+  }
+  return header.split(',').some((candidate) => {
+    const value = candidate.trim();
+    return value === '*' || value === etag || value.replace(/^W\//u, '') === etag;
+  });
+}
+
+function contentDisposition(filename: string): string {
+  const quoted = filename.replaceAll('"', String.raw`\"`);
+  return `inline; filename="${quoted}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+function legacyArtifact(artifact: ArtifactWithContent): LegacyArtifactWithContent {
+  const type = legacyTypeFromMediaType(artifact.mediaType);
+  if (type === undefined) {
+    throw new Error(`Unsupported text media type ${artifact.mediaType}`);
+  }
+  const {
+    collection: _collection,
+    filename: _filename,
+    mediaType: _mediaType,
+    ...fields
+  } = artifact;
+  return {
+    ...fields,
+    content: new TextDecoder('utf-8', { fatal: true }).decode(artifact.content),
+    type,
+  };
+}
+
+export function createApp(store?: ArtifactStore | AppServices): Hono {
   const app = new Hono();
-  const resolveService = (): Promise<ArtifactStore> =>
-    store === undefined ? getDefaultArtifactStore() : Promise.resolve(store);
+  const resolveServices = (): Promise<AppServices> =>
+    store === undefined
+      ? defaultServices()
+      : Promise.resolve(
+          'artifacts' in store ? store : { artifacts: canonicalFromLegacy(store), mcp: store },
+        );
 
   // Namespaced under /assets so dynamic routes (/mcp, /a/:id) can never be
   // shadowed by an asset filename or race a filesystem stat. serveStatic
@@ -48,7 +145,7 @@ export function createApp(store?: ArtifactStore): Hono {
   );
 
   app.get('/', async (c) => {
-    const artifacts = (await resolveService()).listArtifacts();
+    const artifacts = (await resolveServices()).artifacts.listArtifacts();
     return c.html(
       <Layout title="Artifacts">
         <HomePage artifacts={artifacts} />
@@ -64,7 +161,7 @@ export function createApp(store?: ArtifactStore): Hono {
   // so there's nothing 404-worthy about it coming back empty.
   app.get('/p/:project', async (c) => {
     const project = c.req.param('project');
-    const artifacts = (await resolveService()).listArtifacts({ project });
+    const artifacts = (await resolveServices()).artifacts.listArtifacts({ project });
     return c.html(
       <Layout title={`${project} · Artifacts`}>
         <ProjectPage artifacts={artifacts} project={project} />
@@ -79,9 +176,9 @@ export function createApp(store?: ArtifactStore): Hono {
   // makes store.getArtifact throw (see store.ts) — that's deliberately left
   // unguarded here too, so it surfaces as a 500 rather than masquerading as
   // an ordinary 404.
-  app.get('/a/:id', async (c) => {
+  app.on(['GET', 'HEAD'], '/a/:id', async (c) => {
     const id = c.req.param('id');
-    const artifact = (await resolveService()).getArtifact(id);
+    const artifact = (await resolveServices()).artifacts.getArtifact(id);
     if (!artifact) {
       return c.html(
         <Layout title="Artifact not found">
@@ -90,17 +187,47 @@ export function createApp(store?: ArtifactStore): Hono {
         404,
       );
     }
-    if (artifact.type === 'html') {
-      return c.html(artifact.content);
+    const renderingMode = legacyTypeFromMediaType(artifact.mediaType);
+    if (renderingMode === undefined) {
+      const etag = etagFor(artifact);
+      const headers: Record<string, string> = {
+        'Cache-Control': 'no-cache',
+        'Content-Disposition': contentDisposition(artifact.filename!),
+        'Content-Type': artifact.mediaType,
+        ETag: etag,
+        'X-Content-Type-Options': 'nosniff',
+      };
+      if (artifact.mediaType === 'image/svg+xml') {
+        headers['Content-Security-Policy'] =
+          "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+      }
+      if (matchesIfNoneMatch(c.req.header('If-None-Match'), etag)) {
+        return c.body(null, 304, headers);
+      }
+      return new Response(
+        c.req.method === 'HEAD' ? null : new Uint8Array(artifact.content).buffer,
+        {
+          headers: {
+            ...headers,
+            ...(c.req.method === 'HEAD'
+              ? { 'Content-Length': String(artifact.content.byteLength) }
+              : {}),
+          },
+          status: 200,
+        },
+      );
+    }
+    const legacy = legacyArtifact(artifact);
+    if (legacy.type === 'html') {
+      return c.html(legacy.content);
     }
     // Only `md` renders through the markdown pipeline; `txt` is passed
     // through untouched (ArtifactPage falls back to a plain <pre> whenever
     // `rendered` is undefined).
-    const rendered =
-      artifact.type === 'md' ? await renderMarkdownToHtml(artifact.content) : undefined;
+    const rendered = legacy.type === 'md' ? await renderMarkdownToHtml(legacy.content) : undefined;
     return c.html(
-      <Layout title={artifact.title}>
-        <ArtifactPage artifact={artifact} rendered={rendered} />
+      <Layout title={legacy.title}>
+        <ArtifactPage artifact={legacy} rendered={rendered} />
       </Layout>,
     );
   });
@@ -123,7 +250,7 @@ export function createApp(store?: ArtifactStore): Hono {
     if (c.req.method === 'GET') {
       return c.body(null, 405, { Allow: 'POST' });
     }
-    const server = createMcpServer(await resolveService());
+    const server = createMcpServer((await resolveServices()).mcp);
     const transport = new StreamableHTTPTransport({ enableJsonResponse: true });
     try {
       await server.connect(transport);

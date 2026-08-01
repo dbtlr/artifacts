@@ -47,10 +47,11 @@ export async function createArtifactStore({
   databasePath,
   filesDir,
 }: StoragePaths): Promise<ArtifactStore> {
-  mkdirSync(dirname(databasePath), { recursive: true });
-  const metadata = await SqliteArtifactMetadataStore.open(databasePath);
-  const content = new FilesystemArtifactContentStore(filesDir);
-  const service = createArtifactService(metadata, content);
+  const service = await createByteNativeArtifactService({ databasePath, filesDir });
+  return legacyArtifactStoreFromService(service);
+}
+
+export function legacyArtifactStoreFromService(service: ArtifactService): ArtifactStore {
   return {
     createArtifact: (input) => {
       const { content: text, type, ...metadataFields } = input;
@@ -84,7 +85,7 @@ export async function createArtifactStore({
         .map(toLegacyArtifact)
         .filter((artifact) => artifact !== null),
     removeArtifact: (id) => {
-      const artifact = metadata.find(id);
+      const artifact = service.getArtifact(id);
       if (artifact === null || legacyTypeFromMediaType(artifact.mediaType) === undefined) {
         return false;
       }
@@ -95,7 +96,7 @@ export async function createArtifactStore({
       if (type !== undefined) {
         assertLegacyType(type);
       }
-      const existing = metadata.find(id);
+      const existing = service.getArtifact(id);
       if (existing === null || legacyTypeFromMediaType(existing.mediaType) === undefined) {
         return null;
       }
@@ -107,6 +108,22 @@ export async function createArtifactStore({
       return updated === null ? null : toLegacyArtifact(updated);
     },
   };
+}
+
+let defaultByteNativeService: Promise<ArtifactService> | undefined;
+
+async function createDefaultByteNativeArtifactService(): Promise<ArtifactService> {
+  try {
+    return await createByteNativeArtifactService(resolveStoragePaths());
+  } catch (error) {
+    defaultByteNativeService = undefined;
+    throw error;
+  }
+}
+
+export function getDefaultByteNativeArtifactService(): Promise<ArtifactService> {
+  defaultByteNativeService ??= createDefaultByteNativeArtifactService();
+  return defaultByteNativeService;
 }
 
 let defaultStore: Promise<ArtifactStore> | undefined;
