@@ -443,6 +443,38 @@ describe('binary artifacts in browser routes', () => {
     expect(res.headers.get('etag')).toMatch(/^"[A-Za-z0-9_-]+"$/u);
   });
 
+  it.each([
+    ['JPEG', Uint8Array.from([255, 216, 255, 219]), 'image/jpeg', 'photo.jpeg'],
+    ['GIF', new TextEncoder().encode('GIF89a fixture'), 'image/gif', 'animation.gif'],
+    [
+      'WebP',
+      Uint8Array.from([82, 73, 70, 70, 0, 0, 0, 0, 87, 69, 66, 80]),
+      'image/webp',
+      'preview.webp',
+    ],
+  ] as const)(
+    'serves allowlisted %s bytes with canonical response headers',
+    async (_name, bytes, mediaType, filename) => {
+      const artifact = service.createArtifact({
+        content: bytes,
+        description: 'Browser binary fixture',
+        filename,
+        mediaType,
+        project: 'browser-files',
+        title: 'Binary Preview',
+      });
+
+      const res = await testApp.request(`/a/${artifact.id}`);
+
+      expect(res.status).toBe(200);
+      expect(new Uint8Array(await res.arrayBuffer())).toEqual(bytes);
+      expect(res.headers.get('content-type')).toBe(mediaType);
+      expect(res.headers.get('content-disposition')).toContain(`filename="${filename}"`);
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(res.headers.get('cache-control')).toBe('no-cache');
+    },
+  );
+
   it('uses an ASCII fallback and RFC 5987 encoding for non-ASCII filenames', async () => {
     const artifact = createBinary(
       Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
@@ -490,6 +522,21 @@ describe('binary artifacts in browser routes', () => {
     expect(head.headers.get('content-disposition')).toBe(get.headers.get('content-disposition'));
     expect(head.headers.get('etag')).toBe(get.headers.get('etag'));
     expect(head.headers.get('content-length')).toBe(get.headers.get('content-length'));
+  });
+
+  it('preserves the URL while an update changes the bytes and ETag', async () => {
+    const initial = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 1]);
+    const replacement = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 2]);
+    const artifact = createBinary(initial, 'image/png', 'preview.png');
+    const first = await testApp.request(`/a/${artifact.id}`);
+    const firstEtag = first.headers.get('etag');
+
+    const updated = service.updateArtifact(artifact.id, { content: replacement });
+    const second = await testApp.request(`/a/${artifact.id}`);
+
+    expect(updated?.id).toBe(artifact.id);
+    expect(new Uint8Array(await second.arrayBuffer())).toEqual(replacement);
+    expect(second.headers.get('etag')).not.toBe(firstEtag);
   });
 
   it('applies a restrictive CSP to SVG responses', async () => {

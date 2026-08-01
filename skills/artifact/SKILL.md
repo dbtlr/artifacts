@@ -1,11 +1,11 @@
 ---
 name: artifact
-description: Share a plan, design doc, status report, or diagram with a human as a persistent, linkable document via the Artifacts MCP server. Use when the user says "share this as an artifact", "give me a link to the plan", "publish this doc", "post a status update", "put this somewhere I can read it", or "share this with a link" — or whenever a phased plan, design doc/ADR, status report, or diagram is being produced for a human to open in a browser rather than kept as a local file.
+description: Share documents, images, and PDFs with a human as persistent links via the Artifacts MCP server. Use when the user asks to publish or share an artifact, document, diagram, generated image, or PDF with a link.
 ---
 
-# Artifact — Share Documents via Persistent Links
+# Artifact — Share Documents and Files via Persistent Links
 
-Publish a document to the Artifacts server and hand back a URL the user can open on any device. The same URL keeps working across edits, so a living document (a plan that's evolving, a status report that gets refreshed) should be updated in place, not re-created.
+Publish a document or file to the Artifacts server and hand back the returned URL. The same URL keeps working across edits, so living artifacts should be updated in place rather than re-created.
 
 ## Why This Skill Exists
 
@@ -13,27 +13,34 @@ Documents produced mid-task — a plan, a design doc, a status update, a diagram
 
 ## Core Workflow
 
-### Step 1: Look for an existing artifact first
+### Step 1: Look for an existing artifact or collection first
 
-Before creating anything, call `list_artifacts` (pass `project` if you know it) to check whether this document already exists as an artifact.
+Before creating anything, call `list_artifacts` (pass `project` if you know it) to check whether it already exists. For a multi-artifact result such as a document with generated images, call `list_collections` and filter `list_artifacts` by the chosen collection.
 
 - **Update beats duplicate for living documents.** A plan, status report, or design doc that's still evolving should be updated via `update_artifact`, not recreated — the URL stays the same across updates, so anyone holding the old link keeps seeing current content.
 - **Create only when genuinely new** — a document that hasn't existed before, or a distinct artifact from ones already listed (a new phase's plan is not the same artifact as the previous phase's).
-- When updating, `content` is a full replacement, not a diff. If you're editing rather than regenerating from scratch, call `get_artifact` first, edit its content, then `update_artifact` with the result (read-modify-write).
+- When updating, content is a full replacement, not a diff. If you're editing rather than regenerating, call `get_artifact` with `includeContent: true`, edit the result, then send the full replacement to `update_artifact`.
 
 ### Step 2: Choose metadata
 
 - **title** — short and human-scannable; it's what shows up in list views. ("Q3 Migration Plan", not "Plan for migrating the thing we discussed.")
 - **project** — a stable string per repo or initiative, reused across every artifact in that body of work (matches what `list_artifacts` filters on in Step 1). Pick it once and keep it consistent so Step 1 keeps finding the right artifacts.
 - **description** — one line, written for the list view, not the document body.
+- **collection** — optional shared metadata for related independent artifacts. Reuse one value for a document and its images so another agent can rediscover the set. A collection does not own its members.
 
-### Step 3: Choose a type
+### Step 3: Choose a media type and payload
 
-- **md** (default) — nearly everything: plans, design docs, status reports, diagrams, notes. Renders server-side with syntax-highlighted code, mermaid diagrams, and an auto-generated table of contents (once a document has two or more headings) with anchor links.
-- **html** — only for bespoke layouts or visuals a markdown template can't express (custom CSS, non-mermaid diagrams, interactive-free visual layouts). HTML is served as-is — no template chrome, no TOC.
-- **txt** — raw output: logs, command transcripts, anything not meant to be formatted.
+- **`text/markdown`** (document default) — plans, design docs, reports, diagrams, and notes. Send UTF-8 text as `content`.
+- **`text/html`** — bespoke layouts that Markdown cannot express. HTML is served as-is. Send it as `content`.
+- **`text/plain`** — logs and raw output. Send it as `content`.
+- **PNG, JPEG, GIF, WebP, SVG, or PDF** — use canonical `mediaType`, a safe `filename` whose extension agrees with it, and canonical base64 in `contentBase64`. The decoded limit is 10 MiB; binary files must not be empty and their signatures are validated.
 
-### Step 4: Pick a template, fill it, write it
+Current guidance uses `mediaType`. The legacy `type` field exists only for text-client compatibility.
+Never put binary bytes in `content`. If a shell fallback is unavoidable, base64-encode the file bytes
+explicitly; do not read them as text. Base64 consumes agent context, so resize or compress generated
+images before upload and request binary content only when it is needed.
+
+### Step 4: For documents, pick a template and write it
 
 Reference the template file directly rather than retyping it from memory — each is short and already structured for the renderer (headings for TOC, fenced code blocks with a language tag, mermaid where it fits). Read the template, replace every `{{TOKEN}}` placeholder, delete sections that don't apply, and pass the result as `content` to `add_artifact` (or `update_artifact`).
 
@@ -46,9 +53,25 @@ Reference the template file directly rather than retyping it from memory — eac
 
 None of these are mandatory — write plain markdown when a document doesn't fit any of them. They exist to save the boilerplate of getting headings and mermaid fences right for a document type that recurs often.
 
-### Step 5: Share the link
+### Step 5: For embeds, create the file first
 
-`add_artifact` and `update_artifact` both return the artifact's `id` and its resolved `url`. Hand the `url` to the user directly rather than the id alone — that's the whole point of the round trip.
+Create each image or PDF before the containing document, then use the absolute `url` returned by
+`add_artifact` or `update_artifact`. Do not reconstruct the hostname.
+
+```html
+<img src="https://artifacts.example/a/returned-id" alt="Descriptive alternative text">
+```
+
+```md
+![Descriptive alternative text](https://artifacts.example/a/returned-id)
+```
+
+Give the file and document the same collection for rediscovery. Files remain independent artifacts:
+deleting an embedded file breaks the embed, and deleting the document does not delete its files.
+
+### Step 6: Share the link
+
+`add_artifact` and `update_artifact` both return the artifact's `id` and resolved `url`. Hand the `url` to the user directly rather than the id alone.
 
 ## Important Behaviors
 
@@ -57,6 +80,8 @@ None of these are mandatory — write plain markdown when a document doesn't fit
 - **Code blocks should declare a language** (` ```ts `, ` ```bash `, etc.) so they get syntax highlighting instead of a plain-text fallback.
 - **The TOC only appears once a document has two or more headings** — a single-heading document (or one relying only on prose) won't get one, which is fine for short documents but worth knowing if you expect a nav.
 - **Don't invent a new `project` string per artifact.** Reusing the same one is what makes Step 1's `list_artifacts` filter useful later, for you or another agent.
+- **Discovery is metadata-only by default.** `add_artifact`, `update_artifact`, `list_artifacts`, and ordinary `get_artifact` do not echo binary base64. Pass `includeContent: true` only for explicit retrieval; binary content is returned as `contentBase64` and text as `content`.
+- **An oversized request may fail before the tool runs.** The HTTP request-body guard can reject base64 plus JSON overhead before an MCP error result is produced.
 
 ## Setup (operator step, not agent-facing)
 

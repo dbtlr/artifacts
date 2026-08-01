@@ -271,6 +271,22 @@ describe('binary payloads and collections', () => {
       expect(fetched.contentBase64).toBe(png.toString('base64'));
       expect(fetched.content).toBeUndefined();
 
+      const replacement = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 4, 5, 6]);
+      const updated = await callTool(
+        'update_artifact',
+        { contentBase64: replacement.toString('base64'), id: added.id },
+        artifactSchema,
+      );
+      expect(updated.url).toBe(added.url);
+      expect(updated.contentBase64).toBeUndefined();
+
+      const refetched = await callTool(
+        'get_artifact',
+        { id: added.id, includeContent: true },
+        artifactSchema,
+      );
+      expect(refetched.contentBase64).toBe(replacement.toString('base64'));
+
       const listed = await callTool(
         'list_artifacts',
         { collection: 'image train' },
