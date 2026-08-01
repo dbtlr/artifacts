@@ -225,7 +225,7 @@ export function createArtifactService(
         try {
           content.remove(id, previous.mediaType);
         } catch (error) {
-          runRollback('update', rollbackContent);
+          runRollback('update', () => content.remove(id, next.mediaType));
           throw error;
         }
       }

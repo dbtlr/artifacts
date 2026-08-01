@@ -132,7 +132,12 @@ describe('ArtifactService lost metadata races', () => {
           }
           return true;
         },
-        write: (_id, mediaType) => writes.push(mediaType),
+        write: (_id, mediaType) => {
+          writes.push(mediaType);
+          if (mediaType === 'image/png') {
+            throw new Error('redundant old-path rewrite must not run');
+          }
+        },
       },
     );
 
@@ -143,7 +148,7 @@ describe('ArtifactService lost metadata races', () => {
         mediaType: 'application/pdf',
       }),
     ).toThrow('old path removal failed');
-    expect(writes).toEqual(['application/pdf', 'image/png']);
+    expect(writes).toEqual(['application/pdf']);
     expect(removals).toEqual(['image/png', 'application/pdf']);
   });
 });
