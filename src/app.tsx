@@ -11,7 +11,7 @@ import { HomePage } from './components/home-page.js';
 import { Layout } from './components/layout.js';
 import { NotFoundPage } from './components/not-found-page.js';
 import { ProjectPage } from './components/project-page.js';
-import type { ArtifactStore } from './data/store.js';
+import type { ArtifactService } from './data/store.js';
 import { getDefaultArtifactStore } from './data/store.js';
 import { renderMarkdownToHtml } from './markdown.js';
 import { createMcpServer } from './mcp/server.js';
@@ -31,9 +31,10 @@ const MAX_MCP_BODY_BYTES = 10 * 1024 * 1024;
 // default sqlite-backed store is only ever touched lazily, on the first
 // actual /mcp request — never merely by importing this module. Tests pass a
 // temp-directory store explicitly instead of touching the repo's data/.
-export function createApp(store?: ArtifactStore): Hono {
+export function createApp(store?: ArtifactService): Hono {
   const app = new Hono();
-  const resolveStore = (): ArtifactStore => store ?? getDefaultArtifactStore();
+  const resolveService = (): Promise<ArtifactService> =>
+    store === undefined ? getDefaultArtifactStore() : Promise.resolve(store);
 
   // Namespaced under /assets so dynamic routes (/mcp, /a/:id) can never be
   // shadowed by an asset filename or race a filesystem stat. serveStatic
@@ -46,8 +47,8 @@ export function createApp(store?: ArtifactStore): Hono {
     }),
   );
 
-  app.get('/', (c) => {
-    const artifacts = resolveStore().listArtifacts();
+  app.get('/', async (c) => {
+    const artifacts = (await resolveService()).listArtifacts();
     return c.html(
       <Layout title="Artifacts">
         <HomePage artifacts={artifacts} />
@@ -61,9 +62,9 @@ export function createApp(store?: ArtifactStore): Hono {
   // with zero artifacts (typo, or one that was never created) still renders
   // the ordinary list UI with an empty state — it's a filter, not a lookup,
   // so there's nothing 404-worthy about it coming back empty.
-  app.get('/p/:project', (c) => {
+  app.get('/p/:project', async (c) => {
     const project = c.req.param('project');
-    const artifacts = resolveStore().listArtifacts({ project });
+    const artifacts = (await resolveService()).listArtifacts({ project });
     return c.html(
       <Layout title={`${project} · Artifacts`}>
         <ProjectPage artifacts={artifacts} project={project} />
@@ -80,7 +81,7 @@ export function createApp(store?: ArtifactStore): Hono {
   // an ordinary 404.
   app.get('/a/:id', async (c) => {
     const id = c.req.param('id');
-    const artifact = resolveStore().getArtifact(id);
+    const artifact = (await resolveService()).getArtifact(id);
     if (!artifact) {
       return c.html(
         <Layout title="Artifact not found">
@@ -122,7 +123,7 @@ export function createApp(store?: ArtifactStore): Hono {
     if (c.req.method === 'GET') {
       return c.body(null, 405, { Allow: 'POST' });
     }
-    const server = createMcpServer(resolveStore());
+    const server = createMcpServer(await resolveService());
     const transport = new StreamableHTTPTransport({ enableJsonResponse: true });
     try {
       await server.connect(transport);
