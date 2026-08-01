@@ -158,7 +158,7 @@ export function legacyArtifactStoreFromService(service: ArtifactService): Artifa
         .map(toLegacyArtifact)
         .filter((artifact) => artifact !== null),
     removeArtifact: (id) => {
-      const artifact = service.getArtifact(id);
+      const artifact = service.findArtifact(id);
       if (artifact === null || legacyTypeFromMediaType(artifact.mediaType) === undefined) {
         return false;
       }
@@ -169,7 +169,7 @@ export function legacyArtifactStoreFromService(service: ArtifactService): Artifa
       if (type !== undefined) {
         assertLegacyType(type);
       }
-      const existing = service.getArtifact(id);
+      const existing = service.findArtifact(id);
       if (existing === null || legacyTypeFromMediaType(existing.mediaType) === undefined) {
         return null;
       }
@@ -188,7 +188,7 @@ let defaultByteNativeService: Promise<ArtifactService> | undefined;
 
 async function createDefaultArtifactStore(): Promise<ArtifactStore> {
   try {
-    return await createArtifactStore(resolveStoragePaths());
+    return legacyArtifactStoreFromService(await getDefaultByteNativeArtifactService());
   } catch (error) {
     defaultStore = undefined;
     throw error;
