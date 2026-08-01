@@ -197,7 +197,9 @@ export const sqliteMigrations: RunnableMigration<DatabaseSync>[] = [
     name: '0002-binary-artifact-schema',
     up: async ({ context: database }) => {
       const unsupported = database
-        .prepare("SELECT id, type FROM artifacts WHERE type NOT IN ('html', 'md', 'txt') LIMIT 1")
+        .prepare(
+          "SELECT id, type FROM artifacts WHERE type IS NULL OR type NOT IN ('html', 'md', 'txt') ORDER BY rowid LIMIT 1",
+        )
         .get();
       if (unsupported !== undefined) {
         throw new Error(

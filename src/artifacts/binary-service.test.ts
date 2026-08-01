@@ -112,6 +112,21 @@ describe('byte-native artifact service', () => {
     ).not.toThrow();
   });
 
+  it.each([
+    ['XML lookalike', '<?xmlhack?>\n<svg></svg>'],
+    ['unrelated doctype', '<!DOCTYPE html>\n<svg></svg>'],
+  ])('rejects an SVG with an %s prologue', (_name, source) => {
+    expect(() =>
+      service.createArtifact(
+        binaryInput({
+          content: new TextEncoder().encode(source),
+          filename: 'invalid.svg',
+          mediaType: 'image/svg+xml',
+        }),
+      ),
+    ).toThrow('signature does not match');
+  });
+
   it('rejects invalid UTF-8 text before durable mutation', () => {
     expect(() =>
       service.createArtifact({
