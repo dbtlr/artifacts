@@ -54,6 +54,7 @@ export type ArtifactContentStore = {
 
 export type ArtifactService = {
   createArtifact: (input: CreateArtifactInput) => Artifact;
+  findArtifact: (id: string) => Artifact | null;
   getArtifact: (id: string) => ArtifactWithContent | null;
   listArtifacts: (query?: ListArtifactsQuery) => Artifact[];
   removeArtifact: (id: string) => boolean;

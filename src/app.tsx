@@ -11,8 +11,12 @@ import { HomePage } from './components/home-page.js';
 import { Layout } from './components/layout.js';
 import { NotFoundPage } from './components/not-found-page.js';
 import { ProjectPage } from './components/project-page.js';
-import type { ArtifactStore } from './data/store.js';
-import { getDefaultArtifactStore } from './data/store.js';
+import type { ArtifactService, ArtifactStore } from './data/store.js';
+import {
+  adaptLegacyArtifactStore,
+  getDefaultArtifactStore,
+  getDefaultByteNativeArtifactService,
+} from './data/store.js';
 import { renderMarkdownToHtml } from './markdown.js';
 import { createMcpServer } from './mcp/server.js';
 
@@ -25,16 +29,25 @@ import { createMcpServer } from './mcp/server.js';
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 const STATIC_ROOT = process.env.ARTIFACTS_STATIC_ROOT ?? join(moduleDir, '..', 'dist', 'public');
 
-const MAX_MCP_BODY_BYTES = 10 * 1024 * 1024;
+const MAX_MCP_BODY_BYTES = 16 * 1024 * 1024;
 
 // `store` is left undefined in production (`export const app` below), so the
 // default sqlite-backed store is only ever touched lazily, on the first
 // actual /mcp request — never merely by importing this module. Tests pass a
 // temp-directory store explicitly instead of touching the repo's data/.
-export function createApp(store?: ArtifactStore): Hono {
+export function createApp(store?: ArtifactStore, mcpService?: ArtifactService): Hono {
   const app = new Hono();
   const resolveService = (): Promise<ArtifactStore> =>
     store === undefined ? getDefaultArtifactStore() : Promise.resolve(store);
+  const resolveMcpService = (): Promise<ArtifactService> => {
+    if (mcpService !== undefined) {
+      return Promise.resolve(mcpService);
+    }
+    if (store !== undefined) {
+      return Promise.resolve(adaptLegacyArtifactStore(store));
+    }
+    return getDefaultByteNativeArtifactService();
+  };
 
   // Namespaced under /assets so dynamic routes (/mcp, /a/:id) can never be
   // shadowed by an asset filename or race a filesystem stat. serveStatic
@@ -123,7 +136,7 @@ export function createApp(store?: ArtifactStore): Hono {
     if (c.req.method === 'GET') {
       return c.body(null, 405, { Allow: 'POST' });
     }
-    const server = createMcpServer(await resolveService());
+    const server = createMcpServer(await resolveMcpService());
     const transport = new StreamableHTTPTransport({ enableJsonResponse: true });
     try {
       await server.connect(transport);
