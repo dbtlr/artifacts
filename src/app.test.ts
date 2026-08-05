@@ -37,13 +37,6 @@ describe('app', () => {
     expect(body).toContain('<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"/>');
     expect(body).toContain('<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png"/>');
   });
-
-  it('redirects /favicon.ico to the PNG icon for pages without the layout head', async () => {
-    const res = await app.request('/favicon.ico');
-
-    expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe('/assets/favicon-32.png');
-  });
 });
 
 describe('homepage and project list', () => {

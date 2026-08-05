@@ -110,10 +110,18 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
     }),
   );
 
-  // Raw html artifacts are served without the Layout head, so browsers fall
-  // back to requesting /favicon.ico for those pages; point it at the real
-  // icon instead of 404ing every artifact tab.
-  app.get('/favicon.ico', (c) => c.redirect('/assets/favicon-32.png'));
+  // Root-level icon endpoints, serving real bytes rather than redirecting:
+  // raw html artifacts render without the Layout head, so browsers and
+  // tab-icon probes (t3code among them) fall back to these well-known root
+  // paths, and naive probes don't follow redirects. /favicon.ico gets the
+  // 32px PNG's bytes with an image/png content type — modern clients sniff
+  // the content and none of them require a real ICO container.
+  app.use('/favicon.svg', serveStatic({ path: 'favicon.svg', root: STATIC_ROOT }));
+  app.use('/favicon.ico', serveStatic({ path: 'favicon-32.png', root: STATIC_ROOT }));
+  app.use(
+    '/apple-touch-icon.png',
+    serveStatic({ path: 'apple-touch-icon.png', root: STATIC_ROOT }),
+  );
 
   app.get('/', async (c) => {
     const artifacts = (await resolveServices()).artifacts.listArtifacts();
