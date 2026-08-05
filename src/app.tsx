@@ -110,6 +110,11 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
     }),
   );
 
+  // Raw html artifacts are served without the Layout head, so browsers fall
+  // back to requesting /favicon.ico for those pages; point it at the real
+  // icon instead of 404ing every artifact tab.
+  app.get('/favicon.ico', (c) => c.redirect('/assets/favicon-32.png'));
+
   app.get('/', async (c) => {
     const artifacts = (await resolveServices()).artifacts.listArtifacts();
     return c.html(

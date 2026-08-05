@@ -26,6 +26,24 @@ describe('app', () => {
     expect(body).toContain('Artifacts');
     expect(body).toContain('/assets/app.css');
   });
+
+  it('links the favicon set in the layout head', async () => {
+    const res = await app.request('/');
+
+    const body = await res.text();
+    expect(body).toContain(
+      '<link rel="icon" href="/assets/favicon-32.png" type="image/png" sizes="32x32"/>',
+    );
+    expect(body).toContain('<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"/>');
+    expect(body).toContain('<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png"/>');
+  });
+
+  it('redirects /favicon.ico to the PNG icon for pages without the layout head', async () => {
+    const res = await app.request('/favicon.ico');
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/assets/favicon-32.png');
+  });
 });
 
 describe('homepage and project list', () => {

@@ -65,6 +65,10 @@ export default defineConfig({
     }),
     tailwindcss(),
   ],
+  // Favicon files, copied verbatim into dist/public alongside the built
+  // assets. Kept under src/ (not the default ./public) so the Docker builder
+  // stage — which only COPYs src plus the config files — still ships them.
+  publicDir: 'src/public',
   staged: {
     '*': 'vp check --fix',
   },
