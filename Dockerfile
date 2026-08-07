@@ -9,7 +9,7 @@
 # WORKDIR and the COPY layout below such that dist/server.js ends up at
 # <WORKDIR>/dist/server.js and dist/public/ stays alongside it.
 
-FROM node:24-alpine AS builder
+FROM node:25-alpine AS builder
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -18,7 +18,7 @@ COPY tsconfig.json vite.config.ts ./
 COPY src ./src
 RUN pnpm run build
 
-FROM node:24-alpine AS runner
+FROM node:25-alpine AS runner
 WORKDIR /app
 RUN corepack enable
 ENV NODE_ENV=production
