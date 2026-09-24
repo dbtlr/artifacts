@@ -433,7 +433,9 @@ describe('binary artifacts in browser routes', () => {
     expect(body).toContain('browser-files');
     expect(body).toContain('Browser binary fixture');
     expect(body).not.toContain('preview.png');
-    expect(body).not.toContain('ART-22');
+    // The gallery surfaces the collection and points each card at its thumbnail.
+    expect(body).toContain('ART-22');
+    expect(body).toContain(`src="/a/${artifact.id}/thumb"`);
   });
 
   it('serves allowlisted image bytes with inline, sniffing, and revalidation headers', async () => {
@@ -562,6 +564,103 @@ describe('binary artifacts in browser routes', () => {
     expect(res.headers.get('content-security-policy')).toBe(
       "default-src 'none'; style-src 'unsafe-inline'; sandbox",
     );
+  });
+});
+
+describe('gallery index', () => {
+  let dataDir: string;
+  let service: ArtifactService;
+  let testApp: ReturnType<typeof createApp>;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), 'artifacts-gallery-'));
+    service = await createByteNativeArtifactService({
+      databasePath: join(dataDir, 'artifacts.db'),
+      filesDir: join(dataDir, 'artifacts'),
+    });
+    testApp = createApp({ artifacts: service, mcp: service });
+    service.createArtifact({
+      content: new TextEncoder().encode('<h1>a</h1>'),
+      description: 'An html one',
+      mediaType: 'text/html',
+      project: 'scanner',
+      title: 'Html in scanner',
+    });
+    service.createArtifact({
+      content: new TextEncoder().encode('# b'),
+      description: 'A markdown one',
+      mediaType: 'text/markdown',
+      project: 'scanner',
+      title: 'Markdown in scanner',
+    });
+    service.createArtifact({
+      content: new TextEncoder().encode('c'),
+      description: 'A text one',
+      mediaType: 'text/plain',
+      project: 'side project',
+      title: 'Text in side project',
+    });
+  });
+
+  afterEach(async () => {
+    await rm(dataDir, { force: true, recursive: true });
+  });
+
+  it('renders project and kind filter links with counts', async () => {
+    const body = await (await testApp.request('/')).text();
+
+    expect(body).toContain('href="/p/scanner"');
+    expect(body).toContain('href="/p/side%20project"');
+    expect(body).toContain('href="/?kind=html"');
+    expect(body).toContain('href="/?kind=md"');
+    expect(body).toContain('href="/?kind=txt"');
+    // Counts sit next to their labels: scanner has 2, html has 1.
+    expect(body).toMatch(/scanner<[^>]*>\s*<[^>]*>2</u);
+    expect(body).toMatch(/html<[^>]*>\s*<[^>]*>1</u);
+  });
+
+  it('filters the home gallery by kind and keeps the project links', async () => {
+    const body = await (await testApp.request('/?kind=md')).text();
+
+    expect(body).toContain('Markdown in scanner');
+    expect(body).not.toContain('Html in scanner');
+    expect(body).not.toContain('Text in side project');
+    expect(body).toContain('href="/p/side%20project"');
+  });
+
+  it('filters a project page by kind with project-scoped kind links', async () => {
+    const body = await (await testApp.request('/p/scanner?kind=html')).text();
+
+    expect(body).toContain('Html in scanner');
+    expect(body).not.toContain('Markdown in scanner');
+    expect(body).toContain('href="/p/scanner?kind=md"');
+    expect(body).not.toContain('kind=txt');
+  });
+
+  it('shows every artifact for an unknown kind', async () => {
+    const body = await (await testApp.request('/?kind=exe')).text();
+
+    expect(body).toContain('Html in scanner');
+    expect(body).toContain('Text in side project');
+  });
+
+  it('serves a kind-specific SVG placeholder at /a/:id/thumb', async () => {
+    const artifact = service.listArtifacts({ project: 'side project' })[0]!;
+
+    const res = await testApp.request(`/a/${artifact.id}/thumb`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('image/svg+xml');
+    expect(res.headers.get('cache-control')).toBe('no-cache');
+    const body = await res.text();
+    expect(body).toContain('<svg');
+    expect(body).toContain('txt');
+  });
+
+  it('returns 404 from /a/:id/thumb for an unknown artifact', async () => {
+    const res = await testApp.request('/a/nope/thumb');
+
+    expect(res.status).toBe(404);
   });
 });
 

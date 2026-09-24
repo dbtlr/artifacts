@@ -2,18 +2,21 @@ import type { FC, PropsWithChildren } from 'hono/jsx';
 
 const STYLESHEET_HREF = '/assets/app.css';
 
-type LayoutProps = PropsWithChildren<{ title: string }>;
+// `wide` is for the gallery pages, whose thumbnail grid needs the room; the
+// artifact reading pages keep the narrower measure.
+type LayoutProps = PropsWithChildren<{ title: string; wide?: boolean }>;
 
 // Shared server-rendered shell. hono/jsx renders to a string on the server —
 // there is no hydration, and no client-side script here in the shell itself.
 // (ArtifactPage conditionally adds the one script tag this app ever emits —
 // the locally-bundled mermaid entry — only on md pages whose content
 // actually contains a diagram; see its MERMAID_SCRIPT_SRC comment.)
-export const Layout: FC<LayoutProps> = ({ title, children }) => (
+export const Layout: FC<LayoutProps> = ({ title, wide = false, children }) => (
   <html lang="en">
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <meta name="color-scheme" content="light dark" />
       <title>{title}</title>
       {/* PNG before SVG: Safari has no SVG-favicon support and takes the PNG;
           Chromium and Firefox prefer the SVG via its declared type. */}
@@ -22,8 +25,10 @@ export const Layout: FC<LayoutProps> = ({ title, children }) => (
       <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
       <link rel="stylesheet" href={STYLESHEET_HREF} />
     </head>
-    <body class="min-h-screen bg-stone-50 text-stone-900 antialiased dark:bg-stone-950 dark:text-stone-100">
-      <div class="mx-auto max-w-3xl px-4 py-10">{children}</div>
+    <body class="min-h-screen bg-stone-50 text-stone-900 antialiased dark:bg-black dark:text-stone-100">
+      <div class={wide ? 'mx-auto max-w-6xl px-4 py-6' : 'mx-auto max-w-3xl px-4 py-10'}>
+        {children}
+      </div>
     </body>
   </html>
 );

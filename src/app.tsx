@@ -20,8 +20,10 @@ import type {
   LegacyArtifactWithContent,
 } from './data/store.js';
 import { adaptLegacyArtifactStore, getDefaultByteNativeArtifactService } from './data/store.js';
+import { buildIndexView, kindOf } from './index-view.js';
 import { renderMarkdownToHtml } from './markdown.js';
 import { createMcpServer } from './mcp/server.js';
+import { placeholderSvg } from './thumbnails/placeholder.js';
 
 // Resolve the static asset root relative to this module, not process.cwd(),
 // so a different WORKDIR/cwd (e.g. Docker) can't silently 404 every asset.
@@ -123,29 +125,47 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
     serveStatic({ path: 'apple-touch-icon.png', root: STATIC_ROOT }),
   );
 
+  // `?kind=html` narrows either gallery to one file kind; an unknown kind is
+  // ignored rather than 404ed, for the same reason an unknown project is.
   app.get('/', async (c) => {
     const artifacts = (await resolveServices()).artifacts.listArtifacts();
+    const view = buildIndexView(artifacts, { kind: c.req.query('kind') });
     return c.html(
-      <Layout title="Artifacts">
-        <HomePage artifacts={artifacts} />
+      <Layout title="Artifacts" wide>
+        <HomePage view={view} />
       </Layout>,
     );
   });
 
   // Hono's c.req.param() already URL-decodes a segment that contains a `%`
   // (see hono/dist/request.js), so `project` here is the raw project name —
-  // matching what ArtifactList encoded into the /p/:project link. A project
+  // matching what the gallery encoded into the /p/:project link. A project
   // with zero artifacts (typo, or one that was never created) still renders
-  // the ordinary list UI with an empty state — it's a filter, not a lookup,
-  // so there's nothing 404-worthy about it coming back empty.
+  // the ordinary gallery UI with an empty state — it's a filter, not a
+  // lookup, so there's nothing 404-worthy about it coming back empty.
   app.get('/p/:project', async (c) => {
     const project = c.req.param('project');
     const artifacts = (await resolveServices()).artifacts.listArtifacts({ project });
+    const view = buildIndexView(artifacts, { kind: c.req.query('kind') });
     return c.html(
-      <Layout title={`${project} · Artifacts`}>
-        <ProjectPage artifacts={artifacts} project={project} />
+      <Layout title={`${project} · Artifacts`} wide>
+        <ProjectPage project={project} view={view} />
       </Layout>,
     );
+  });
+
+  // The gallery card's <img>. Until a rendered preview exists this answers
+  // with a drawn per-kind placeholder; `no-cache` so a browser revalidates and
+  // picks up the real image once it lands.
+  app.get('/a/:id/thumb', async (c) => {
+    const artifact = (await resolveServices()).artifacts.findArtifact(c.req.param('id'));
+    if (!artifact) {
+      return c.body(null, 404);
+    }
+    return c.body(placeholderSvg(kindOf(artifact.mediaType)), 200, {
+      'Cache-Control': 'no-cache',
+      'Content-Type': 'image/svg+xml; charset=utf-8',
+    });
   });
 
   // html artifacts are served as-is — CLAUDE.md: "HTML documents are
