@@ -109,7 +109,7 @@ export function adaptLegacyArtifactStore(store: ArtifactStore): ArtifactService 
 export async function createByteNativeArtifactService({
   databasePath,
   filesDir,
-}: StoragePaths): Promise<ArtifactService> {
+}: Pick<StoragePaths, 'databasePath' | 'filesDir'>): Promise<ArtifactService> {
   mkdirSync(dirname(databasePath), { recursive: true });
   const metadata = await SqliteArtifactMetadataStore.open(databasePath);
   const content = new FilesystemArtifactContentStore(filesDir);
@@ -119,7 +119,7 @@ export async function createByteNativeArtifactService({
 export async function createArtifactStore({
   databasePath,
   filesDir,
-}: StoragePaths): Promise<ArtifactStore> {
+}: Pick<StoragePaths, 'databasePath' | 'filesDir'>): Promise<ArtifactStore> {
   const service = await createByteNativeArtifactService({ databasePath, filesDir });
   return legacyArtifactStoreFromService(service);
 }

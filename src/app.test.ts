@@ -13,6 +13,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { z } from 'zod';
 
 import { app, createApp } from './app.js';
+import { FilesystemThumbnailStore } from './data/filesystem-thumbnail-store.js';
 import type { ArtifactService, ArtifactStore } from './data/store.js';
 import { createArtifactStore, createByteNativeArtifactService } from './data/store.js';
 
@@ -570,6 +571,7 @@ describe('binary artifacts in browser routes', () => {
 describe('gallery index', () => {
   let dataDir: string;
   let service: ArtifactService;
+  let thumbnails: FilesystemThumbnailStore;
   let testApp: ReturnType<typeof createApp>;
 
   beforeEach(async () => {
@@ -661,6 +663,43 @@ describe('gallery index', () => {
     const res = await testApp.request('/a/nope/thumb');
 
     expect(res.status).toBe(404);
+  });
+
+  describe('with a thumbnail store', () => {
+    const jpeg = Uint8Array.from([255, 216, 255, 224, 0, 16]);
+
+    beforeEach(() => {
+      thumbnails = new FilesystemThumbnailStore(join(dataDir, 'thumbs'));
+      testApp = createApp({ artifacts: service, mcp: service, thumbnails });
+    });
+
+    it('serves the stored JPEG with an ETag, and 304 when it matches', async () => {
+      const artifact = service.listArtifacts({ project: 'scanner' })[0]!;
+      thumbnails.write(artifact.id, jpeg);
+
+      const res = await testApp.request(`/a/${artifact.id}/thumb`);
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toBe('image/jpeg');
+      expect(res.headers.get('cache-control')).toBe('no-cache');
+      const etag = res.headers.get('etag');
+      expect(etag).toMatch(/^"[A-Za-z0-9_-]+"$/u);
+      expect(new Uint8Array(await res.arrayBuffer())).toEqual(jpeg);
+
+      const revalidated = await testApp.request(`/a/${artifact.id}/thumb`, {
+        headers: { 'If-None-Match': etag! },
+      });
+      expect(revalidated.status).toBe(304);
+    });
+
+    it('falls back to the placeholder for an artifact without a stored preview', async () => {
+      const artifact = service.listArtifacts({ project: 'scanner' })[0]!;
+
+      const res = await testApp.request(`/a/${artifact.id}/thumb`);
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('image/svg+xml');
+    });
   });
 });
 
