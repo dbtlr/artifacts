@@ -153,9 +153,21 @@ Direct development uses `.env.development` and intentionally separate paths:
 | `ARTIFACTS_PUBLIC_BASE_URL` | `http://localhost:3000` |
 | `ARTIFACTS_FILES_DIR` | `data/development/files` |
 | `ARTIFACTS_DATABASE_PATH` | `data/development/database/artifacts.db` |
+| `ARTIFACTS_THUMBS_DIR` | `data/development/thumbs` |
+| `ARTIFACTS_CHROMIUM_PATH` | probed: Alpine `chromium`, Linux `google-chrome`, macOS Chrome |
 
 See `.env.development.example` for copyable overrides. Docker mount variables and direct-runtime
 path variables are deliberately different; one is not an alias for the other.
+
+### Gallery previews
+
+The index shows a screenshot of every artifact. A headless Chromium renders each artifact's own
+page after it is created or updated, off the request path, and the JPEG is stored under the
+thumbnails directory. Until it exists the card shows a drawn placeholder for the file kind, and a
+PDF keeps its placeholder because headless Chromium downloads PDFs instead of drawing them. Previews
+are derived data: the server re-renders any that are missing at startup, so the thumbnails directory
+needs no backup and no mount. Without a Chromium the server logs one notice and keeps the
+placeholders.
 
 ## Development
 
@@ -197,8 +209,10 @@ SQLite while byte-native content lives in a separate files directory. The MCP ad
 base64 for binary transport; base64 is not part of the storage or service model. Markdown is rendered on the server
 with syntax highlighting; Mermaid diagrams are rendered in the browser. Allowlisted images and PDFs
 are served directly from `/a/:id`; SVG responses receive an additional restrictive content security
-policy. The Docker image is a two-stage Alpine build that runs as the non-root `node` user and writes
-only to its two persistence mounts.
+policy. Gallery previews are screenshots taken by Alpine's Chromium package, driven by
+playwright-core from a serial in-process queue. The Docker image is a two-stage Alpine build that
+runs as the non-root `node` user and writes only to its two persistence mounts and the derived
+thumbnails directory.
 
 The metadata and content adapters are deliberately narrow seams for a future hosting requirement,
 not a configurable backend system. PostgreSQL, object storage, multipart browser uploads, presigned
