@@ -50,7 +50,7 @@ describe('buildIndexView', () => {
     ]);
   });
 
-  it('filters items by kind while keeping the full kind counts for the filter row', () => {
+  it('filters items by kind while keeping the full kind counts for the header links', () => {
     const view = buildIndexView(all, { kind: 'html' });
 
     expect(view.items.map((item) => item.id)).toEqual(['1', '4', '5']);

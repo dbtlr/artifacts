@@ -69,9 +69,11 @@ describe('createPlaywrightRenderer without a Chromium', () => {
 });
 
 // Needs a real Chromium: skipped where none is found (see resolveChromiumPath).
-// A cold Chromium launch lands inside the first test, so the whole block
-// gets a timeout well past vitest's 5s default.
+// Every test here drives a real browser, so the block gets a timeout well
+// past vitest's 5s default; the cold launch itself happens in beforeAll
+// under a larger budget still, so no single test pays for it.
 const CHROMIUM_TIMEOUT_MS = 30_000;
+const WARM_UP_TIMEOUT_MS = 120_000;
 
 describe.skipIf(chromiumPath === undefined)(
   'createPlaywrightRenderer',
@@ -152,7 +154,11 @@ describe.skipIf(chromiumPath === undefined)(
       app.get('/a/slow', (c) => c.html('<!doctype html><body><img src="/a/drip">slow</body>'));
       ({ server, url: baseUrl } = await listen(app));
       renderer = createPlaywrightRenderer({ executablePath: chromiumPath });
-    });
+      // Pay for the cold Chromium launch here, with a generous hook budget,
+      // rather than inside whichever test happens to run first: on a loaded
+      // CI runner the launch alone has exceeded a test's timeout.
+      await renderer.render({ id: 'warm', mediaType: 'text/html', url: `${baseUrl}/a/page` });
+    }, WARM_UP_TIMEOUT_MS);
 
     afterAll(async () => {
       await renderer.close();
