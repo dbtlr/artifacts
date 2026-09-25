@@ -83,17 +83,33 @@ async function confineToOrigin(context: BrowserContext, origin: string): Promise
     const allowed = request.method() === 'GET' && new URL(request.url()).origin === origin;
     return allowed ? route.continue() : route.abort('blockedbyclient');
   });
+  await context.addInitScript(removeWebRtc);
 }
 
 // TCP port 9 (discard) on loopback: nothing listens there, so proxied
 // connections are refused at once rather than hanging.
 const DEAD_PROXY = 'http://127.0.0.1:9';
 
-function proxyFencedTo(origin: string): { bypass: string; server: string } {
+export function proxyFencedTo(origin: string): { bypass: string; server: string } {
   // `<-loopback>` removes Chromium's implicit "never proxy loopback" rule,
   // so 127.0.0.1 on any other port goes to the dead proxy like everything
-  // else; the one host:port bypass is this server.
-  return { bypass: `<-loopback>,${new URL(origin).host}`, server: DEAD_PROXY };
+  // else; the one host:port bypass is this server. The port is always
+  // spelled out: URL.host drops a default port, and a bare hostname in a
+  // bypass rule matches every port on it.
+  const url = new URL(origin);
+  const defaultPort = url.protocol === 'https:' ? '443' : '80';
+  const port = url.port === '' ? defaultPort : url.port;
+  return { bypass: `<-loopback>,${url.hostname}:${port}`, server: DEAD_PROXY };
+}
+
+// WebRTC talks UDP to STUN/TURN servers and resolves their hostnames on its
+// own, past both the proxy and the request filter, so it is removed from
+// every document the render context creates. It exists on windows only,
+// never in workers, so the init script covers it fully.
+function removeWebRtc(): void {
+  for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCIceTransport']) {
+    Reflect.deleteProperty(globalThis, name);
+  }
 }
 
 async function closeQuietly(context: BrowserContext): Promise<void> {
@@ -131,9 +147,6 @@ export function createPlaywrightRenderer({
           // boundary here anyway.
           '--no-sandbox',
           '--disable-dev-shm-usage',
-          // WebRTC ignores the proxy; with this policy it sends no UDP of
-          // its own, and TURN over TCP goes through the dead proxy.
-          '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
         ],
         proxy: proxyFencedTo(origin),
         ...(executablePath === undefined ? {} : { executablePath }),

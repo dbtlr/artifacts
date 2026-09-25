@@ -9,7 +9,11 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 
-import { createPlaywrightRenderer, resolveChromiumPath } from './playwright-renderer.js';
+import {
+  createPlaywrightRenderer,
+  proxyFencedTo,
+  resolveChromiumPath,
+} from './playwright-renderer.js';
 import type { ThumbnailRenderer } from './types.js';
 
 const chromiumPath = await resolveChromiumPath(process.env);
@@ -33,6 +37,16 @@ async function listen(app: Hono): Promise<{ server: ServerType; url: string }> {
   }
   return { server, url: `http://127.0.0.1:${String(address.port)}` };
 }
+
+describe('proxyFencedTo', () => {
+  it('names the explicit port so a bare hostname never bypasses every port', () => {
+    expect(proxyFencedTo('http://127.0.0.1:3000').bypass).toBe('<-loopback>,127.0.0.1:3000');
+    expect(proxyFencedTo('http://127.0.0.1').bypass).toBe('<-loopback>,127.0.0.1:80');
+    expect(proxyFencedTo('https://artifacts.internal').bypass).toBe(
+      '<-loopback>,artifacts.internal:443',
+    );
+  });
+});
 
 describe('createPlaywrightRenderer without a Chromium', () => {
   it('reports the failed launch once and declines every render', async () => {
@@ -105,13 +119,18 @@ describe.skipIf(chromiumPath === undefined)('createPlaywrightRenderer', () => {
     app.get('/a/leaky', (c) =>
       c.html(
         `<!doctype html><body><iframe src="${neighbourUrl}/"></iframe><img src="${neighbourUrl}/i.png">` +
-          `<script>fetch('/mcp',{method:'POST',body:'{}'});fetch('${neighbourUrl}/f');` +
-          `new WebSocket('${wsUrl}/ws');` +
+          // Each attempt stands alone, so one that throws cannot mask the rest.
+          `<script>` +
+          `try{fetch('/mcp',{method:'POST',body:'{}'})}catch{}` +
+          `try{fetch('${neighbourUrl}/f')}catch{}` +
+          `try{new WebSocket('${wsUrl}/ws')}catch{}` +
           // Workers never see Playwright's page-level WebSocket mock.
-          `new Worker(URL.createObjectURL(new Blob(["new WebSocket('${wsUrl}/ws-worker')"],{type:'text/javascript'})));` +
-          `new SharedWorker(URL.createObjectURL(new Blob(["new WebSocket('${wsUrl}/ws-shared')"],{type:'text/javascript'})));` +
-          // WebRTC bypasses the proxy; STUN would be a UDP packet to loopback.
-          `new RTCPeerConnection({iceServers:[{urls:'stun:127.0.0.1:${String(udpPort)}'}]}).createDataChannel('x');` +
+          `try{new Worker(URL.createObjectURL(new Blob(["new WebSocket('${wsUrl}/ws-worker')"],{type:'text/javascript'})))}catch{}` +
+          `try{new SharedWorker(URL.createObjectURL(new Blob(["new WebSocket('${wsUrl}/ws-shared')"],{type:'text/javascript'})))}catch{}` +
+          // WebRTC bypasses the proxy; ICE gathering (which needs an offer
+          // and a local description) would send STUN packets to loopback.
+          `try{const pc=new RTCPeerConnection({iceServers:[{urls:'stun:127.0.0.1:${String(udpPort)}'}]});` +
+          `pc.createDataChannel('x');pc.createOffer().then(o=>pc.setLocalDescription(o))}catch{}` +
           `</script></body>`,
       ),
     );
@@ -171,8 +190,8 @@ describe.skipIf(chromiumPath === undefined)('createPlaywrightRenderer', () => {
     });
 
     expect(bytes).not.toBeNull();
-    // Give a straggling STUN packet time to arrive if one were ever sent.
-    await delay(300);
+    // ICE retries STUN at ~0.3s, 0.5s, 1s; wait long enough to catch one.
+    await delay(1200);
     expect(neighbourHits).toBe(0);
     expect(neighbourUpgrades).toBe(0);
     expect(udpPackets).toBe(0);
