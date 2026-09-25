@@ -73,7 +73,7 @@ export const IndexHeader: FC<IndexHeaderProps> = ({ basePath, current, projects,
         </a>
       ))}
     </nav>
-    <span class="shrink-0 border-l border-stone-200 pl-5 text-[13px] whitespace-nowrap text-stone-500 tabular-nums dark:border-ink-800 dark:text-ink-400">
+    <span class="hidden shrink-0 border-l border-stone-200 pl-5 text-[13px] whitespace-nowrap text-stone-500 tabular-nums sm:inline dark:border-ink-800 dark:text-ink-400">
       {artifactsLabel(view.total)}
     </span>
   </header>
