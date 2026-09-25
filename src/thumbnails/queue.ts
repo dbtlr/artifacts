@@ -62,7 +62,14 @@ export function createThumbnailQueue({
       });
       // Removed while rendering: the remove hook already dropped the old
       // file, so writing now would leave an orphan behind.
-      if (bytes !== null && lookup(id) !== null) {
+      if (lookup(id) === null) {
+        return;
+      }
+      if (bytes === null) {
+        // Declined (say, an update turned an html artifact into a PDF): a
+        // preview of the old content must not outlive it.
+        store.remove(id);
+      } else {
         store.write(id, bytes);
       }
     } catch (error) {

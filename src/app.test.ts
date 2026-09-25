@@ -639,6 +639,18 @@ describe('gallery index', () => {
     expect(body).not.toContain('kind=txt');
   });
 
+  it('tells a filtered-out project apart from an empty one', async () => {
+    const filtered = await (await testApp.request('/p/scanner?kind=png')).text();
+    expect(filtered).toContain('No png artifacts in scanner.');
+    expect(filtered).not.toContain('No artifacts in scanner yet.');
+
+    const empty = await (await testApp.request('/p/nothing-here?kind=png')).text();
+    expect(empty).toContain('No artifacts in nothing-here yet.');
+
+    const home = await (await testApp.request('/?kind=png')).text();
+    expect(home).toContain('No png artifacts yet.');
+  });
+
   it('shows every artifact for an unknown kind', async () => {
     const body = await (await testApp.request('/?kind=exe')).text();
 

@@ -217,8 +217,11 @@ describe('createThumbnailQueue', () => {
     expect(store.has('fine')).toBe(true);
   });
 
-  it('writes nothing when the renderer declines with null', async () => {
+  it('drops any stored preview when the renderer declines with null', async () => {
     const store = memoryStore();
+    // A preview of the artifact's previous content, before an update made
+    // it something the renderer declines.
+    store.write('a', bytesFor('old'));
     const renderer = fakeRenderer(() => Promise.resolve(null));
     const queue = createThumbnailQueue({ lookup: artifact, store });
     queue.start(renderer, BASE);
