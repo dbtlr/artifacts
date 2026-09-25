@@ -51,9 +51,11 @@
 
   /*
    * The typography plugin's inverted scheme reads its colors from these
-   * variables, so setting them here (instead of on `.prose` itself) keeps
+   * variables, so overriding the variables (not the color properties) keeps
    * `dark:prose-invert` in charge of when they apply and only changes what
-   * they resolve to: the Ink palette above.
+   * they resolve to: the Ink palette above. `prose-stone` also sets every
+   * one of them from inside Tailwind's utilities layer; this rule wins only
+   * because it is unlayered, so it must stay outside any @layer.
    */
   .prose {
     --tw-prose-invert-body: var(--color-ink-300);

@@ -15,7 +15,7 @@ export type IndexView = {
   // The applied kind filter, or undefined when none (or an unknown one) was
   // asked for.
   kind: Kind | undefined;
-  // Counts are taken over the unfiltered input so the filter row stays stable
+  // Counts are taken over the unfiltered input so the header links stay stable
   // while a filter is active — the input is already project-scoped on
   // /p/:project, so kind counts there are project-scoped too.
   kinds: CountedKind[];
@@ -40,7 +40,7 @@ function countBy<T extends string>(values: T[]): Map<T, number> {
 }
 
 // Sorted by count descending, then label ascending, so the busiest project
-// or kind leads the filter row and ties are deterministic.
+// or kind leads the header links and ties are deterministic.
 function sortedCounts(counts: Map<string, number>): [string, number][] {
   return [...counts.entries()].toSorted(([aName, aCount], [bName, bCount]) =>
     aCount === bCount ? aName.localeCompare(bName) : bCount - aCount,

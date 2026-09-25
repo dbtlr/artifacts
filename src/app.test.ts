@@ -639,14 +639,34 @@ describe('gallery index', () => {
     expect(body).not.toContain('kind=txt');
   });
 
-  it('lists every project with counts in the selector on a project page too', async () => {
-    const body = await (await testApp.request('/p/scanner')).text();
+  it('carries the navigation in one header: selector, kind links, and count', async () => {
+    const body = await (await testApp.request('/')).text();
+    const header = /<header[^>]*>([\s\S]*?)<\/header>/u.exec(body)?.[1];
 
-    // The selector names the current project and still offers the others.
-    expect(body).toMatch(/<summary[^>]*>scanner</u);
-    expect(body).toContain('href="/p/side%20project"');
-    expect(body).toMatch(/side project<[^>]*>\s*<[^>]*>1</u);
-    expect(body).toContain('href="/"');
+    expect(header).toBeDefined();
+    // The selector is a details element listing every project with counts,
+    // and "All projects" carries the sum.
+    expect(header).toMatch(/<details[^>]*>[\s\S]*<summary[^>]*>All projects</u);
+    expect(header).toMatch(/All projects<[^>]*>\s*<[^>]*>3</u);
+    expect(header).toContain('href="/p/side%20project"');
+    // The kind links and the count live in the header, not a second row.
+    expect(header).toContain('href="/?kind=md"');
+    expect(header).toContain('3 artifacts');
+    expect(body.match(/<nav\b/gu)).toHaveLength(1);
+  });
+
+  it('scopes the count to the project and names it in the selector on a project page', async () => {
+    const body = await (await testApp.request('/p/scanner')).text();
+    const header = /<header[^>]*>([\s\S]*?)<\/header>/u.exec(body)?.[1];
+
+    expect(header).toMatch(/<summary[^>]*>scanner</u);
+    expect(header).toContain('2 artifacts');
+    expect(header).toMatch(/All projects<[^>]*>\s*<[^>]*>3</u);
+    expect(header).toContain('href="/p/side%20project"');
+    expect(header).toMatch(/side project<[^>]*>\s*<[^>]*>1</u);
+
+    const single = await (await testApp.request('/p/side%20project')).text();
+    expect(single).toContain('1 artifact<');
   });
 
   it('tells a filtered-out project apart from an empty one', async () => {

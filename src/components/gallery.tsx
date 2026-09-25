@@ -50,8 +50,12 @@ export const ArtifactGallery: FC<GalleryProps> = ({ artifacts, emptyMessage }) =
             >
               {artifact.project}
             </a>
-            <span class="mx-2 font-mono text-xs">{kindOf(artifact.mediaType)}</span>
-            <span class="tabular-nums">{formatDate(artifact.createdAt, 'short')}</span>
+            <span class="mx-2 font-mono text-xs whitespace-nowrap">
+              {kindOf(artifact.mediaType)}
+            </span>
+            <span class="tabular-nums whitespace-nowrap">
+              {formatDate(artifact.createdAt, 'short')}
+            </span>
             {artifact.collection !== undefined && <span class="ml-2">{artifact.collection}</span>}
           </p>
           <p class="mt-2 line-clamp-2 text-[15px] leading-normal text-stone-600 dark:text-ink-300">
