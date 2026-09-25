@@ -60,6 +60,7 @@ describe.skipIf(chromiumPath === undefined)('createPlaywrightRenderer', () => {
   let neighbour: ServerType;
   let neighbourUrl: string;
   let neighbourHits = 0;
+  let neighbourUpgrades = 0;
   let mcpPosts = 0;
   let renderer: ThumbnailRenderer;
 
@@ -70,6 +71,11 @@ describe.skipIf(chromiumPath === undefined)('createPlaywrightRenderer', () => {
       return c.text('INTERNAL');
     });
     ({ server: neighbour, url: neighbourUrl } = await listen(other));
+    // A WebSocket handshake never reaches Hono; count it at the socket layer.
+    neighbour.on('upgrade', (_request, socket) => {
+      neighbourUpgrades += 1;
+      socket.destroy();
+    });
 
     const app = new Hono();
     app.get('/a/page', (c) =>
@@ -86,7 +92,8 @@ describe.skipIf(chromiumPath === undefined)('createPlaywrightRenderer', () => {
     app.get('/a/leaky', (c) =>
       c.html(
         `<!doctype html><body><iframe src="${neighbourUrl}/"></iframe><img src="${neighbourUrl}/i.png">` +
-          `<script>fetch('/mcp',{method:'POST',body:'{}'});fetch('${neighbourUrl}/f');</script></body>`,
+          `<script>fetch('/mcp',{method:'POST',body:'{}'});fetch('${neighbourUrl}/f');` +
+          `new WebSocket('${neighbourUrl.replace('http', 'ws')}/ws');</script></body>`,
       ),
     );
     // Never answers, so the page never reaches network idle.
@@ -145,6 +152,7 @@ describe.skipIf(chromiumPath === undefined)('createPlaywrightRenderer', () => {
 
     expect(bytes).not.toBeNull();
     expect(neighbourHits).toBe(0);
+    expect(neighbourUpgrades).toBe(0);
     expect(mcpPosts).toBe(0);
   });
 

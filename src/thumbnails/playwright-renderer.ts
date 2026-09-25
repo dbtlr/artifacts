@@ -75,6 +75,12 @@ async function confineToOrigin(context: BrowserContext, origin: string): Promise
     const allowed = request.method() === 'GET' && new URL(request.url()).origin === origin;
     return allowed ? route.continue() : route.abort('blockedbyclient');
   });
+  // context.route() does not see WebSocket upgrades, which are otherwise a
+  // GET to any host and port. This server speaks no WebSocket, so none is
+  // legitimate.
+  await context.routeWebSocket(/.*/u, (socket) => {
+    void socket.close();
+  });
 }
 
 async function closeQuietly(context: BrowserContext): Promise<void> {

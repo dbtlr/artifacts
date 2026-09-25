@@ -171,9 +171,9 @@ placeholders.
 
 Rendering runs an HTML artifact's scripts on the server host, not in a viewer's browser. The render
 context may only make GET requests to the server's own origin: every other request, including
-POSTs to `/mcp` and anything on loopback or the container network, is blocked, and a render that
-is still busy after 15 seconds is abandoned. The screenshot is what a trusted viewer would see, and
-nothing more.
+POSTs to `/mcp`, WebSockets, and anything on loopback or the container network, is blocked, and a
+render that is still busy after 15 seconds is abandoned. The screenshot shows the artifact's own
+page and nothing else the server host can reach.
 
 ## Development
 

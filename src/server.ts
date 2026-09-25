@@ -32,7 +32,12 @@ const server = serve({ fetch: app.fetch, port }, (info) => {
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
   process.stdout.write(`Artifacts shutting down on ${signal}\n`);
   server.close();
-  await Promise.race([renderer.close(), delay(SHUTDOWN_GRACE_MS)]);
+  try {
+    await Promise.race([renderer.close(), delay(SHUTDOWN_GRACE_MS)]);
+  } catch {
+    // A browser that failed to launch or died mid-close is no reason to
+    // report an unclean exit.
+  }
   process.exit(0);
 }
 
