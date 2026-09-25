@@ -21,20 +21,31 @@ RUN pnpm run build
 FROM node:24-alpine AS runner
 WORKDIR /app
 RUN corepack enable
+
+# Gallery previews are screenshots taken by a headless Chromium driven over
+# CDP by playwright-core (src/thumbnails/playwright-renderer.ts). Alpine's own
+# chromium package is far smaller than Playwright's bundled browser build;
+# the fonts give rendered pages real glyphs instead of boxes.
+RUN apk add --no-cache chromium nss freetype harfbuzz ca-certificates ttf-dejavu font-noto-emoji
+
 ENV NODE_ENV=production
 ENV ARTIFACTS_PORT=3000
 ENV ARTIFACTS_DATABASE_PATH=/app/data/database/artifacts.db
 ENV ARTIFACTS_FILES_DIR=/app/data/files
+ENV ARTIFACTS_THUMBS_DIR=/app/data/thumbs
+ENV ARTIFACTS_CHROMIUM_PATH=/usr/bin/chromium
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 COPY --from=builder /app/dist ./dist
-RUN mkdir -p /app/data/database /app/data/files && chown -R node:node /app/data
+RUN mkdir -p /app/data/database /app/data/files /app/data/thumbs && chown -R node:node /app/data
 
 # Run as the non-root `node` user baked into the base image (uid/gid 1000)
 # rather than root. Everything under /app is read-only for this process except
-# the two persistence paths, which are prepared for independent named volumes.
+# the persistence paths, which are prepared for independent named volumes.
 # Host bind mounts retain host ownership and must be writable by this user; the
 # Docker operator probes that access before replacing a running container.
+# /app/data/thumbs holds derived previews only: without a mount they live in
+# the container layer and are re-rendered on the next start.
 USER node
 
 EXPOSE ${ARTIFACTS_PORT}

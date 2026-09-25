@@ -8,10 +8,12 @@ import { fileURLToPath } from 'node:url';
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 const developmentDataDir = join(moduleDir, '..', 'data', 'development');
 
-export type StoragePaths = { databasePath: string; filesDir: string };
+export type StoragePaths = { databasePath: string; filesDir: string; thumbsDir: string };
+
+type PathVariable = 'ARTIFACTS_DATABASE_PATH' | 'ARTIFACTS_FILES_DIR' | 'ARTIFACTS_THUMBS_DIR';
 
 function resolvePathOverride(
-  name: 'ARTIFACTS_DATABASE_PATH' | 'ARTIFACTS_FILES_DIR',
+  name: PathVariable,
   value: string | undefined,
   fallback: string,
 ): string {
@@ -35,6 +37,13 @@ export function resolveStoragePaths(env: NodeJS.ProcessEnv = process.env): Stora
       'ARTIFACTS_FILES_DIR',
       env.ARTIFACTS_FILES_DIR,
       join(developmentDataDir, 'files'),
+    ),
+    // Rendered previews are derived data: losing this directory only costs a
+    // re-render, so it is a sibling of the two durable stores, not inside one.
+    thumbsDir: resolvePathOverride(
+      'ARTIFACTS_THUMBS_DIR',
+      env.ARTIFACTS_THUMBS_DIR,
+      join(developmentDataDir, 'thumbs'),
     ),
   };
 }

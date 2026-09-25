@@ -19,9 +19,13 @@ import type {
   ArtifactWithContent,
   LegacyArtifactWithContent,
 } from './data/store.js';
-import { adaptLegacyArtifactStore, getDefaultByteNativeArtifactService } from './data/store.js';
+import { adaptLegacyArtifactStore } from './data/store.js';
+import { buildIndexView, kindOf } from './index-view.js';
 import { renderMarkdownToHtml } from './markdown.js';
 import { createMcpServer } from './mcp/server.js';
+import type { AppServices } from './services.js';
+import { getDefaultAppServices } from './services.js';
+import { placeholderSvg } from './thumbnails/placeholder.js';
 
 // Resolve the static asset root relative to this module, not process.cwd(),
 // so a different WORKDIR/cwd (e.g. Docker) can't silently 404 every asset.
@@ -34,19 +38,18 @@ const STATIC_ROOT = process.env.ARTIFACTS_STATIC_ROOT ?? join(moduleDir, '..', '
 
 const MAX_MCP_BODY_BYTES = 16 * 1024 * 1024;
 
-// `store` is left undefined in production (`export const app` below), so the
-// default sqlite-backed store is only ever touched lazily, on the first
-// actual /mcp request — never merely by importing this module. Tests pass a
-// temp-directory store explicitly instead of touching the repo's data/.
-type AppServices = { artifacts: ArtifactService; mcp: ArtifactService };
-
+// server.ts passes the composed services in; `export const app` below (used
+// by embedding callers and tests) leaves `store` undefined and resolves the
+// same default services (see services.ts) lazily on the first request —
+// never merely by importing this module. Most tests pass temp-directory
+// services explicitly instead of touching the repo's data/.
 async function defaultServices(mcpService?: ArtifactService): Promise<AppServices> {
-  const artifacts = await getDefaultByteNativeArtifactService();
-  return { artifacts, mcp: mcpService ?? artifacts };
+  const services = await getDefaultAppServices();
+  return mcpService === undefined ? services : { ...services, mcp: mcpService };
 }
 
-function etagFor(artifact: ArtifactWithContent): string {
-  return `"${createHash('sha256').update(artifact.content).digest('base64url')}"`;
+function etagOf(bytes: Uint8Array): string {
+  return `"${createHash('sha256').update(bytes).digest('base64url')}"`;
 }
 
 function matchesIfNoneMatch(header: string | undefined, etag: string): boolean {
@@ -123,29 +126,59 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
     serveStatic({ path: 'apple-touch-icon.png', root: STATIC_ROOT }),
   );
 
+  // `?kind=html` narrows either gallery to one file kind; an unknown kind is
+  // ignored rather than 404ed, for the same reason an unknown project is.
   app.get('/', async (c) => {
     const artifacts = (await resolveServices()).artifacts.listArtifacts();
+    const view = buildIndexView(artifacts, { kind: c.req.query('kind') });
     return c.html(
-      <Layout title="Artifacts">
-        <HomePage artifacts={artifacts} />
+      <Layout title="Artifacts" wide>
+        <HomePage view={view} />
       </Layout>,
     );
   });
 
   // Hono's c.req.param() already URL-decodes a segment that contains a `%`
   // (see hono/dist/request.js), so `project` here is the raw project name —
-  // matching what ArtifactList encoded into the /p/:project link. A project
+  // matching what the gallery encoded into the /p/:project link. A project
   // with zero artifacts (typo, or one that was never created) still renders
-  // the ordinary list UI with an empty state — it's a filter, not a lookup,
-  // so there's nothing 404-worthy about it coming back empty.
+  // the ordinary gallery UI with an empty state — it's a filter, not a
+  // lookup, so there's nothing 404-worthy about it coming back empty.
   app.get('/p/:project', async (c) => {
     const project = c.req.param('project');
     const artifacts = (await resolveServices()).artifacts.listArtifacts({ project });
+    const view = buildIndexView(artifacts, { kind: c.req.query('kind') });
     return c.html(
-      <Layout title={`${project} · Artifacts`}>
-        <ProjectPage artifacts={artifacts} project={project} />
+      <Layout title={`${project} · Artifacts`} wide>
+        <ProjectPage project={project} view={view} />
       </Layout>,
     );
+  });
+
+  // The gallery card's <img>: the rendered JPEG when one exists, otherwise a
+  // drawn per-kind placeholder. Both are `no-cache` so a browser revalidates
+  // and picks up the real image once it lands; the JPEG carries an ETag so
+  // that revalidation is a 304 until the artifact is re-rendered.
+  app.get('/a/:id/thumb', async (c) => {
+    const services = await resolveServices();
+    const id = c.req.param('id');
+    const artifact = services.artifacts.findArtifact(id);
+    if (!artifact) {
+      return c.body(null, 404);
+    }
+    const bytes = services.thumbnails?.read(id) ?? null;
+    if (bytes === null) {
+      return c.body(placeholderSvg(kindOf(artifact.mediaType)), 200, {
+        'Cache-Control': 'no-cache',
+        'Content-Type': 'image/svg+xml; charset=utf-8',
+      });
+    }
+    const etag = etagOf(bytes);
+    const headers = { 'Cache-Control': 'no-cache', 'Content-Type': 'image/jpeg', ETag: etag };
+    if (matchesIfNoneMatch(c.req.header('If-None-Match'), etag)) {
+      return c.body(null, 304, headers);
+    }
+    return new Response(new Uint8Array(bytes).buffer, { headers, status: 200 });
   });
 
   // html artifacts are served as-is — CLAUDE.md: "HTML documents are
@@ -168,7 +201,7 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
     }
     const renderingMode = legacyTypeFromMediaType(artifact.mediaType);
     if (renderingMode === undefined) {
-      const etag = etagFor(artifact);
+      const etag = etagOf(artifact.content);
       const headers: Record<string, string> = {
         'Cache-Control': 'no-cache',
         'Content-Disposition': contentDisposition(artifact.filename!),

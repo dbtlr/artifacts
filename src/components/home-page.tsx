@@ -1,17 +1,25 @@
 import type { FC } from 'hono/jsx';
 
-import type { Artifact } from '../data/store.js';
-import { ArtifactList } from './artifact-list.js';
+import type { IndexView } from '../index-view.js';
+import { ArtifactGallery, GalleryFilters } from './gallery.js';
+import { PageHeader } from './page-header.js';
 
-type HomePageProps = { artifacts: Artifact[] };
+type HomePageProps = { view: IndexView };
 
-export const HomePage: FC<HomePageProps> = ({ artifacts }) => (
+// An empty grid means one of two things: nothing has been shared yet, or the
+// active kind filter excluded everything.
+function emptyMessage(view: IndexView): string {
+  return view.kind !== undefined && view.total > 0
+    ? `No ${view.kind} artifacts yet.`
+    : 'No artifacts yet. Once an agent shares one, it will show up here.';
+}
+
+export const HomePage: FC<HomePageProps> = ({ view }) => (
   <main>
-    <h1 class="text-3xl font-semibold tracking-tight">Artifacts</h1>
-    <p class="mt-2 text-stone-600">A preview environment for agent-authored documents.</p>
-    <ArtifactList
-      artifacts={artifacts}
-      emptyMessage="No artifacts yet. Once an agent shares one, it will show up here."
+    <PageHeader
+      summary={`${String(view.total)} artifacts · ${String(view.projects.length)} projects`}
     />
+    <GalleryFilters basePath="/" view={view} />
+    <ArtifactGallery artifacts={view.items} emptyMessage={emptyMessage(view)} />
   </main>
 );
