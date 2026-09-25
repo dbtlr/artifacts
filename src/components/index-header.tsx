@@ -19,8 +19,12 @@ const count = 'ml-1.5 text-xs text-stone-500 tabular-nums dark:text-ink-400';
 const kindLink =
   'whitespace-nowrap text-stone-500 hover:text-stone-900 dark:text-ink-400 dark:hover:text-ink-100';
 const kindLinkOn = 'whitespace-nowrap font-semibold text-stone-900 dark:text-ink-100';
+// A flex row so an unbroken project name truncates inside its column while
+// the count stays visible.
 const menuLink =
-  'block break-inside-avoid py-1 text-stone-700 hover:text-stone-900 dark:text-ink-300 dark:hover:text-ink-100';
+  'flex items-baseline break-inside-avoid py-1 text-stone-700 hover:text-stone-900 dark:text-ink-300 dark:hover:text-ink-100';
+const menuName = 'min-w-0 truncate';
+const menuCount = `shrink-0 ${count}`;
 
 function artifactsLabel(total: number): string {
   return total === 1 ? '1 artifact' : `${String(total)} artifacts`;
@@ -50,13 +54,13 @@ export const IndexHeader: FC<IndexHeaderProps> = ({ basePath, current, projects,
       </summary>
       <div class="absolute top-full left-0 z-10 mt-1 w-full max-w-[600px] columns-2 gap-x-8 border border-stone-200 bg-white px-4 py-3 shadow-lg sm:columns-3 dark:border-ink-800 dark:bg-ink-900 dark:shadow-black/50">
         <a href="/" class={menuLink}>
-          <span>All projects</span>
-          <span class={count}>{projects.reduce((sum, project) => sum + project.count, 0)}</span>
+          <span class={menuName}>All projects</span>
+          <span class={menuCount}>{projects.reduce((sum, project) => sum + project.count, 0)}</span>
         </a>
         {projects.map((project) => (
           <a key={project.name} href={projectHref(project.name)} class={menuLink}>
-            <span>{project.name}</span>
-            <span class={count}>{project.count}</span>
+            <span class={menuName}>{project.name}</span>
+            <span class={menuCount}>{project.count}</span>
           </a>
         ))}
       </div>
@@ -75,7 +79,7 @@ export const IndexHeader: FC<IndexHeaderProps> = ({ basePath, current, projects,
           <span class={count}>{entry.count}</span>
         </a>
       ))}
-      <span class="hidden text-[13px] whitespace-nowrap text-stone-500 tabular-nums sm:inline dark:text-ink-400">
+      <span class="text-[13px] whitespace-nowrap text-stone-500 tabular-nums dark:text-ink-400">
         {artifactsLabel(view.total)}
       </span>
     </nav>
