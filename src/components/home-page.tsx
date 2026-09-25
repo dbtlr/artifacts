@@ -1,8 +1,8 @@
 import type { FC } from 'hono/jsx';
 
 import type { IndexView } from '../index-view.js';
-import { ArtifactGallery, GalleryFilters } from './gallery.js';
-import { PageHeader } from './page-header.js';
+import { ArtifactGallery } from './gallery.js';
+import { IndexHeader } from './index-header.js';
 
 type HomePageProps = { view: IndexView };
 
@@ -16,10 +16,7 @@ function emptyMessage(view: IndexView): string {
 
 export const HomePage: FC<HomePageProps> = ({ view }) => (
   <main>
-    <PageHeader
-      summary={`${String(view.total)} artifacts · ${String(view.projects.length)} projects`}
-    />
-    <GalleryFilters basePath="/" view={view} />
+    <IndexHeader basePath="/" projects={view.projects} view={view} />
     <ArtifactGallery artifacts={view.items} emptyMessage={emptyMessage(view)} />
   </main>
 );

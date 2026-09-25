@@ -24,9 +24,24 @@ RUN corepack enable
 
 # Gallery previews are screenshots taken by a headless Chromium driven over
 # CDP by playwright-core (src/thumbnails/playwright-renderer.ts). Alpine's own
-# chromium package is far smaller than Playwright's bundled browser build;
-# the fonts give rendered pages real glyphs instead of boxes.
-RUN apk add --no-cache chromium nss freetype harfbuzz ca-certificates ttf-dejavu font-noto-emoji
+# chromium package is far smaller than Playwright's bundled browser build.
+# Inter is the sans face (close to the macOS system font the pages are
+# designed on), DejaVu covers the mono and fallback glyphs, Noto the emoji.
+# Chromium resolves the CSS generic families through fontconfig, and without
+# the aliases below `system-ui` matches nothing in particular and numerals can
+# come out of the emoji font; the aliases pin every generic to a real face.
+RUN apk add --no-cache chromium nss freetype harfbuzz ca-certificates font-inter font-dejavu font-noto-emoji \
+  && printf '%s\n' \
+    '<?xml version="1.0"?>' \
+    '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">' \
+    '<fontconfig>' \
+    '  <alias><family>system-ui</family><prefer><family>Inter</family></prefer></alias>' \
+    '  <alias><family>ui-sans-serif</family><prefer><family>Inter</family></prefer></alias>' \
+    '  <alias><family>sans-serif</family><prefer><family>Inter</family><family>DejaVu Sans</family></prefer></alias>' \
+    '  <alias><family>ui-monospace</family><prefer><family>DejaVu Sans Mono</family></prefer></alias>' \
+    '  <alias><family>monospace</family><prefer><family>DejaVu Sans Mono</family></prefer></alias>' \
+    '</fontconfig>' \
+    > /etc/fonts/local.conf
 
 ENV NODE_ENV=production
 ENV ARTIFACTS_PORT=3000

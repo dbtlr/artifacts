@@ -639,6 +639,16 @@ describe('gallery index', () => {
     expect(body).not.toContain('kind=txt');
   });
 
+  it('lists every project with counts in the selector on a project page too', async () => {
+    const body = await (await testApp.request('/p/scanner')).text();
+
+    // The selector names the current project and still offers the others.
+    expect(body).toMatch(/<summary[^>]*>scanner</u);
+    expect(body).toContain('href="/p/side%20project"');
+    expect(body).toMatch(/side project<[^>]*>\s*<[^>]*>1</u);
+    expect(body).toContain('href="/"');
+  });
+
   it('tells a filtered-out project apart from an empty one', async () => {
     const filtered = await (await testApp.request('/p/scanner?kind=png')).text();
     expect(filtered).toContain('No png artifacts in scanner.');

@@ -1,10 +1,16 @@
 import type { FC } from 'hono/jsx';
 
-import type { IndexView } from '../index-view.js';
-import { ArtifactGallery, GalleryFilters, projectHref } from './gallery.js';
-import { PageHeader } from './page-header.js';
+import type { CountedProject, IndexView } from '../index-view.js';
+import { ArtifactGallery, projectHref } from './gallery.js';
+import { IndexHeader } from './index-header.js';
 
-type ProjectPageProps = { project: string; view: IndexView };
+type ProjectPageProps = {
+  project: string;
+  // Every project with counts, so the selector can switch projects directly.
+  projects: CountedProject[];
+  // The project-scoped view: its items, kinds, and total.
+  view: IndexView;
+};
 
 // An empty grid means one of two things: the project has nothing, or the
 // active kind filter excluded everything it has.
@@ -14,15 +20,14 @@ function emptyMessage(project: string, view: IndexView): string {
     : `No artifacts in ${project} yet.`;
 }
 
-export const ProjectPage: FC<ProjectPageProps> = ({ project, view }) => (
+export const ProjectPage: FC<ProjectPageProps> = ({ project, projects, view }) => (
   <main>
-    <PageHeader summary={`${String(view.total)} artifacts`}>
-      <a href="/" class="text-sm text-stone-500 hover:underline dark:text-stone-400">
-        &larr; All artifacts
-      </a>
-      <h1 class="mt-1 text-2xl font-semibold tracking-tight">{project}</h1>
-    </PageHeader>
-    <GalleryFilters basePath={projectHref(project)} view={view} />
+    <IndexHeader
+      basePath={projectHref(project)}
+      current={project}
+      projects={projects}
+      view={view}
+    />
     <ArtifactGallery artifacts={view.items} emptyMessage={emptyMessage(project, view)} />
   </main>
 );

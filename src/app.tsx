@@ -146,11 +146,14 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
   // lookup, so there's nothing 404-worthy about it coming back empty.
   app.get('/p/:project', async (c) => {
     const project = c.req.param('project');
-    const artifacts = (await resolveServices()).artifacts.listArtifacts({ project });
+    const services = await resolveServices();
+    const artifacts = services.artifacts.listArtifacts({ project });
     const view = buildIndexView(artifacts, { kind: c.req.query('kind') });
+    // The header's project selector offers every project, not just this one.
+    const { projects } = buildIndexView(services.artifacts.listArtifacts(), {});
     return c.html(
       <Layout title={`${project} · Artifacts`} wide>
-        <ProjectPage project={project} view={view} />
+        <ProjectPage project={project} projects={projects} view={view} />
       </Layout>,
     );
   });

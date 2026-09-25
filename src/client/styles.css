@@ -2,6 +2,25 @@
 @plugin '@tailwindcss/typography';
 
 /*
+ * The Ink dark palette. Light mode keeps Tailwind's stone scale; dark mode
+ * never uses pure black or pure white: the page sits just above black and
+ * primary text a step below white, so contrast stays high without glare.
+ * Contrast against ink-950: ink-100 15.0, ink-300 11.1, ink-400 5.1,
+ * accent 8.1 (WCAG AA for body text is 4.5).
+ */
+@theme {
+  --color-ink-950: #101114;
+  --color-ink-900: #16181c;
+  --color-ink-850: #1b1e24;
+  --color-ink-800: #262930;
+  --color-ink-700: #31353d;
+  --color-ink-400: #7f858f;
+  --color-ink-300: #c3c7ce;
+  --color-ink-100: #e3e5e9;
+  --color-accent: #d4a054;
+}
+
+/*
  * Shiki dual-theme code blocks (see src/markdown.ts): codeToHtml is called
  * with `themes: { light, dark }` and `defaultColor: false`, which makes each
  * token carry a `--shiki-light` and a `--shiki-dark` custom property instead
@@ -28,6 +47,31 @@
     font-style: var(--shiki-dark-font-style) !important;
     font-weight: var(--shiki-dark-font-weight) !important;
     text-decoration: var(--shiki-dark-text-decoration) !important;
+  }
+
+  /*
+   * The typography plugin's inverted scheme reads its colors from these
+   * variables, so setting them here (instead of on `.prose` itself) keeps
+   * `dark:prose-invert` in charge of when they apply and only changes what
+   * they resolve to: the Ink palette above.
+   */
+  .prose {
+    --tw-prose-invert-body: var(--color-ink-300);
+    --tw-prose-invert-headings: var(--color-ink-100);
+    --tw-prose-invert-lead: var(--color-ink-300);
+    --tw-prose-invert-links: var(--color-accent);
+    --tw-prose-invert-bold: var(--color-ink-100);
+    --tw-prose-invert-counters: var(--color-ink-400);
+    --tw-prose-invert-bullets: var(--color-ink-700);
+    --tw-prose-invert-hr: var(--color-ink-800);
+    --tw-prose-invert-quotes: var(--color-ink-100);
+    --tw-prose-invert-quote-borders: var(--color-ink-800);
+    --tw-prose-invert-captions: var(--color-ink-400);
+    --tw-prose-invert-code: var(--color-ink-100);
+    --tw-prose-invert-pre-code: var(--color-ink-300);
+    --tw-prose-invert-pre-bg: #0a0b0d;
+    --tw-prose-invert-th-borders: var(--color-ink-700);
+    --tw-prose-invert-td-borders: var(--color-ink-800);
   }
 }
 
@@ -62,7 +106,7 @@
 
 @media (prefers-color-scheme: dark) {
   .toc a {
-    color: var(--color-stone-300);
+    color: var(--color-ink-300);
   }
 }
 
