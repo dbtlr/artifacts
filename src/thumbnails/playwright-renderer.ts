@@ -111,10 +111,10 @@ async function closeQuietly(context: BrowserContext): Promise<void> {
 }
 
 // One shared headless Chromium, launched on first use and relaunched after a
-// crash. Each render gets its own short-lived context, so nothing leaks from
-// one artifact's scripts into the next. A launch that fails (no Chromium on
-// this machine) is reported once; after that every render declines with
-// null and the gallery keeps its drawn placeholders.
+// crash. Each render gets its own short-lived context, so no cookies, cache,
+// or storage carry over from one artifact to the next. A launch that fails
+// (no Chromium on this machine) is reported once; after that every render
+// declines with null and the gallery keeps its drawn placeholders.
 export function createPlaywrightRenderer({
   executablePath,
   report = defaultReport,
@@ -141,6 +141,11 @@ export function createPlaywrightRenderer({
           // starts. The per-context `javaScriptEnabled: false` is applied
           // over CDP after a frame exists, which a sandboxed srcdoc frame in
           // its own process can beat; a startup setting cannot be raced.
+          // Playwright passes its own --blink-settings (hover/pointer
+          // hints) and appends user args after its own, and Chromium keeps
+          // the last copy of a repeated switch, so this one wins. The
+          // renderer test's zero-datagram assertion is what would notice if
+          // that ordering ever changed.
           '--blink-settings=scriptEnabled=false',
         ],
         proxy: proxyFencedTo(origin),
@@ -206,8 +211,8 @@ export function createPlaywrightRenderer({
       colorScheme: 'dark',
       deviceScaleFactor: DEVICE_SCALE_FACTOR,
       // See confineToOrigin: a preview is the static document, scripts off.
-      // This is the per-page CDP switch; the launch-time blink setting below
-      // is what actually guarantees it for every frame and process.
+      // This is the per-page CDP switch; the launch-time blink setting in
+      // `launch` is what actually guarantees it for every frame and process.
       javaScriptEnabled: false,
       viewport: VIEWPORT,
     });

@@ -69,148 +69,156 @@ describe('createPlaywrightRenderer without a Chromium', () => {
 });
 
 // Needs a real Chromium: skipped where none is found (see resolveChromiumPath).
-describe.skipIf(chromiumPath === undefined)('createPlaywrightRenderer', () => {
-  let server: ServerType;
-  let baseUrl: string;
-  // A second origin standing in for a loopback neighbour the render context
-  // must never reach.
-  let neighbour: ServerType;
-  let neighbourUrl: string;
-  let neighbourHits = 0;
-  let neighbourUpgrades = 0;
-  let udp: Socket;
-  let udpPackets = 0;
-  let mcpPosts = 0;
-  let renderer: ThumbnailRenderer;
+// A cold Chromium launch lands inside the first test, so the whole block
+// gets a timeout well past vitest's 5s default.
+const CHROMIUM_TIMEOUT_MS = 30_000;
 
-  beforeAll(async () => {
-    const other = new Hono();
-    other.all('*', (c) => {
-      neighbourHits += 1;
-      return c.text('INTERNAL');
-    });
-    ({ server: neighbour, url: neighbourUrl } = await listen(other));
-    const wsUrl = neighbourUrl.replace('http', 'ws');
-    // A WebSocket handshake never reaches Hono; count it at the socket layer.
-    neighbour.on('upgrade', (_request, socket) => {
-      neighbourUpgrades += 1;
-      socket.destroy();
-    });
-    udp = createSocket('udp4');
-    udp.on('message', () => {
-      udpPackets += 1;
-    });
-    udp.bind(0, '127.0.0.1');
-    await once(udp, 'listening');
-    const udpPort = udp.address().port;
+describe.skipIf(chromiumPath === undefined)(
+  'createPlaywrightRenderer',
+  { timeout: CHROMIUM_TIMEOUT_MS },
+  () => {
+    let server: ServerType;
+    let baseUrl: string;
+    // A second origin standing in for a loopback neighbour the render context
+    // must never reach.
+    let neighbour: ServerType;
+    let neighbourUrl: string;
+    let neighbourHits = 0;
+    let neighbourUpgrades = 0;
+    let udp: Socket;
+    let udpPackets = 0;
+    let mcpPosts = 0;
+    let renderer: ThumbnailRenderer;
 
-    const app = new Hono();
-    app.get('/a/page', (c) =>
-      c.html('<!doctype html><body style="background:#123456;margin:0"><h1>hello</h1></body>'),
-    );
-    app.get('/a/image', (c) => c.body(PNG.buffer, 200, { 'Content-Type': 'image/png' }));
-    app.get('/a/pdf', (c) =>
-      c.body('%PDF-1.4 not really a pdf', 200, { 'Content-Type': 'application/pdf' }),
-    );
-    app.post('/mcp', (c) => {
-      mcpPosts += 1;
-      return c.json({});
-    });
-    app.get('/a/leaky', (c) =>
-      c.html(
-        `<!doctype html><body><iframe src="${neighbourUrl}/"></iframe><img src="${neighbourUrl}/i.png">` +
-          // A sandboxed srcdoc frame runs in its own process, ahead of any
-          // page-level countermeasure; only scripts-off covers it.
-          `<iframe sandbox="allow-scripts" srcdoc="<script>const pc=new RTCPeerConnection({iceServers:[{urls:'stun:127.0.0.1:${String(udpPort)}'}]});` +
-          `pc.createDataChannel('x');pc.createOffer().then(o=>pc.setLocalDescription(o));new WebSocket('${wsUrl}/ws-sandbox')</script>"></iframe>` +
-          // Script canaries: none of these may run, let alone connect. Each
-          // attempt stands alone, so one that throws cannot mask the rest.
-          `<script>` +
-          `try{fetch('/mcp',{method:'POST',body:'{}'})}catch{}` +
-          `try{fetch('${neighbourUrl}/f')}catch{}` +
-          `try{new WebSocket('${wsUrl}/ws')}catch{}` +
-          // Workers never see Playwright's page-level WebSocket mock.
-          `try{new Worker(URL.createObjectURL(new Blob(["new WebSocket('${wsUrl}/ws-worker')"],{type:'text/javascript'})))}catch{}` +
-          `try{new SharedWorker(URL.createObjectURL(new Blob(["new WebSocket('${wsUrl}/ws-shared')"],{type:'text/javascript'})))}catch{}` +
-          // WebRTC bypasses the proxy; ICE gathering (which needs an offer
-          // and a local description) would send STUN packets to loopback.
-          `try{const pc=new RTCPeerConnection({iceServers:[{urls:'stun:127.0.0.1:${String(udpPort)}'}]});` +
-          `pc.createDataChannel('x');pc.createOffer().then(o=>pc.setLocalDescription(o))}catch{}` +
-          `</script></body>`,
-      ),
-    );
-    // Never answers, so the page never reaches network idle.
-    app.get('/a/drip', () => Promise.withResolvers<Response>().promise);
-    // Scripts are off in previews, so the never-ending request is an <img>.
-    app.get('/a/slow', (c) => c.html('<!doctype html><body><img src="/a/drip">slow</body>'));
-    ({ server, url: baseUrl } = await listen(app));
-    renderer = createPlaywrightRenderer({ executablePath: chromiumPath });
-  });
+    beforeAll(async () => {
+      const other = new Hono();
+      other.all('*', (c) => {
+        neighbourHits += 1;
+        return c.text('INTERNAL');
+      });
+      ({ server: neighbour, url: neighbourUrl } = await listen(other));
+      const wsUrl = neighbourUrl.replace('http', 'ws');
+      // A WebSocket handshake never reaches Hono; count it at the socket layer.
+      neighbour.on('upgrade', (_request, socket) => {
+        neighbourUpgrades += 1;
+        socket.destroy();
+      });
+      udp = createSocket('udp4');
+      udp.on('message', () => {
+        udpPackets += 1;
+      });
+      udp.bind(0, '127.0.0.1');
+      await once(udp, 'listening');
+      const udpPort = udp.address().port;
 
-  afterAll(async () => {
-    await renderer.close();
-    await promisify(server.close.bind(server))();
-    await promisify(neighbour.close.bind(neighbour))();
-    udp.close();
-  });
-
-  it('screenshots an html page as a JPEG', async () => {
-    const bytes = await renderer.render({
-      id: 'page',
-      mediaType: 'text/html',
-      url: `${baseUrl}/a/page`,
+      const app = new Hono();
+      app.get('/a/page', (c) =>
+        c.html('<!doctype html><body style="background:#123456;margin:0"><h1>hello</h1></body>'),
+      );
+      app.get('/a/image', (c) => c.body(PNG.buffer, 200, { 'Content-Type': 'image/png' }));
+      app.get('/a/pdf', (c) =>
+        c.body('%PDF-1.4 not really a pdf', 200, { 'Content-Type': 'application/pdf' }),
+      );
+      app.post('/mcp', (c) => {
+        mcpPosts += 1;
+        return c.json({});
+      });
+      app.get('/a/leaky', (c) =>
+        c.html(
+          `<!doctype html><body><iframe src="${neighbourUrl}/"></iframe><img src="${neighbourUrl}/i.png">` +
+            // A sandboxed srcdoc frame runs in its own process, ahead of any
+            // page-level countermeasure; only scripts-off covers it.
+            `<iframe sandbox="allow-scripts" srcdoc="<script>const pc=new RTCPeerConnection({iceServers:[{urls:'stun:127.0.0.1:${String(udpPort)}'}]});` +
+            `pc.createDataChannel('x');pc.createOffer().then(o=>pc.setLocalDescription(o));new WebSocket('${wsUrl}/ws-sandbox')</script>"></iframe>` +
+            // Script canaries: none of these may run, let alone connect. Each
+            // attempt stands alone, so one that throws cannot mask the rest.
+            `<script>` +
+            `try{fetch('/mcp',{method:'POST',body:'{}'})}catch{}` +
+            `try{fetch('${neighbourUrl}/f')}catch{}` +
+            `try{new WebSocket('${wsUrl}/ws')}catch{}` +
+            // Workers never see Playwright's page-level WebSocket mock.
+            `try{new Worker(URL.createObjectURL(new Blob(["new WebSocket('${wsUrl}/ws-worker')"],{type:'text/javascript'})))}catch{}` +
+            `try{new SharedWorker(URL.createObjectURL(new Blob(["new WebSocket('${wsUrl}/ws-shared')"],{type:'text/javascript'})))}catch{}` +
+            // WebRTC bypasses the proxy; ICE gathering (which needs an offer
+            // and a local description) would send STUN packets to loopback.
+            `try{const pc=new RTCPeerConnection({iceServers:[{urls:'stun:127.0.0.1:${String(udpPort)}'}]});` +
+            `pc.createDataChannel('x');pc.createOffer().then(o=>pc.setLocalDescription(o))}catch{}` +
+            `</script></body>`,
+        ),
+      );
+      // Never answers, so the page never reaches network idle.
+      app.get('/a/drip', () => Promise.withResolvers<Response>().promise);
+      // Scripts are off in previews, so the never-ending request is an <img>.
+      app.get('/a/slow', (c) => c.html('<!doctype html><body><img src="/a/drip">slow</body>'));
+      ({ server, url: baseUrl } = await listen(app));
+      renderer = createPlaywrightRenderer({ executablePath: chromiumPath });
     });
 
-    expect(bytes).not.toBeNull();
-    expect([...bytes!.subarray(0, 3)]).toEqual(JPEG_MAGIC);
-  });
+    afterAll(async () => {
+      await renderer.close();
+      await promisify(server.close.bind(server))();
+      await promisify(neighbour.close.bind(neighbour))();
+      udp.close();
+    }, CHROMIUM_TIMEOUT_MS);
 
-  it('screenshots an image served as bytes', async () => {
-    const bytes = await renderer.render({
-      id: 'image',
-      mediaType: 'image/png',
-      url: `${baseUrl}/a/image`,
+    it('screenshots an html page as a JPEG', async () => {
+      const bytes = await renderer.render({
+        id: 'page',
+        mediaType: 'text/html',
+        url: `${baseUrl}/a/page`,
+      });
+
+      expect(bytes).not.toBeNull();
+      expect([...bytes!.subarray(0, 3)]).toEqual(JPEG_MAGIC);
     });
 
-    expect(bytes).not.toBeNull();
-    expect([...bytes!.subarray(0, 3)]).toEqual(JPEG_MAGIC);
-  });
+    it('screenshots an image served as bytes', async () => {
+      const bytes = await renderer.render({
+        id: 'image',
+        mediaType: 'image/png',
+        url: `${baseUrl}/a/image`,
+      });
 
-  it('declines a PDF instead of throwing', async () => {
-    const bytes = await renderer.render({
-      id: 'pdf',
-      mediaType: 'application/pdf',
-      url: `${baseUrl}/a/pdf`,
+      expect(bytes).not.toBeNull();
+      expect([...bytes!.subarray(0, 3)]).toEqual(JPEG_MAGIC);
     });
 
-    expect(bytes).toBeNull();
-  });
+    it('declines a PDF instead of throwing', async () => {
+      const bytes = await renderer.render({
+        id: 'pdf',
+        mediaType: 'application/pdf',
+        url: `${baseUrl}/a/pdf`,
+      });
 
-  it('blocks every request that is not a GET to the artifact origin', async () => {
-    const bytes = await renderer.render({
-      id: 'leaky',
-      mediaType: 'text/html',
-      url: `${baseUrl}/a/leaky`,
+      expect(bytes).toBeNull();
     });
 
-    expect(bytes).not.toBeNull();
-    // ICE retries STUN at ~0.3s, 0.5s, 1s; wait long enough to catch one.
-    await delay(1200);
-    expect(neighbourHits).toBe(0);
-    expect(neighbourUpgrades).toBe(0);
-    expect(udpPackets).toBe(0);
-    expect(mcpPosts).toBe(0);
-  });
+    it('blocks every request that is not a GET to the artifact origin', async () => {
+      const bytes = await renderer.render({
+        id: 'leaky',
+        mediaType: 'text/html',
+        url: `${baseUrl}/a/leaky`,
+      });
 
-  it('abandons a page that never settles once the deadline passes', async () => {
-    const impatient = createPlaywrightRenderer({ executablePath: chromiumPath, timeoutMs: 1500 });
-    const started = Date.now();
+      expect(bytes).not.toBeNull();
+      // ICE retries STUN at ~0.3s, 0.5s, 1s; wait long enough to catch one.
+      await delay(1200);
+      expect(neighbourHits).toBe(0);
+      expect(neighbourUpgrades).toBe(0);
+      expect(udpPackets).toBe(0);
+      expect(mcpPosts).toBe(0);
+    });
 
-    await expect(
-      impatient.render({ id: 'slow', mediaType: 'text/html', url: `${baseUrl}/a/slow` }),
-    ).rejects.toThrow(/closed|Timeout/u);
+    it('abandons a page that never settles once the deadline passes', async () => {
+      const impatient = createPlaywrightRenderer({ executablePath: chromiumPath, timeoutMs: 1500 });
+      const started = Date.now();
 
-    expect(Date.now() - started).toBeLessThan(4000);
-    await impatient.close();
-  });
-});
+      await expect(
+        impatient.render({ id: 'slow', mediaType: 'text/html', url: `${baseUrl}/a/slow` }),
+      ).rejects.toThrow(/closed|Timeout/u);
+
+      expect(Date.now() - started).toBeLessThan(4000);
+      await impatient.close();
+    });
+  },
+);
