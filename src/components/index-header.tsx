@@ -15,7 +15,7 @@ type IndexHeaderProps = {
   view: IndexView;
 };
 
-const count = 'ml-1.5 text-xs text-stone-400 tabular-nums dark:text-ink-400/80';
+const count = 'ml-1.5 text-xs text-stone-500 tabular-nums dark:text-ink-400';
 const kindLink =
   'whitespace-nowrap text-stone-500 hover:text-stone-900 dark:text-ink-400 dark:hover:text-ink-100';
 const kindLinkOn = 'whitespace-nowrap font-semibold text-stone-900 dark:text-ink-100';
@@ -75,7 +75,7 @@ export const IndexHeader: FC<IndexHeaderProps> = ({ basePath, current, projects,
           <span class={count}>{entry.count}</span>
         </a>
       ))}
-      <span class="hidden text-[13px] whitespace-nowrap text-stone-400 tabular-nums sm:inline dark:text-ink-400/80">
+      <span class="hidden text-[13px] whitespace-nowrap text-stone-500 tabular-nums sm:inline dark:text-ink-400">
         {artifactsLabel(view.total)}
       </span>
     </nav>
