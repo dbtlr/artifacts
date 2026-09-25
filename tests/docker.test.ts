@@ -60,6 +60,8 @@ describe('bare Docker command construction', () => {
       'type=volume,source=artifacts-files,target=/app/data/files',
       '--mount',
       'type=volume,source=artifacts-database,target=/app/data/database',
+      '--mount',
+      'type=volume,source=artifacts-thumbs,target=/app/data/thumbs',
       'artifacts:local',
     ]);
   });
@@ -103,6 +105,23 @@ describe('bare Docker command construction', () => {
         ARTIFACTS_FILES_MOUNT: 'shared-data',
       }),
     ).toThrow(/must use different sources/u);
+    expect(() => resolveDockerConfig({ ARTIFACTS_THUMBS_MOUNT: ' ' })).toThrow(
+      /ARTIFACTS_THUMBS_MOUNT/u,
+    );
+    expect(() =>
+      resolveDockerConfig({
+        ARTIFACTS_FILES_MOUNT: 'shared-data',
+        ARTIFACTS_THUMBS_MOUNT: 'shared-data',
+      }),
+    ).toThrow(/ARTIFACTS_FILES_MOUNT and ARTIFACTS_THUMBS_MOUNT must use different sources/u);
+  });
+
+  it('mounts an absolute thumbnails directory as a bind mount at the container thumbs path', () => {
+    const config = resolveDockerConfig({ ARTIFACTS_THUMBS_MOUNT: '/srv/artifacts/thumbs' });
+
+    expect(buildBareRunArgs(config)).toContain(
+      'type=bind,source=/srv/artifacts/thumbs,target=/app/data/thumbs',
+    );
   });
 
   it.each(['relative/path', 'volume:/unexpected-target', 'x'])(
@@ -134,6 +153,11 @@ describe('bare Docker command construction', () => {
       await expect(
         validateBindMounts(resolveDockerConfig({ ARTIFACTS_DATABASE_MOUNT: file })),
       ).rejects.toThrow(/ARTIFACTS_DATABASE_MOUNT must be a directory/u);
+      await expect(
+        validateBindMounts(
+          resolveDockerConfig({ ARTIFACTS_THUMBS_MOUNT: join(directory, 'missing-thumbs') }),
+        ),
+      ).rejects.toThrow(/ARTIFACTS_THUMBS_MOUNT path does not exist/u);
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
@@ -362,6 +386,8 @@ describe('Docker operator actions', () => {
         'type=volume,source=artifacts-files,target=/app/data/files',
         '--mount',
         'type=volume,source=artifacts-database,target=/app/data/database',
+        '--mount',
+        'type=volume,source=artifacts-thumbs,target=/app/data/thumbs',
         'artifacts:local',
       ],
       ['stop', 'artifacts'],
