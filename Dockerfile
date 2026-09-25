@@ -30,6 +30,7 @@ RUN corepack enable
 # Chromium resolves the CSS generic families through fontconfig, and without
 # the aliases below `system-ui` matches nothing in particular and numerals can
 # come out of the emoji font; the aliases pin every generic to a real face.
+# Alpine's fonts.conf includes conf.d only (not local.conf), hence the path.
 RUN apk add --no-cache chromium nss freetype harfbuzz ca-certificates font-inter font-dejavu font-noto-emoji \
   && printf '%s\n' \
     '<?xml version="1.0"?>' \
@@ -38,10 +39,9 @@ RUN apk add --no-cache chromium nss freetype harfbuzz ca-certificates font-inter
     '  <alias><family>system-ui</family><prefer><family>Inter</family></prefer></alias>' \
     '  <alias><family>ui-sans-serif</family><prefer><family>Inter</family></prefer></alias>' \
     '  <alias><family>sans-serif</family><prefer><family>Inter</family><family>DejaVu Sans</family></prefer></alias>' \
-    '  <alias><family>ui-monospace</family><prefer><family>DejaVu Sans Mono</family></prefer></alias>' \
     '  <alias><family>monospace</family><prefer><family>DejaVu Sans Mono</family></prefer></alias>' \
     '</fontconfig>' \
-    > /etc/fonts/local.conf
+    > /etc/fonts/conf.d/51-artifacts-generics.conf
 
 ENV NODE_ENV=production
 ENV ARTIFACTS_PORT=3000
