@@ -169,11 +169,12 @@ are derived data: the server re-renders any that are missing at startup, so the 
 needs no backup and no mount. Without a Chromium the server logs one notice and keeps the
 placeholders.
 
-Rendering runs an HTML artifact's scripts on the server host, not in a viewer's browser. The render
-context may only make GET requests to the server's own origin: every other request, including
-POSTs to `/mcp`, WebSockets, and anything on loopback or the container network, is blocked, and a
-render that is still busy after 15 seconds is abandoned. The screenshot shows the artifact's own
-page and nothing else the server host can reach.
+A preview is a screenshot of the static document: the render context has JavaScript disabled, so
+an artifact's scripts never run on the server host, and a Mermaid fence shows as its source in the
+thumbnail. Declarative loads (images, frames, stylesheets) may only GET from the server's own
+origin; everything else, including `/mcp` and anything on loopback or the container network, is
+blocked at a proxy nobody listens on, and a render that is still busy after 15 seconds is
+abandoned.
 
 ## Development
 

@@ -119,7 +119,12 @@ describe.skipIf(chromiumPath === undefined)('createPlaywrightRenderer', () => {
     app.get('/a/leaky', (c) =>
       c.html(
         `<!doctype html><body><iframe src="${neighbourUrl}/"></iframe><img src="${neighbourUrl}/i.png">` +
-          // Each attempt stands alone, so one that throws cannot mask the rest.
+          // A sandboxed srcdoc frame runs in its own process, ahead of any
+          // page-level countermeasure; only scripts-off covers it.
+          `<iframe sandbox="allow-scripts" srcdoc="<script>const pc=new RTCPeerConnection({iceServers:[{urls:'stun:127.0.0.1:${String(udpPort)}'}]});` +
+          `pc.createDataChannel('x');pc.createOffer().then(o=>pc.setLocalDescription(o));new WebSocket('${wsUrl}/ws-sandbox')</script>"></iframe>` +
+          // Script canaries: none of these may run, let alone connect. Each
+          // attempt stands alone, so one that throws cannot mask the rest.
           `<script>` +
           `try{fetch('/mcp',{method:'POST',body:'{}'})}catch{}` +
           `try{fetch('${neighbourUrl}/f')}catch{}` +
@@ -136,9 +141,8 @@ describe.skipIf(chromiumPath === undefined)('createPlaywrightRenderer', () => {
     );
     // Never answers, so the page never reaches network idle.
     app.get('/a/drip', () => Promise.withResolvers<Response>().promise);
-    app.get('/a/slow', (c) =>
-      c.html('<!doctype html><body><script>fetch("/a/drip")</script>slow</body>'),
-    );
+    // Scripts are off in previews, so the never-ending request is an <img>.
+    app.get('/a/slow', (c) => c.html('<!doctype html><body><img src="/a/drip">slow</body>'));
     ({ server, url: baseUrl } = await listen(app));
     renderer = createPlaywrightRenderer({ executablePath: chromiumPath });
   });

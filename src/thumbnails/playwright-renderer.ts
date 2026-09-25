@@ -64,26 +64,26 @@ function imagePage(url: string): string {
   );
 }
 
-// The render context may only GET from this server's own origin. An artifact's
-// scripts already run same-origin in a trusted viewer's browser, but a page
-// rendered here runs on the server host with nobody watching: without a
-// fence it could screenshot loopback or container-network neighbours into a
-// public thumbnail, or POST to /mcp and re-trigger its own render forever.
+// A preview is a screenshot of the static document. An artifact's scripts
+// run same-origin in a trusted viewer's browser, but a page rendered here
+// runs on the server host with nobody watching, and every script-driven
+// network path (fetch, WebSocket, WebTransport, WebRTC, workers, popups)
+// turned out to need its own fence with its own gaps. So the render context
+// has JavaScript off (see `render`), which removes that whole class: a
+// mermaid fence shows as its source in the thumbnail, and that is the trade.
 //
-// The fence has two layers. The browser is launched (see `launch`) with a
-// proxy nobody listens on and a bypass list naming only the server's own
-// host and port, so every other connection the network stack makes, from
-// any page, frame, or worker, including WebSocket upgrades, dies at the
-// proxy. This request filter then narrows the one allowed origin to GETs,
-// which keeps /mcp out of reach. (Playwright's routeWebSocket is a page-JS
-// mock that workers never see, so it is no substitute for the proxy.)
+// What remains is declarative loads (img, iframe, stylesheet, meta refresh),
+// fenced twice. The browser is launched (see `launch`) with a proxy nobody
+// listens on and a bypass list naming only the server's own host and port,
+// so every other connection the network stack makes, from any page or frame,
+// dies at the proxy. This request filter then narrows the one allowed origin
+// to GETs, which keeps /mcp out of reach even from a form.
 async function confineToOrigin(context: BrowserContext, origin: string): Promise<void> {
   await context.route('**/*', (route) => {
     const request = route.request();
     const allowed = request.method() === 'GET' && new URL(request.url()).origin === origin;
     return allowed ? route.continue() : route.abort('blockedbyclient');
   });
-  await context.addInitScript(removeWebRtc);
 }
 
 // TCP port 9 (discard) on loopback: nothing listens there, so proxied
@@ -100,16 +100,6 @@ export function proxyFencedTo(origin: string): { bypass: string; server: string 
   const defaultPort = url.protocol === 'https:' ? '443' : '80';
   const port = url.port === '' ? defaultPort : url.port;
   return { bypass: `<-loopback>,${url.hostname}:${port}`, server: DEAD_PROXY };
-}
-
-// WebRTC talks UDP to STUN/TURN servers and resolves their hostnames on its
-// own, past both the proxy and the request filter, so it is removed from
-// every document the render context creates. It exists on windows only,
-// never in workers, so the init script covers it fully.
-function removeWebRtc(): void {
-  for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCIceTransport']) {
-    Reflect.deleteProperty(globalThis, name);
-  }
 }
 
 async function closeQuietly(context: BrowserContext): Promise<void> {
@@ -147,6 +137,11 @@ export function createPlaywrightRenderer({
           // boundary here anyway.
           '--no-sandbox',
           '--disable-dev-shm-usage',
+          // Scripting off in every renderer process from the moment it
+          // starts. The per-context `javaScriptEnabled: false` is applied
+          // over CDP after a frame exists, which a sandboxed srcdoc frame in
+          // its own process can beat; a startup setting cannot be raced.
+          '--blink-settings=scriptEnabled=false',
         ],
         proxy: proxyFencedTo(origin),
         ...(executablePath === undefined ? {} : { executablePath }),
@@ -210,6 +205,10 @@ export function createPlaywrightRenderer({
       acceptDownloads: false,
       colorScheme: 'dark',
       deviceScaleFactor: DEVICE_SCALE_FACTOR,
+      // See confineToOrigin: a preview is the static document, scripts off.
+      // This is the per-page CDP switch; the launch-time blink setting below
+      // is what actually guarantees it for every frame and process.
+      javaScriptEnabled: false,
       viewport: VIEWPORT,
     });
     // One deadline for the whole render: closing the context makes whatever
