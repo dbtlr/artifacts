@@ -1,4 +1,7 @@
+import { createSocket } from 'node:dgram';
+import type { Socket } from 'node:dgram';
 import { once } from 'node:events';
+import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 
 import type { ServerType } from '@hono/node-server';
@@ -61,6 +64,8 @@ describe.skipIf(chromiumPath === undefined)('createPlaywrightRenderer', () => {
   let neighbourUrl: string;
   let neighbourHits = 0;
   let neighbourUpgrades = 0;
+  let udp: Socket;
+  let udpPackets = 0;
   let mcpPosts = 0;
   let renderer: ThumbnailRenderer;
 
@@ -71,11 +76,19 @@ describe.skipIf(chromiumPath === undefined)('createPlaywrightRenderer', () => {
       return c.text('INTERNAL');
     });
     ({ server: neighbour, url: neighbourUrl } = await listen(other));
+    const wsUrl = neighbourUrl.replace('http', 'ws');
     // A WebSocket handshake never reaches Hono; count it at the socket layer.
     neighbour.on('upgrade', (_request, socket) => {
       neighbourUpgrades += 1;
       socket.destroy();
     });
+    udp = createSocket('udp4');
+    udp.on('message', () => {
+      udpPackets += 1;
+    });
+    udp.bind(0, '127.0.0.1');
+    await once(udp, 'listening');
+    const udpPort = udp.address().port;
 
     const app = new Hono();
     app.get('/a/page', (c) =>
@@ -93,7 +106,13 @@ describe.skipIf(chromiumPath === undefined)('createPlaywrightRenderer', () => {
       c.html(
         `<!doctype html><body><iframe src="${neighbourUrl}/"></iframe><img src="${neighbourUrl}/i.png">` +
           `<script>fetch('/mcp',{method:'POST',body:'{}'});fetch('${neighbourUrl}/f');` +
-          `new WebSocket('${neighbourUrl.replace('http', 'ws')}/ws');</script></body>`,
+          `new WebSocket('${wsUrl}/ws');` +
+          // Workers never see Playwright's page-level WebSocket mock.
+          `new Worker(URL.createObjectURL(new Blob(["new WebSocket('${wsUrl}/ws-worker')"],{type:'text/javascript'})));` +
+          `new SharedWorker(URL.createObjectURL(new Blob(["new WebSocket('${wsUrl}/ws-shared')"],{type:'text/javascript'})));` +
+          // WebRTC bypasses the proxy; STUN would be a UDP packet to loopback.
+          `new RTCPeerConnection({iceServers:[{urls:'stun:127.0.0.1:${String(udpPort)}'}]}).createDataChannel('x');` +
+          `</script></body>`,
       ),
     );
     // Never answers, so the page never reaches network idle.
@@ -109,6 +128,7 @@ describe.skipIf(chromiumPath === undefined)('createPlaywrightRenderer', () => {
     await renderer.close();
     await promisify(server.close.bind(server))();
     await promisify(neighbour.close.bind(neighbour))();
+    udp.close();
   });
 
   it('screenshots an html page as a JPEG', async () => {
@@ -151,8 +171,11 @@ describe.skipIf(chromiumPath === undefined)('createPlaywrightRenderer', () => {
     });
 
     expect(bytes).not.toBeNull();
+    // Give a straggling STUN packet time to arrive if one were ever sent.
+    await delay(300);
     expect(neighbourHits).toBe(0);
     expect(neighbourUpgrades).toBe(0);
+    expect(udpPackets).toBe(0);
     expect(mcpPosts).toBe(0);
   });
 

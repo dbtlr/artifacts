@@ -66,21 +66,34 @@ function imagePage(url: string): string {
 
 // The render context may only GET from this server's own origin. An artifact's
 // scripts already run same-origin in a trusted viewer's browser, but a page
-// rendered here runs on the server host with nobody watching: without this
-// filter it could screenshot loopback or container-network neighbours into a
+// rendered here runs on the server host with nobody watching: without a
+// fence it could screenshot loopback or container-network neighbours into a
 // public thumbnail, or POST to /mcp and re-trigger its own render forever.
+//
+// The fence has two layers. The browser is launched (see `launch`) with a
+// proxy nobody listens on and a bypass list naming only the server's own
+// host and port, so every other connection the network stack makes, from
+// any page, frame, or worker, including WebSocket upgrades, dies at the
+// proxy. This request filter then narrows the one allowed origin to GETs,
+// which keeps /mcp out of reach. (Playwright's routeWebSocket is a page-JS
+// mock that workers never see, so it is no substitute for the proxy.)
 async function confineToOrigin(context: BrowserContext, origin: string): Promise<void> {
   await context.route('**/*', (route) => {
     const request = route.request();
     const allowed = request.method() === 'GET' && new URL(request.url()).origin === origin;
     return allowed ? route.continue() : route.abort('blockedbyclient');
   });
-  // context.route() does not see WebSocket upgrades, which are otherwise a
-  // GET to any host and port. This server speaks no WebSocket, so none is
-  // legitimate.
-  await context.routeWebSocket(/.*/u, (socket) => {
-    void socket.close();
-  });
+}
+
+// TCP port 9 (discard) on loopback: nothing listens there, so proxied
+// connections are refused at once rather than hanging.
+const DEAD_PROXY = 'http://127.0.0.1:9';
+
+function proxyFencedTo(origin: string): { bypass: string; server: string } {
+  // `<-loopback>` removes Chromium's implicit "never proxy loopback" rule,
+  // so 127.0.0.1 on any other port goes to the dead proxy like everything
+  // else; the one host:port bypass is this server.
+  return { bypass: `<-loopback>,${new URL(origin).host}`, server: DEAD_PROXY };
 }
 
 async function closeQuietly(context: BrowserContext): Promise<void> {
@@ -103,15 +116,26 @@ export function createPlaywrightRenderer({
 }: RendererOptions = {}): ThumbnailRenderer {
   let browser: Promise<Browser> | undefined;
   let disabled = false;
+  // The proxy fence is a launch option, so the browser is pinned to the
+  // first origin it renders; every artifact URL comes from the same
+  // server, so a second origin is a caller bug, not a case to support.
+  let pinnedOrigin: string | undefined;
 
-  async function launch(): Promise<Browser> {
+  async function launch(origin: string): Promise<Browser> {
     try {
       const launched = await chromium.launch({
-        // The runtime container runs as an unprivileged user without the
-        // kernel features Chromium's own sandbox wants; content is
-        // self-authored on a trusted network, so the sandbox is not the
-        // boundary here anyway.
-        args: ['--no-sandbox', '--disable-dev-shm-usage'],
+        args: [
+          // The runtime container runs as an unprivileged user without the
+          // kernel features Chromium's own sandbox wants; content is
+          // self-authored on a trusted network, so the sandbox is not the
+          // boundary here anyway.
+          '--no-sandbox',
+          '--disable-dev-shm-usage',
+          // WebRTC ignores the proxy; with this policy it sends no UDP of
+          // its own, and TURN over TCP goes through the dead proxy.
+          '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
+        ],
+        proxy: proxyFencedTo(origin),
         ...(executablePath === undefined ? {} : { executablePath }),
         // Playwright's own signal handlers close the browser but swallow the
         // signal, which would leave the HTTP server running through a
@@ -133,9 +157,13 @@ export function createPlaywrightRenderer({
     }
   }
 
-  async function currentBrowser(): Promise<Browser | null> {
+  async function currentBrowser(origin: string): Promise<Browser | null> {
+    pinnedOrigin ??= origin;
+    if (origin !== pinnedOrigin) {
+      throw new Error(`Thumbnail renderer is pinned to ${pinnedOrigin}, cannot render ${origin}`);
+    }
     try {
-      browser ??= launch();
+      browser ??= launch(origin);
       return await browser;
     } catch {
       // Already reported by launch(); the caller declines quietly.
@@ -160,7 +188,8 @@ export function createPlaywrightRenderer({
     if (disabled || target.mediaType === 'application/pdf') {
       return null;
     }
-    const launched = await currentBrowser();
+    const origin = new URL(target.url).origin;
+    const launched = await currentBrowser(origin);
     if (launched === null) {
       return null;
     }
@@ -177,7 +206,7 @@ export function createPlaywrightRenderer({
       void closeQuietly(context);
     }, timeoutMs);
     try {
-      await confineToOrigin(context, new URL(target.url).origin);
+      await confineToOrigin(context, origin);
       return await capture(context, target);
     } finally {
       clearTimeout(deadline);
