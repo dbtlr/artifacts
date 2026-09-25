@@ -38,11 +38,11 @@ const STATIC_ROOT = process.env.ARTIFACTS_STATIC_ROOT ?? join(moduleDir, '..', '
 
 const MAX_MCP_BODY_BYTES = 16 * 1024 * 1024;
 
-// `store` is left undefined in production (`export const app` below), so the
-// default sqlite-backed services (see services.ts) are only ever touched
-// lazily, on the first actual request — never merely by importing this
-// module. Tests pass temp-directory services explicitly instead of touching
-// the repo's data/.
+// server.ts passes the composed services in; `export const app` below (used
+// by embedding callers and tests) leaves `store` undefined and resolves the
+// same default services (see services.ts) lazily on the first request —
+// never merely by importing this module. Most tests pass temp-directory
+// services explicitly instead of touching the repo's data/.
 async function defaultServices(mcpService?: ArtifactService): Promise<AppServices> {
   const services = await getDefaultAppServices();
   return mcpService === undefined ? services : { ...services, mcp: mcpService };

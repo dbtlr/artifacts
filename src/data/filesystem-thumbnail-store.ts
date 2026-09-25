@@ -27,9 +27,17 @@ export class FilesystemThumbnailStore implements ThumbnailStore {
     return existsSync(pathFor(this.dir, id));
   }
 
+  // Read-then-check rather than check-then-read, so a remove landing between
+  // the two cannot turn a missing file into a thrown error.
   read(id: string): Uint8Array | null {
-    const path = pathFor(this.dir, id);
-    return existsSync(path) ? new Uint8Array(readFileSync(path)) : null;
+    try {
+      return new Uint8Array(readFileSync(pathFor(this.dir, id)));
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        return null;
+      }
+      throw error;
+    }
   }
 
   remove(id: string): void {

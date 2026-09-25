@@ -1,6 +1,6 @@
 import { access } from 'node:fs/promises';
 
-import type { Browser } from 'playwright-core';
+import type { Browser, BrowserContext } from 'playwright-core';
 import { chromium } from 'playwright-core';
 
 import { mediaDefinition } from '../artifacts/media.js';
@@ -45,6 +45,9 @@ export async function resolveChromiumPath(env: NodeJS.ProcessEnv): Promise<strin
 type RendererOptions = {
   executablePath?: string | undefined;
   report?: (message: string) => void;
+  // Upper bound for one whole render, from opening the page to the
+  // screenshot; a page that is still busy at the deadline is closed and the
+  // render fails.
   timeoutMs?: number;
 };
 
@@ -59,6 +62,27 @@ function imagePage(url: string): string {
     '<!doctype html><html><body style="margin:0;background:#000;display:grid;place-items:center;height:100vh">' +
     `<img src="${url}" alt="" style="max-width:100%;max-height:100%;object-fit:contain"></body></html>`
   );
+}
+
+// The render context may only GET from this server's own origin. An artifact's
+// scripts already run same-origin in a trusted viewer's browser, but a page
+// rendered here runs on the server host with nobody watching: without this
+// filter it could screenshot loopback or container-network neighbours into a
+// public thumbnail, or POST to /mcp and re-trigger its own render forever.
+async function confineToOrigin(context: BrowserContext, origin: string): Promise<void> {
+  await context.route('**/*', (route) => {
+    const request = route.request();
+    const allowed = request.method() === 'GET' && new URL(request.url()).origin === origin;
+    return allowed ? route.continue() : route.abort('blockedbyclient');
+  });
+}
+
+async function closeQuietly(context: BrowserContext): Promise<void> {
+  try {
+    await context.close();
+  } catch {
+    // Already closed by the render's own finally; nothing to do.
+  }
 }
 
 // One shared headless Chromium, launched on first use and relaunched after a
@@ -83,6 +107,12 @@ export function createPlaywrightRenderer({
         // boundary here anyway.
         args: ['--no-sandbox', '--disable-dev-shm-usage'],
         ...(executablePath === undefined ? {} : { executablePath }),
+        // Playwright's own signal handlers close the browser but swallow the
+        // signal, which would leave the HTTP server running through a
+        // `docker stop`. server.ts owns shutdown and calls close().
+        handleSIGHUP: false,
+        handleSIGINT: false,
+        handleSIGTERM: false,
       });
       launched.on('disconnected', () => {
         browser = undefined;
@@ -97,9 +127,26 @@ export function createPlaywrightRenderer({
     }
   }
 
-  function currentBrowser(): Promise<Browser> {
-    browser ??= launch();
-    return browser;
+  async function currentBrowser(): Promise<Browser | null> {
+    try {
+      browser ??= launch();
+      return await browser;
+    } catch {
+      // Already reported by launch(); the caller declines quietly.
+      return null;
+    }
+  }
+
+  async function capture(context: BrowserContext, target: ThumbnailTarget): Promise<Uint8Array> {
+    const page = await context.newPage();
+    page.setDefaultTimeout(timeoutMs);
+    if (mediaDefinition(target.mediaType).renderingMode === 'binary') {
+      await page.setContent(imagePage(target.url), { waitUntil: 'networkidle' });
+    } else {
+      await page.goto(target.url, { waitUntil: 'networkidle' });
+    }
+    const shot = await page.screenshot({ quality: JPEG_QUALITY, type: 'jpeg' });
+    return new Uint8Array(shot);
   }
 
   async function render(target: ThumbnailTarget): Promise<Uint8Array | null> {
@@ -107,24 +154,27 @@ export function createPlaywrightRenderer({
     if (disabled || target.mediaType === 'application/pdf') {
       return null;
     }
-    const context = await (
-      await currentBrowser()
-    ).newContext({
+    const launched = await currentBrowser();
+    if (launched === null) {
+      return null;
+    }
+    const context = await launched.newContext({
+      acceptDownloads: false,
       colorScheme: 'dark',
       deviceScaleFactor: DEVICE_SCALE_FACTOR,
       viewport: VIEWPORT,
     });
+    // One deadline for the whole render: closing the context makes whatever
+    // step is in flight reject, so a page that keeps the network busy and
+    // then spins cannot hold the queue past timeoutMs.
+    const deadline = setTimeout(() => {
+      void closeQuietly(context);
+    }, timeoutMs);
     try {
-      const page = await context.newPage();
-      page.setDefaultTimeout(timeoutMs);
-      if (mediaDefinition(target.mediaType).renderingMode === 'binary') {
-        await page.setContent(imagePage(target.url), { waitUntil: 'networkidle' });
-      } else {
-        await page.goto(target.url, { waitUntil: 'networkidle' });
-      }
-      const shot = await page.screenshot({ quality: JPEG_QUALITY, type: 'jpeg' });
-      return new Uint8Array(shot);
+      await confineToOrigin(context, new URL(target.url).origin);
+      return await capture(context, target);
     } finally {
+      clearTimeout(deadline);
       await context.close();
     }
   }

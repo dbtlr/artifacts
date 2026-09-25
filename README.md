@@ -169,6 +169,12 @@ are derived data: the server re-renders any that are missing at startup, so the 
 needs no backup and no mount. Without a Chromium the server logs one notice and keeps the
 placeholders.
 
+Rendering runs an HTML artifact's scripts on the server host, not in a viewer's browser. The render
+context may only make GET requests to the server's own origin: every other request, including
+POSTs to `/mcp` and anything on loopback or the container network, is blocked, and a render that
+is still busy after 15 seconds is abandoned. The screenshot is what a trusted viewer would see, and
+nothing more.
+
 ## Development
 
 ```sh
@@ -211,8 +217,9 @@ with syntax highlighting; Mermaid diagrams are rendered in the browser. Allowlis
 are served directly from `/a/:id`; SVG responses receive an additional restrictive content security
 policy. Gallery previews are screenshots taken by Alpine's Chromium package, driven by
 playwright-core from a serial in-process queue. The Docker image is a two-stage Alpine build that
-runs as the non-root `node` user and writes only to its two persistence mounts and the derived
-thumbnails directory.
+runs as the non-root `node` user; the application writes only to its two persistence mounts and
+the derived thumbnails directory, and Chromium keeps its own scratch profile under the container's
+temporary directory.
 
 The metadata and content adapters are deliberately narrow seams for a future hosting requirement,
 not a configurable backend system. PostgreSQL, object storage, multipart browser uploads, presigned

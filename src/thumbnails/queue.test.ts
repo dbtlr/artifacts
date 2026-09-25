@@ -45,7 +45,14 @@ function fakeRenderer(
   };
 }
 
+// A render whose completion the test controls.
+function gate(): { open: () => void; wait: Promise<void> } {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  return { open: resolve, wait: promise };
+}
+
 const bytesFor = (id: string) => new TextEncoder().encode(`jpeg:${id}`);
+const BASE = 'http://127.0.0.1:3000';
 
 describe('createThumbnailQueue', () => {
   it('defers rendering until started, then renders each id once in order', async () => {
@@ -62,15 +69,11 @@ describe('createThumbnailQueue', () => {
     await queue.idle();
     expect(renderer.calls).toEqual([]);
 
-    queue.start(renderer, 'http://127.0.0.1:3000');
+    queue.start(renderer, BASE);
     await queue.idle();
 
     expect(renderer.calls.map((call) => call.id)).toEqual(['a', 'b']);
-    expect(renderer.calls[0]).toEqual({
-      id: 'a',
-      mediaType: 'text/html',
-      url: 'http://127.0.0.1:3000/a/a',
-    });
+    expect(renderer.calls[0]).toEqual({ id: 'a', mediaType: 'text/html', url: `${BASE}/a/a` });
     expect(store.read('a')).toEqual(bytesFor('a'));
     expect(store.read('b')).toEqual(bytesFor('b'));
   });
@@ -82,7 +85,7 @@ describe('createThumbnailQueue', () => {
 
     queue.enqueue('a');
     queue.enqueue('a');
-    queue.start(renderer, 'http://127.0.0.1:3000');
+    queue.start(renderer, BASE);
     await queue.idle();
 
     expect(renderer.calls).toHaveLength(1);
@@ -92,7 +95,7 @@ describe('createThumbnailQueue', () => {
     const store = memoryStore();
     const renderer = fakeRenderer((target) => Promise.resolve(bytesFor(target.id)));
     const queue = createThumbnailQueue({ lookup: artifact, store });
-    queue.start(renderer, 'http://127.0.0.1:3000');
+    queue.start(renderer, BASE);
 
     queue.enqueue('a');
     await queue.idle();
@@ -102,17 +105,62 @@ describe('createThumbnailQueue', () => {
     expect(renderer.calls).toHaveLength(2);
   });
 
+  it('picks up an id enqueued while another render is in flight', async () => {
+    const store = memoryStore();
+    const first = gate();
+    const renderer = fakeRenderer(async (target) => {
+      if (target.id === 'a') {
+        await first.wait;
+      }
+      return bytesFor(target.id);
+    });
+    const queue = createThumbnailQueue({ lookup: artifact, store });
+    queue.start(renderer, BASE);
+
+    queue.enqueue('a');
+    await Promise.resolve();
+    expect(renderer.calls.map((call) => call.id)).toEqual(['a']);
+    queue.enqueue('b');
+    first.open();
+    await queue.idle();
+
+    expect(renderer.calls.map((call) => call.id)).toEqual(['a', 'b']);
+    expect(store.has('b')).toBe(true);
+  });
+
   it('skips an artifact that was removed before its turn', async () => {
     const store = memoryStore();
     const renderer = fakeRenderer((target) => Promise.resolve(bytesFor(target.id)));
     const queue = createThumbnailQueue({ lookup: () => null, store });
-    queue.start(renderer, 'http://127.0.0.1:3000');
+    queue.start(renderer, BASE);
 
     queue.enqueue('gone');
     await queue.idle();
 
     expect(renderer.calls).toEqual([]);
     expect(store.files.size).toBe(0);
+  });
+
+  it('does not write a preview for an artifact removed while it was rendering', async () => {
+    const store = memoryStore();
+    const artifacts = new Map([['a', artifact('a')]]);
+    const inFlight = gate();
+    const renderer = fakeRenderer(async (target) => {
+      await inFlight.wait;
+      return bytesFor(target.id);
+    });
+    const queue = createThumbnailQueue({ lookup: (id) => artifacts.get(id) ?? null, store });
+    queue.start(renderer, BASE);
+
+    queue.enqueue('a');
+    await Promise.resolve();
+    // What the service decorator does on remove: metadata gone, file dropped.
+    artifacts.delete('a');
+    store.remove('a');
+    inFlight.open();
+    await queue.idle();
+
+    expect(store.has('a')).toBe(false);
   });
 
   it('keeps draining after a renderer failure and reports it', async () => {
@@ -130,7 +178,7 @@ describe('createThumbnailQueue', () => {
       },
       store,
     });
-    queue.start(renderer, 'http://127.0.0.1:3000');
+    queue.start(renderer, BASE);
 
     queue.enqueue('bad');
     queue.enqueue('good');
@@ -141,11 +189,39 @@ describe('createThumbnailQueue', () => {
     expect(reported).toEqual(['Thumbnail render failed for bad: boom']);
   });
 
+  it('reports a throwing lookup instead of rejecting, and keeps draining', async () => {
+    const store = memoryStore();
+    const reported: string[] = [];
+    const renderer = fakeRenderer((target) => Promise.resolve(bytesFor(target.id)));
+    const queue = createThumbnailQueue({
+      lookup: (id) => {
+        if (id === 'locked') {
+          throw new Error('SQLITE_BUSY: database is locked');
+        }
+        return artifact(id);
+      },
+      report: (message) => {
+        reported.push(message);
+      },
+      store,
+    });
+    queue.start(renderer, BASE);
+
+    queue.enqueue('locked');
+    queue.enqueue('fine');
+    await expect(queue.idle()).resolves.toBeUndefined();
+
+    expect(reported).toEqual([
+      'Thumbnail render failed for locked: SQLITE_BUSY: database is locked',
+    ]);
+    expect(store.has('fine')).toBe(true);
+  });
+
   it('writes nothing when the renderer declines with null', async () => {
     const store = memoryStore();
     const renderer = fakeRenderer(() => Promise.resolve(null));
     const queue = createThumbnailQueue({ lookup: artifact, store });
-    queue.start(renderer, 'http://127.0.0.1:3000');
+    queue.start(renderer, BASE);
 
     queue.enqueue('a');
     await queue.idle();
@@ -158,7 +234,7 @@ describe('createThumbnailQueue', () => {
     store.write('have', bytesFor('have'));
     const renderer = fakeRenderer((target) => Promise.resolve(bytesFor(target.id)));
     const queue = createThumbnailQueue({ lookup: artifact, store });
-    queue.start(renderer, 'http://127.0.0.1:3000');
+    queue.start(renderer, BASE);
 
     queue.backfill([artifact('have'), artifact('need')]);
     await queue.idle();

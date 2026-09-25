@@ -27,9 +27,15 @@ function defaultReport(message: string): void {
   process.stderr.write(`${message}\n`);
 }
 
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 // One render at a time, in enqueue order, so a burst of uploads never opens a
 // pile of browser pages at once. Ids are kept in a Set, so an artifact queued
 // twice before its turn renders once; queued again after, it renders again.
+// Every failure (lookup, renderer, store) is reported and the queue moves on:
+// nothing here may reject into the caller or become an unhandled rejection.
 export function createThumbnailQueue({
   lookup,
   report = defaultReport,
@@ -41,22 +47,26 @@ export function createThumbnailQueue({
   let draining: Promise<void> | undefined;
 
   async function renderOne(id: string): Promise<void> {
-    const artifact = lookup(id);
-    if (artifact === null || renderer === undefined) {
+    if (renderer === undefined) {
       return;
     }
     try {
+      const artifact = lookup(id);
+      if (artifact === null) {
+        return;
+      }
       const bytes = await renderer.render({
         id,
         mediaType: artifact.mediaType,
         url: `${baseUrl}/a/${id}`,
       });
-      if (bytes !== null) {
+      // Removed while rendering: the remove hook already dropped the old
+      // file, so writing now would leave an orphan behind.
+      if (bytes !== null && lookup(id) !== null) {
         store.write(id, bytes);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      report(`Thumbnail render failed for ${id}: ${message}`);
+      report(`Thumbnail render failed for ${id}: ${describe(error)}`);
     }
   }
 
@@ -76,6 +86,8 @@ export function createThumbnailQueue({
   async function run(): Promise<void> {
     try {
       await drain();
+    } catch (error) {
+      report(`Thumbnail queue stopped draining: ${describe(error)}`);
     } finally {
       draining = undefined;
       // Anything enqueued while the last render was in flight.
