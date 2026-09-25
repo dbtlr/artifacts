@@ -10,7 +10,28 @@ export type DockerConfig = {
   filesMount: string;
   port: number;
   publicBaseUrl: string;
+  // Rendered previews. Derived data (the server re-renders whatever is
+  // missing at boot), so losing it costs time, not artifacts; mounted so a
+  // container replacement does not re-render every preview.
+  thumbsMount: string;
 };
+
+type MountVariable =
+  | 'ARTIFACTS_DATABASE_MOUNT'
+  | 'ARTIFACTS_FILES_MOUNT'
+  | 'ARTIFACTS_THUMBS_MOUNT';
+
+// Every persistence mount with its variable name and container path, in one
+// place, so argument building and both validations cannot disagree.
+function persistenceMounts(
+  config: DockerConfig,
+): readonly (readonly [MountVariable, string, string])[] {
+  return [
+    ['ARTIFACTS_FILES_MOUNT', config.filesMount, '/app/data/files'],
+    ['ARTIFACTS_DATABASE_MOUNT', config.databaseMount, '/app/data/database'],
+    ['ARTIFACTS_THUMBS_MOUNT', config.thumbsMount, '/app/data/thumbs'],
+  ];
+}
 
 export type DockerAction = 'build' | 'check' | 'logs' | 'start' | 'stop';
 export type DockerRunResult = {
@@ -82,17 +103,26 @@ export function resolveDockerConfig(env: NodeJS.ProcessEnv): DockerConfig {
     env.ARTIFACTS_FILES_MOUNT,
     'artifacts-files',
   );
-  if (databaseMount === filesMount) {
-    throw new Error(
-      'ARTIFACTS_DATABASE_MOUNT and ARTIFACTS_FILES_MOUNT must use different sources',
-    );
-  }
-  return {
+  const thumbsMount = resolveMount(
+    'ARTIFACTS_THUMBS_MOUNT',
+    env.ARTIFACTS_THUMBS_MOUNT,
+    'artifacts-thumbs',
+  );
+  const config: DockerConfig = {
     databaseMount,
     filesMount,
     port,
     publicBaseUrl: env.ARTIFACTS_PUBLIC_BASE_URL ?? `http://localhost:${String(port)}`,
+    thumbsMount,
   };
+  const mounts = persistenceMounts(config);
+  for (const [index, [name, source]] of mounts.entries()) {
+    const clash = mounts.slice(index + 1).find(([, other]) => other === source);
+    if (clash !== undefined) {
+      throw new Error(`${name} and ${clash[0]} must use different sources`);
+    }
+  }
+  return config;
 }
 
 function mountArgument(source: string, target: string): string {
@@ -117,10 +147,10 @@ export function buildBareRunArgs(config: DockerConfig): string[] {
     `ARTIFACTS_PORT=${String(config.port)}`,
     '--env',
     `ARTIFACTS_PUBLIC_BASE_URL=${config.publicBaseUrl}`,
-    '--mount',
-    mountArgument(config.filesMount, '/app/data/files'),
-    '--mount',
-    mountArgument(config.databaseMount, '/app/data/database'),
+    ...persistenceMounts(config).flatMap(([, source, target]) => [
+      '--mount',
+      mountArgument(source, target),
+    ]),
     IMAGE_NAME,
   ];
 }
@@ -131,13 +161,8 @@ function buildBareCreateArgs(config: DockerConfig): string[] {
 }
 
 export async function validateBindMounts(config: DockerConfig): Promise<void> {
-  const mounts = [
-    ['ARTIFACTS_DATABASE_MOUNT', config.databaseMount],
-    ['ARTIFACTS_FILES_MOUNT', config.filesMount],
-  ] as const;
-
   await Promise.all(
-    mounts.map(async ([name, source]) => {
+    persistenceMounts(config).map(async ([name, source]) => {
       if (!isAbsolute(source) && !win32.isAbsolute(source)) {
         return;
       }
@@ -161,13 +186,8 @@ export async function validateBindMounts(config: DockerConfig): Promise<void> {
 }
 
 async function validateBindMountWritability(config: DockerConfig, run: DockerRun): Promise<void> {
-  const mounts = [
-    ['ARTIFACTS_DATABASE_MOUNT', config.databaseMount],
-    ['ARTIFACTS_FILES_MOUNT', config.filesMount],
-  ] as const;
-
   await Promise.all(
-    mounts.map(async ([name, source]) => {
+    persistenceMounts(config).map(async ([name, source]) => {
       if (!isAbsolute(source) && !win32.isAbsolute(source)) {
         return;
       }
