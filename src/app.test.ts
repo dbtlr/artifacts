@@ -646,7 +646,7 @@ describe('gallery index', () => {
     expect(header).toBeDefined();
     // The selector is a details element listing every project with counts,
     // and "All projects" carries the sum.
-    expect(header).toMatch(/<details[^>]*>[\s\S]*<summary[^>]*>All projects</u);
+    expect(header).toMatch(/<details[^>]*>[\s\S]*<summary[^>]*>(?:<span[^>]*>)?All projects</u);
     expect(header).toMatch(/All projects<[^>]*>\s*<[^>]*>3</u);
     expect(header).toContain('href="/p/side%20project"');
     // The kind links and the count live in the header, not a second row.
@@ -659,7 +659,7 @@ describe('gallery index', () => {
     const body = await (await testApp.request('/p/scanner')).text();
     const header = /<header[^>]*>([\s\S]*?)<\/header>/u.exec(body)?.[1];
 
-    expect(header).toMatch(/<summary[^>]*>scanner</u);
+    expect(header).toMatch(/<summary[^>]*>(?:<span[^>]*>)?scanner</u);
     expect(header).toContain('2 artifacts');
     expect(header).toMatch(/All projects<[^>]*>\s*<[^>]*>3</u);
     expect(header).toContain('href="/p/side%20project"');
