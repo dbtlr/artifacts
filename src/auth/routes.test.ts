@@ -8,7 +8,10 @@ import { createApp } from '../app.js';
 import { SqliteOwnerAuthStore } from '../data/sqlite-owner-auth-store.js';
 import type { ArtifactService } from '../data/store.js';
 import { createByteNativeArtifactService } from '../data/store.js';
+import { createThumbnailQueue } from '../thumbnails/queue.js';
 import { createOwnerAuth, LOGIN_ATTEMPT_LIMIT, SESSION_LIFETIME_SECONDS } from './owner-auth.js';
+import type { OwnerAuth } from './owner-auth.js';
+import { SIGNED_URL_LIFETIME_SECONDS } from './signed-urls.js';
 
 const PASSWORD = 'correct horse battery staple';
 // app.request() resolves paths against http://localhost.
@@ -132,12 +135,13 @@ describe('with no owner password', () => {
 });
 
 describe('with an owner password', () => {
+  let auth: OwnerAuth;
   let testApp: ReturnType<typeof createApp>;
   const originalBaseUrl = process.env.ARTIFACTS_PUBLIC_BASE_URL;
 
   beforeEach(async () => {
     delete process.env.ARTIFACTS_PUBLIC_BASE_URL;
-    const auth = createOwnerAuth({
+    auth = createOwnerAuth({
       password: PASSWORD,
       store: await SqliteOwnerAuthStore.open(join(dataDir, 'artifacts.db')),
     });
@@ -515,5 +519,102 @@ describe('with an owner password', () => {
     const responses = await Promise.all(paths.map(async (path) => testApp.request(path)));
 
     expect(responses.map((res) => res.status)).not.toContain(302);
+  });
+
+  it('reads one artifact through a signed URL without a session', async () => {
+    const artifact = await createText('rendered for a preview');
+
+    const res = await testApp.request(auth.artifactUrls.signedPath(artifact.id));
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toMatch(/^private\b/u);
+    await expect(res.text()).resolves.toContain('rendered for a preview');
+  });
+
+  it('refuses an expired signed URL', async () => {
+    let now = new Date();
+    const timedAuth = createOwnerAuth({
+      now: () => now,
+      password: PASSWORD,
+      store: await SqliteOwnerAuthStore.open(join(dataDir, 'artifacts.db')),
+    });
+    const timedApp = createApp({ artifacts: service, auth: timedAuth, mcp: service });
+    const artifact = await createText('expired preview');
+    const path = timedAuth.artifactUrls.signedPath(artifact.id);
+
+    now = new Date(now.getTime() + SIGNED_URL_LIFETIME_SECONDS * 1000);
+    const res = await timedApp.request(path);
+
+    expect(res.status).toBe(403);
+    await expect(res.text()).resolves.not.toContain('expired preview');
+  });
+
+  it('refuses a tampered signed URL, and one used for anything but its artifact', async () => {
+    const artifact = await createText('owner eyes only');
+    const other = await createText('another secret');
+    const signed = new URL(auth.artifactUrls.signedPath(artifact.id), ORIGIN);
+    const query = signed.searchParams;
+    const later = new URLSearchParams({
+      expires: String(Number(query.get('expires')) + 3600),
+      signature: query.get('signature')!,
+    });
+
+    const paths = [
+      `/a/${artifact.id}?${later.toString()}`,
+      `/a/${artifact.id}?expires=${query.get('expires')!}&signature=${'A'.repeat(43)}`,
+      `/a/${other.id}${signed.search}`,
+      `/a/${artifact.id}/thumb${signed.search}`,
+      `/${signed.search}`,
+    ];
+    const responses = await Promise.all(paths.map(async (path) => testApp.request(path)));
+
+    expect(responses.map((res) => res.status)).toEqual([403, 403, 403, 403, 403]);
+    const bodies = await Promise.all(responses.map((res) => res.text()));
+    expect(bodies.join('')).not.toMatch(/owner eyes only|another secret/u);
+  });
+
+  it('lets a signed-in owner through even with a stale signature', async () => {
+    const artifact = await createText('still mine');
+    const cookie = await logIn();
+
+    const res = await testApp.request(`/a/${artifact.id}?expires=1&signature=stale`, {
+      headers: { Cookie: cookie },
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it('lets the thumbnail queue render an artifact through a signed URL', async () => {
+    const artifact = await createText('preview me');
+    const store = new Map<string, Uint8Array>();
+    const queue = createThumbnailQueue({
+      artifactPath: auth.artifactUrls.signedPath,
+      lookup: service.findArtifact,
+      store: {
+        has: async (id) => store.has(id),
+        read: async (id) => store.get(id) ?? null,
+        remove: async (id) => {
+          store.delete(id);
+        },
+        write: async (id, bytes) => {
+          store.set(id, bytes);
+        },
+      },
+    });
+    // Stands in for the headless browser: it fetches the target with no
+    // cookie and keeps the page body as the "screenshot".
+    const renderer = {
+      close: () => Promise.resolve(),
+      render: async ({ url }: { url: string }) => {
+        const res = await testApp.request(url);
+        return res.ok ? new Uint8Array(await res.arrayBuffer()) : null;
+      },
+    };
+
+    queue.start(renderer, ORIGIN);
+    queue.enqueue(artifact.id);
+    await queue.idle();
+
+    expect(new TextDecoder().decode(store.get(artifact.id))).toContain('preview me');
   });
 });

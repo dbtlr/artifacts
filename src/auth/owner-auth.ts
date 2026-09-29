@@ -1,5 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
+import { createArtifactUrlSigner } from './signed-urls.js';
+import type { ArtifactUrlSigner } from './signed-urls.js';
 import type { ApiKeySummary, OwnerAuthStore } from './types.js';
 
 // A session lasts a fixed 7 days from login; using it does not extend it.
@@ -20,6 +22,10 @@ export type LoginResult =
 export type CreatedApiKey = { id: string; key: string };
 
 export type OwnerAuth = {
+  // Signed URLs that read one artifact without a session, for the thumbnail
+  // renderer. The key is random per process, so a restart voids every
+  // outstanding URL, and no signature can reveal anything about the password.
+  artifactUrls: ArtifactUrlSigner;
   createApiKey: (name: string) => Promise<CreatedApiKey>;
   hasApiKey: (key: string | undefined) => Promise<boolean>;
   hasSession: (token: string | undefined) => Promise<boolean>;
@@ -147,6 +153,7 @@ export function createOwnerAuth({
   }
 
   return {
+    artifactUrls: createArtifactUrlSigner({ key: randomBytes(32), now }),
     createApiKey,
     hasApiKey,
     hasSession,

@@ -8,3 +8,4 @@ and do not bind anything.
 | Record | Status | Decision |
 | --- | --- | --- |
 | [0001](0001-opt-in-owner-auth.md) | accepted | An owner password turns on login; without one, Artifacts keeps its no-auth, trusted-network boundary. |
+| [0002](0002-signed-artifact-urls.md) | accepted | A short-lived signed URL reads one artifact without a session; the thumbnail renderer uses one per render. |
