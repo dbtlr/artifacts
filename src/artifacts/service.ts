@@ -110,10 +110,33 @@ async function runRollback(
   }
 }
 
+type SerialLane = <T>(task: () => Promise<T>) => Promise<T>;
+
+// Runs each task only after every earlier task has settled, in call order.
+// Create, update, and remove change content and metadata in a fixed order
+// with compensating rollback, awaiting each step; the lane keeps another
+// operation from reading or changing an artifact between those steps.
+function createSerialLane(): SerialLane {
+  let tail: Promise<void> = Promise.resolve();
+  return async (task) => {
+    const previous = tail;
+    const { promise: settled, resolve: release } = Promise.withResolvers<void>();
+    tail = settled;
+    await previous;
+    try {
+      return await task();
+    } finally {
+      release();
+    }
+  };
+}
+
 export function createArtifactService(
   metadata: ArtifactMetadataStore,
   content: ArtifactContentStore,
 ): ArtifactService {
+  const serial = createSerialLane();
+
   // Tries up to MAX_ID_ATTEMPTS fresh ids, one lookup at a time.
   async function generateId(attempt = 0): Promise<string> {
     if (attempt >= MAX_ID_ATTEMPTS) {
@@ -267,12 +290,14 @@ export function createArtifactService(
     return true;
   }
 
+  // Single metadata reads are atomic on their own; everything that touches
+  // both stores, or reads then writes, goes through the lane.
   return {
-    createArtifact,
+    createArtifact: (input) => serial(() => createArtifact(input)),
     findArtifact: (id) => metadata.find(id),
-    getArtifact,
+    getArtifact: (id) => serial(() => getArtifact(id)),
     listArtifacts: (query) => metadata.list(query),
-    removeArtifact,
-    updateArtifact,
+    removeArtifact: (id) => serial(() => removeArtifact(id)),
+    updateArtifact: (id, patch) => serial(() => updateArtifact(id, patch)),
   };
 }
