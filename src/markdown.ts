@@ -1,7 +1,6 @@
 import MarkdownIt from 'markdown-it';
-import type { HighlighterCore } from 'shiki/core';
-import { createHighlighterCore } from 'shiki/core';
-import { createOnigurumaEngine } from 'shiki/engine/oniguruma';
+
+import { resolveCodeLanguage } from './code-languages.js';
 
 // @types/markdown-it exposes the parsed-token shape only via `MarkdownIt`'s
 // `export =` namespace merge, which trips over this project's
@@ -9,111 +8,12 @@ import { createOnigurumaEngine } from 'shiki/engine/oniguruma';
 // sidesteps that entirely and stays exactly as accurate.
 type Token = ReturnType<InstanceType<typeof MarkdownIt>['parse']>[number];
 
-// Fine-grained shiki build: `shiki/bundle/full` ships every language and
-// theme, and even `shiki/bundle/web` (a curated ~55-language subset) still
-// omits things an agent-authored artifact might plausibly contain, like Go,
-// Rust, or a Dockerfile. Instead this wires the oniguruma engine plus an
-// explicit, short language list via `@shikijs/langs` — shiki's own
-// per-language subpackage, already resolved as shiki's transitive
-// dependency; declaring it directly just exposes its tree-shakeable
-// subpath exports (`@shikijs/langs/<name>`) to this module. Each entry below
-// is a dynamic import, so only the languages actually requested at runtime
-// are parsed/compiled into the highlighter — not the whole set.
-const SHIKI_LANGS = [
-  import('@shikijs/langs/c'),
-  import('@shikijs/langs/cpp'),
-  import('@shikijs/langs/css'),
-  import('@shikijs/langs/diff'),
-  import('@shikijs/langs/dockerfile'),
-  import('@shikijs/langs/go'),
-  import('@shikijs/langs/html'),
-  import('@shikijs/langs/java'),
-  import('@shikijs/langs/javascript'),
-  import('@shikijs/langs/json'),
-  import('@shikijs/langs/jsonc'),
-  import('@shikijs/langs/jsx'),
-  import('@shikijs/langs/markdown'),
-  import('@shikijs/langs/python'),
-  import('@shikijs/langs/rust'),
-  import('@shikijs/langs/shellscript'),
-  import('@shikijs/langs/sql'),
-  import('@shikijs/langs/toml'),
-  import('@shikijs/langs/tsx'),
-  import('@shikijs/langs/typescript'),
-  import('@shikijs/langs/yaml'),
-];
-
-// Dual light/dark theme with zero client JS: `codeToHtml` is called below
-// with two named themes and `defaultColor: false`, which makes shiki emit
-// `--shiki-light`/`--shiki-dark` CSS custom properties per token instead of
-// baking in one theme's colors. src/client/styles.css swaps to the dark set
-// inside a `@media (prefers-color-scheme: dark)` block — the same query
-// Tailwind v4's `dark:` variant already uses by default — so highlighted
-// code follows the system color scheme exactly like the rest of this
-// zero-client-JS app, with no `<script>` and no `class="dark"` toggle.
-const SHIKI_THEMES = { dark: 'github-dark', light: 'github-light' };
-
-let highlighterInstance: HighlighterCore | undefined;
-let highlighterPromise: Promise<HighlighterCore> | undefined;
-
-// Lazy singleton (mirrors getDefaultArtifactStore in data/store.ts): building
-// the highlighter loads the oniguruma wasm engine plus every grammar/theme
-// above, so it must happen exactly once per process, not once per request.
-// The in-flight promise itself is memoized so concurrent first requests
-// share one build instead of racing separate ones. A failed build clears the
-// memoized promise instead of permanently caching the rejection, so a
-// transient failure (e.g. a wasm load hiccup) can succeed on the next
-// request rather than wedging every future render.
-async function getHighlighter(): Promise<HighlighterCore> {
-  highlighterPromise ??= buildHighlighter();
-  try {
-    return await highlighterPromise;
-  } catch (error) {
-    highlighterPromise = undefined;
-    throw error;
-  }
-}
-
-async function buildHighlighter(): Promise<HighlighterCore> {
-  const highlighter = await createHighlighterCore({
-    engine: createOnigurumaEngine(import('shiki/wasm')),
-    langs: SHIKI_LANGS,
-    themes: [import('@shikijs/themes/github-light'), import('@shikijs/themes/github-dark')],
-  });
-  highlighterInstance = highlighter;
-  return highlighter;
-}
-
-// Renders one fenced code block to shiki's themed HTML. An unrecognized
-// fence language (a typo, or simply a language not in SHIKI_LANGS above)
-// makes `codeToHtml` throw rather than return — caught here and retried as
-// `text`, shiki's built-in no-grammar-needed passthrough, so one bad fence
-// falls back to plain code instead of taking down the whole render.
-function highlightCode(highlighter: HighlighterCore, code: string, lang: string): string {
-  const requested = lang.trim() || 'text';
-  try {
-    return highlighter.codeToHtml(code, {
-      defaultColor: false,
-      lang: requested,
-      themes: SHIKI_THEMES,
-    });
-  } catch {
-    return highlighter.codeToHtml(code, {
-      defaultColor: false,
-      lang: 'text',
-      themes: SHIKI_THEMES,
-    });
-  }
-}
-
 const MERMAID_LANG = 'mermaid';
 
-// A ```mermaid fence is a diagram source, not a language shiki knows how to
-// tokenize — it must bypass highlightCode entirely rather than fall into its
-// `text` fallback. markdown-it's default fence renderer uses the `highlight`
-// callback's return value verbatim whenever it starts with `<pre`, which is
-// exactly how shiki's own `codeToHtml` output is threaded through above, so
-// this piggybacks on the same seam: return a `<pre class="mermaid">` whose
+// A ```mermaid fence is a diagram source, not code to highlight.
+// markdown-it's default fence renderer uses the `highlight` callback's return
+// value verbatim whenever it starts with `<pre`, so the callback below uses
+// that seam for mermaid alone: it returns a `<pre class="mermaid">` whose
 // body is the raw diagram source, escaped with markdown-it's own
 // `utils.escapeHtml` (the same escaping the default renderer would have
 // applied) so adversarial source (`<script>`, quotes) can never break out of
@@ -150,6 +50,13 @@ function isMermaidFence(token: Token): boolean {
   return token.type === 'fence' && isMermaidLangName(fenceLangName(token.info));
 }
 
+// A fence the browser can highlight: its language has a grammar in
+// code-languages.ts (mermaid never does). markdown-it tags such a fence
+// `<code class="language-x">`, which is what src/client/highlight.ts reads.
+function isHighlightableFence(token: Token): boolean {
+  return token.type === 'fence' && resolveCodeLanguage(fenceLangName(token.info)) !== undefined;
+}
+
 // --- Heading anchors + table of contents ---
 //
 // Choice: hand-rolled from the token stream rather than a plugin
@@ -158,8 +65,7 @@ function isMermaidFence(token: Token): boolean {
 // ids, and a nested list built from the same headings), both a straight walk
 // over `md.parse()`'s flat token array covering maybe 30 lines total. Two
 // more dependencies (plus their own transitive deps and update cadence) to
-// save that little hand-rolled logic isn't a good trade for a KISS codebase
-// that already hand-rolls its own slim shiki wiring above.
+// save that little hand-rolled logic isn't a good trade for a KISS codebase.
 
 type HeadingInfo = { id: string; labelHtml: string; level: number };
 
@@ -316,25 +222,17 @@ function renderToc(headings: HeadingInfo[]): string | undefined {
   return `<nav aria-label="Table of contents" class="toc">${renderTocNodes(buildTocTree(headings))}</nav>`;
 }
 
-// markdown-it itself does no I/O and is cheap to construct, so — unlike the
-// shiki highlighter above — it doesn't need lazy/async init. Its `highlight`
-// callback runs synchronously during `.render()`, so it reads
-// `highlighterInstance` directly; `renderMarkdownToHtml` always awaits
-// `getHighlighter()` first, guaranteeing that's set by the time render runs.
+// markdown-it itself does no I/O and is cheap to construct, so it is built
+// once at module load. Code is highlighted in the browser, not here: every
+// fence but mermaid gets markdown-it's default escaped
+// `<pre><code class="language-x">`.
 const markdownIt: MarkdownIt = new MarkdownIt({
-  highlight: (code, lang) => {
-    // `lang` here is markdown-it's own already-unescaped, already-split
-    // `langName` (see fenceLangName's comment) — routed through the same
-    // `isMermaidLangName` predicate `isMermaidFence` uses, so this and
-    // `hasMermaid` can never disagree about what counts as mermaid.
-    if (isMermaidLangName(lang.trim())) {
-      return renderMermaidFence(code);
-    }
-    if (!highlighterInstance) {
-      throw new Error('renderMarkdownToHtml: highlighter must be loaded before md.render()');
-    }
-    return highlightCode(highlighterInstance, code, lang);
-  },
+  // `lang` here is markdown-it's own already-unescaped, already-split
+  // `langName` (see fenceLangName's comment) — routed through the same
+  // `isMermaidLangName` predicate `isMermaidFence` uses, so this and
+  // `hasMermaid` can never disagree about what counts as mermaid. An empty
+  // return tells markdown-it to escape and wrap the code itself.
+  highlight: (code, lang) => (isMermaidLangName(lang.trim()) ? renderMermaidFence(code) : ''),
   // Safety: raw HTML in markdown must never execute on the artifacts domain.
   // `html: false` (markdown-it's own default) escapes any inline HTML tag or
   // comment in the source as literal text instead of passing it through, so
@@ -352,6 +250,9 @@ const markdownIt: MarkdownIt = new MarkdownIt({
 });
 
 export type RenderedMarkdown = {
+  // Whether any fence names a language the browser can highlight —
+  // artifact-page.tsx emits the client-side highlight <script> only then.
+  hasHighlightableCode: boolean;
   // Whether any ```mermaid fence survived into the render — artifact-page.tsx
   // uses this to decide whether to emit the client-side mermaid <script> tag,
   // so pages without a diagram stay at zero client JS.
@@ -363,8 +264,8 @@ export type RenderedMarkdown = {
 };
 
 // Converts artifact markdown to an HTML string for server-side rendering,
-// alongside the two pieces of document structure the route/page need to
-// react to: whether a mermaid diagram is present, and a table of contents.
+// alongside the document structure the route/page need to react to: whether
+// highlightable code or a mermaid diagram is present, and a table of contents.
 // Callers inject `html`/`toc` with hono's `raw()` — see artifact-page.tsx —
 // since this is the one place in the app that intentionally emits markup
 // built from artifact content rather than escaping it.
@@ -373,13 +274,13 @@ export type RenderedMarkdown = {
 // internally) rather than plain `md.render()`, so the parsed token stream is
 // available in between for `extractHeadings` to walk — it mutates heading
 // tokens in place (assigning `id` attrs) before the renderer turns them into
-// HTML, and the same walk is what produces the TOC and the mermaid flag.
-export async function renderMarkdownToHtml(markdown: string): Promise<RenderedMarkdown> {
-  await getHighlighter();
+// HTML, and the same token stream is what produces the TOC and both flags.
+export function renderMarkdownToHtml(markdown: string): RenderedMarkdown {
   const env = {};
   const tokens = markdownIt.parse(markdown, env);
+  const hasHighlightableCode = tokens.some(isHighlightableFence);
   const hasMermaid = tokens.some(isMermaidFence);
   const headings = extractHeadings(tokens);
   const html = markdownIt.renderer.render(tokens, markdownIt.options, env);
-  return { hasMermaid, html, toc: renderToc(headings) };
+  return { hasHighlightableCode, hasMermaid, html, toc: renderToc(headings) };
 }

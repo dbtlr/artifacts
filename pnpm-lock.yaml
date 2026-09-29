@@ -17,12 +17,6 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(supports-color@10.2.2)(zod@4.4.3)
-      '@shikijs/langs':
-        specifier: ^4.3.1
-        version: 4.3.1
-      '@shikijs/themes':
-        specifier: ^4.3.1
-        version: 4.3.1
       hono:
         specifier: ^4.12.31
         version: 4.12.31
@@ -35,9 +29,6 @@ importers:
       playwright-core:
         specifier: ^1.63.0
         version: 1.63.0
-      shiki:
-        specifier: ^4.3.1
-        version: 4.3.1
       umzug:
         specifier: ^3.8.3
         version: 3.8.3(@types/node@24.13.3)
@@ -48,6 +39,12 @@ importers:
       '@dbtlr/tooling':
         specifier: ^0.6.0
         version: 0.6.0(vite-plus@0.2.6(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(typescript@7.0.2)(vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)))(vite@8.1.5(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1))
+      '@shikijs/langs':
+        specifier: ^4.3.1
+        version: 4.3.1
+      '@shikijs/themes':
+        specifier: ^4.3.1
+        version: 4.3.1
       '@tailwindcss/typography':
         specifier: ^0.5.20
         version: 0.5.20(tailwindcss@4.3.3)
@@ -69,6 +66,9 @@ importers:
       mermaid:
         specifier: ^11.16.0
         version: 11.16.0
+      shiki:
+        specifier: ^4.3.1
+        version: 4.3.1
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3

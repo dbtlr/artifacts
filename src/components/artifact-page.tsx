@@ -5,15 +5,16 @@ import type { LegacyArtifactWithContent } from '../data/store.js';
 import { formatDate } from '../format-date.js';
 import type { RenderedMarkdown } from '../markdown.js';
 
-// Fixed filename the vite config gives the mermaid entry (see
-// vite.config.ts's `entryFileNames`) — a static path, like Layout's own
+// Fixed filenames the vite config gives the client entries (see
+// vite.config.ts's `entryFileNames`) — static paths, like Layout's own
 // STYLESHEET_HREF, not something read from a Vite manifest at request time.
+const HIGHLIGHT_SCRIPT_SRC = '/assets/highlight.js';
 const MERMAID_SCRIPT_SRC = '/assets/mermaid.js';
 
 // `rendered` is set by the /a/:id route (app.tsx) exactly when
-// `artifact.type === 'md'` — rendering is async (see markdown.ts), so it
-// happens once in the route handler rather than inside this component.
-// `txt` always leaves it undefined and keeps the plain <pre> path.
+// `artifact.type === 'md'`, so markdown rendering happens once in the route
+// handler rather than inside this component. `txt` always leaves it
+// undefined and keeps the plain <pre> path.
 type ArtifactPageProps = { artifact: LegacyArtifactWithContent; rendered?: RenderedMarkdown };
 
 export const ArtifactPage: FC<ArtifactPageProps> = ({ artifact, rendered }) => (
@@ -46,13 +47,12 @@ export const ArtifactPage: FC<ArtifactPageProps> = ({ artifact, rendered }) => (
       // itself survives into it) — never from artifact.content directly.
       <div class="prose prose-stone mt-8 max-w-none dark:prose-invert">{raw(rendered.html)}</div>
     )}
-    {rendered?.hasMermaid === true && (
-      // Zero client JS everywhere else in the app (see CLAUDE.md) — this tag
-      // only ever appears when markdown.ts's own token-stream scan found a
-      // ```mermaid fence in this exact document, so pages without a diagram
-      // stay script-free. `src` is the fixed build-time path above, not
-      // artifact content, so there's nothing here to escape.
-      <script src={MERMAID_SCRIPT_SRC} type="module" />
-    )}
+    {/* Client scripts only enhance the already-rendered page, and each tag
+        appears only when markdown.ts's token-stream scan found something in
+        this exact document for it to do, so a page with neither stays
+        script-free. `src` is a fixed build-time path above, not artifact
+        content, so there's nothing here to escape. */}
+    {rendered?.hasHighlightableCode === true && <script src={HIGHLIGHT_SCRIPT_SRC} type="module" />}
+    {rendered?.hasMermaid === true && <script src={MERMAID_SCRIPT_SRC} type="module" />}
   </article>
 );

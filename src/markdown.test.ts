@@ -1,15 +1,10 @@
-import type { createHighlighterCore } from 'shiki/core';
-import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+import { describe, expect, it } from 'vite-plus/test';
 
 import { renderMarkdownToHtml } from './markdown.js';
 
-// Just enough of shiki/core's shape for the injected-failure mock below —
-// avoids a `import type * as` namespace import for one member.
-type ShikiCoreModule = { createHighlighterCore: typeof createHighlighterCore };
-
 describe('renderMarkdownToHtml', () => {
-  it('renders headings and lists to HTML', async () => {
-    const { html } = await renderMarkdownToHtml('# Title\n\n- one\n- two\n');
+  it('renders headings and lists to HTML', () => {
+    const { html } = renderMarkdownToHtml('# Title\n\n- one\n- two\n');
 
     // Every heading gets an id (see the heading-anchor tests below) — a
     // single heading like this still gets one, even though one heading
@@ -20,45 +15,51 @@ describe('renderMarkdownToHtml', () => {
     expect(html).toContain('<li>two</li>');
   });
 
-  it('renders a table', async () => {
-    const { html } = await renderMarkdownToHtml('| a | b |\n| --- | --- |\n| 1 | 2 |\n');
+  it('renders a table', () => {
+    const { html } = renderMarkdownToHtml('| a | b |\n| --- | --- |\n| 1 | 2 |\n');
 
     expect(html).toContain('<table>');
     expect(html).toContain('<td>1</td>');
   });
 
-  it('highlights a fenced code block with a known language', async () => {
-    const { html } = await renderMarkdownToHtml('```ts\nconst x: number = 1;\n```\n');
+  it('emits a fenced code block as plain, escaped code tagged with its language', () => {
+    const { hasHighlightableCode, html } = renderMarkdownToHtml('```ts\nconst x = a < b;\n```\n');
 
-    expect(html).toContain('class="shiki');
-    expect(html).toContain('<span');
-    // Token-level styling proves the grammar loaded, not just the wrapper.
-    expect(html).toContain('--shiki-light');
-    expect(html).toContain('--shiki-dark');
+    // Highlighting happens in the browser (src/client/highlight.ts), which
+    // reads the language from this class.
+    expect(hasHighlightableCode).toBe(true);
+    expect(html).toContain('<pre><code class="language-ts">const x = a &lt; b;\n</code></pre>');
+    expect(html).not.toContain('shiki');
   });
 
-  it('falls back to plain code for an unrecognized fence language instead of throwing', async () => {
-    await expect(
-      renderMarkdownToHtml('```not-a-real-language\nsome nonsense code\n```\n'),
-    ).resolves.not.toThrow();
+  it('emits a fence with no language as plain code with nothing to highlight', () => {
+    const { hasHighlightableCode, html } = renderMarkdownToHtml('```\nplain\n```\n');
 
-    const { html } = await renderMarkdownToHtml(
-      '```not-a-real-language\nsome nonsense code\n```\n',
-    );
-
-    expect(html).toContain('class="shiki');
-    expect(html).toContain('some nonsense code');
+    expect(hasHighlightableCode).toBe(false);
+    expect(html).toContain('<pre><code>plain\n</code></pre>');
   });
 
-  it('neutralizes inline HTML instead of passing it through', async () => {
-    const { html } = await renderMarkdownToHtml('# Hi\n\n<script>alert(1)</script>\n');
+  it('reports no highlightable code for a fence in a language the browser has no grammar for', () => {
+    const { hasHighlightableCode } = renderMarkdownToHtml('```text\nplain\n```\n');
+
+    expect(hasHighlightableCode).toBe(false);
+  });
+
+  it('reports no highlightable code for a document with only inline code', () => {
+    const { hasHighlightableCode } = renderMarkdownToHtml('Some `inline` code.\n');
+
+    expect(hasHighlightableCode).toBe(false);
+  });
+
+  it('neutralizes inline HTML instead of passing it through', () => {
+    const { html } = renderMarkdownToHtml('# Hi\n\n<script>alert(1)</script>\n');
 
     expect(html).not.toContain('<script>alert(1)</script>');
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
   });
 
-  it('neutralizes a javascript: link instead of emitting an anchor', async () => {
-    const { html } = await renderMarkdownToHtml('[click me](javascript:alert(1))\n');
+  it('neutralizes a javascript: link instead of emitting an anchor', () => {
+    const { html } = renderMarkdownToHtml('[click me](javascript:alert(1))\n');
 
     // markdown-it's default link validation rejects the javascript: scheme
     // outright, so the whole link construct fails to parse as a link at all
@@ -70,59 +71,59 @@ describe('renderMarkdownToHtml', () => {
 });
 
 describe('mermaid fences', () => {
-  it('renders a mermaid fence as a text-escaped <pre class="mermaid"> instead of a shiki block', async () => {
-    const { hasMermaid, html } = await renderMarkdownToHtml(
+  it('renders a mermaid fence as a text-escaped <pre class="mermaid"> instead of a code block', () => {
+    const { hasHighlightableCode, hasMermaid, html } = renderMarkdownToHtml(
       '```mermaid\nflowchart TD\n  A --> B\n```\n',
     );
 
     expect(hasMermaid).toBe(true);
+    // A diagram is not code to highlight, so it doesn't pull in the
+    // highlighter script on its own.
+    expect(hasHighlightableCode).toBe(false);
     expect(html).toContain('<pre class="mermaid">flowchart TD\n  A --&gt; B\n</pre>');
-    expect(html).not.toContain('class="shiki');
+    expect(html).not.toContain('<code');
   });
 
-  it('escapes adversarial diagram source instead of letting it break out of the <pre>', async () => {
-    const { html } = await renderMarkdownToHtml(
-      '```mermaid\n</pre><script>alert(1)</script>\n```\n',
-    );
+  it('escapes adversarial diagram source instead of letting it break out of the <pre>', () => {
+    const { html } = renderMarkdownToHtml('```mermaid\n</pre><script>alert(1)</script>\n```\n');
 
     expect(html).not.toContain('<script>alert(1)</script>');
     expect(html).toContain('&lt;/pre&gt;&lt;script&gt;alert(1)&lt;/script&gt;');
   });
 
-  it('reports hasMermaid: false and highlights normally when no fence is mermaid', async () => {
-    const { hasMermaid, html } = await renderMarkdownToHtml('```ts\nconst x = 1;\n```\n');
+  it('reports hasMermaid: false when no fence is mermaid', () => {
+    const { hasMermaid, html } = renderMarkdownToHtml('```ts\nconst x = 1;\n```\n');
 
     expect(hasMermaid).toBe(false);
-    expect(html).toContain('class="shiki');
     expect(html).not.toContain('class="mermaid"');
   });
 
-  it('recognizes an HTML-entity-encoded fence info string the same way markdown-it itself does', async () => {
+  it('recognizes an HTML-entity-encoded fence info string the same way markdown-it itself does', () => {
     // markdown-it's own fence renderer computes the `highlight` callback's
     // `lang` via `utils.unescapeAll(token.info)` before splitting on
     // whitespace, so "&#109;ermaid" (unescapes to "mermaid") already rendered
     // as <pre class="mermaid"> via that callback — but `hasMermaid`, built
     // from a separate token-stream scan, used to read the raw `token.info`
     // without the same unescaping and stayed false. Both must agree.
-    const { hasMermaid, html } = await renderMarkdownToHtml(
+    const { hasMermaid, html } = renderMarkdownToHtml(
       '```&#109;ermaid\nflowchart TD\n  A --> B\n```\n',
     );
 
     expect(hasMermaid).toBe(true);
     expect(html).toContain('<pre class="mermaid">');
-    expect(html).not.toContain('class="shiki');
+    expect(html).not.toContain('<code');
   });
 });
 
 describe('heading anchors and table of contents', () => {
-  it('slugifies a heading into a stable, prefixed id', async () => {
-    const { html } = await renderMarkdownToHtml('## Getting Started\n');
+  it('slugifies a heading into a stable, prefixed id', () => {
+    const { html } = renderMarkdownToHtml('## Getting Started\n');
 
     expect(html).toContain('<h2 id="heading-getting-started">Getting Started</h2>');
   });
 
-  it('dedupes repeated headings with numeric suffixes', async () => {
-    const { html, toc } = await renderMarkdownToHtml('## Overview\n\ntext\n\n## Overview\n');
+  it('dedupes repeated headings with numeric suffixes', () => {
+    const { html, toc } = renderMarkdownToHtml('## Overview\n\ntext\n\n## Overview\n');
 
     expect(html).toContain('id="heading-overview"');
     expect(html).toContain('id="heading-overview-1"');
@@ -130,8 +131,8 @@ describe('heading anchors and table of contents', () => {
     expect(toc).toContain('href="#heading-overview-1"');
   });
 
-  it('produces a safe id and an escaped label for adversarial heading text', async () => {
-    const { html, toc } = await renderMarkdownToHtml(
+  it('produces a safe id and an escaped label for adversarial heading text', () => {
+    const { html, toc } = renderMarkdownToHtml(
       '## <script>alert(1)</script> "quotes\' 日本語 😀\n\n## Second\n',
     );
 
@@ -149,14 +150,14 @@ describe('heading anchors and table of contents', () => {
     expect(toc).not.toContain('<script>alert(1)</script>');
   });
 
-  it('keeps unicode letters in the slug instead of dropping them to the fallback', async () => {
-    const { html } = await renderMarkdownToHtml('## 日本語\n\n## Second\n');
+  it('keeps unicode letters in the slug instead of dropping them to the fallback', () => {
+    const { html } = renderMarkdownToHtml('## 日本語\n\n## Second\n');
 
     expect(html).toContain('id="heading-日本語"');
   });
 
-  it('falls back to a constant slug for a heading with no letters or numbers', async () => {
-    const { html } = await renderMarkdownToHtml('## 😀😀😀\n\n## ---\n');
+  it('falls back to a constant slug for a heading with no letters or numbers', () => {
+    const { html } = renderMarkdownToHtml('## 😀😀😀\n\n## ---\n');
 
     expect(html).toContain('id="heading-section"');
     // Second heading is just as letter/number-free, so it dedupes off the
@@ -164,8 +165,8 @@ describe('heading anchors and table of contents', () => {
     expect(html).toContain('id="heading-section-1"');
   });
 
-  it('never collides a dedup-suffixed id with a later heading whose literal text matches it', async () => {
-    const { html } = await renderMarkdownToHtml(
+  it('never collides a dedup-suffixed id with a later heading whose literal text matches it', () => {
+    const { html } = renderMarkdownToHtml(
       '## Overview\n\ntext\n\n## Overview\n\ntext\n\n## Overview 1\n',
     );
 
@@ -176,16 +177,16 @@ describe('heading anchors and table of contents', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('omits the TOC for a document with fewer than 2 headings', async () => {
-    const zero = await renderMarkdownToHtml('Just a paragraph, no headings.\n');
-    const one = await renderMarkdownToHtml('# Only Heading\n\nSome text.\n');
+  it('omits the TOC for a document with fewer than 2 headings', () => {
+    const zero = renderMarkdownToHtml('Just a paragraph, no headings.\n');
+    const one = renderMarkdownToHtml('# Only Heading\n\nSome text.\n');
 
     expect(zero.toc).toBeUndefined();
     expect(one.toc).toBeUndefined();
   });
 
-  it('builds a nested TOC for a document with 2+ headings', async () => {
-    const { toc } = await renderMarkdownToHtml(
+  it('builds a nested TOC for a document with 2+ headings', () => {
+    const { toc } = renderMarkdownToHtml(
       '# Title\n\n## Section A\n\n### Subsection\n\n## Section B\n',
     );
 
@@ -204,8 +205,8 @@ describe('heading anchors and table of contents', () => {
     expect(subsectionIndex).toBeLessThan(sectionBIndex);
   });
 
-  it('flattens a heading containing a link so the TOC never nests an <a> inside its own anchor', async () => {
-    const { html, toc } = await renderMarkdownToHtml(
+  it('flattens a heading containing a link so the TOC never nests an <a> inside its own anchor', () => {
+    const { html, toc } = renderMarkdownToHtml(
       '## [Link Text](https://example.com)\n\n## Second\n',
     );
 
@@ -223,53 +224,10 @@ describe('heading anchors and table of contents', () => {
     expect(toc?.match(/<a /gu) ?? []).toHaveLength(2);
   });
 
-  it('drops an image from the TOC label instead of emitting <img>', async () => {
-    const { toc } = await renderMarkdownToHtml('## ![alt text](img.png)\n\n## Second\n');
+  it('drops an image from the TOC label instead of emitting <img>', () => {
+    const { toc } = renderMarkdownToHtml('## ![alt text](img.png)\n\n## Second\n');
 
     expect(toc).toBeDefined();
     expect(toc).not.toContain('<img');
-  });
-});
-
-describe('getHighlighter failure recovery', () => {
-  // `vi.doMock` (unlike `vi.mock`) isn't hoisted, so it only affects the
-  // dynamic `import('./markdown.js')` below — the static top-level import
-  // used by every other test in this file, already resolved before this
-  // test runs, is untouched. Undoing the mock and resetting the module
-  // registry afterwards keeps that isolation one-directional.
-  afterEach(() => {
-    vi.doUnmock('shiki/core');
-    vi.resetModules();
-  });
-
-  it('clears the memoized highlighter promise after a failed build, so the next render retries', async () => {
-    let buildAttempts = 0;
-    vi.doMock('shiki/core', async (importOriginal) => {
-      const actual = await importOriginal<ShikiCoreModule>();
-      const createHighlighterCore: typeof actual.createHighlighterCore = (options) => {
-        buildAttempts += 1;
-        // Fail exactly once — a one-shot injected failure, like a
-        // transient wasm-load hiccup — then fall through to the real
-        // implementation so the second attempt can actually succeed.
-        if (buildAttempts === 1) {
-          return Promise.reject(new Error('injected highlighter build failure'));
-        }
-        return actual.createHighlighterCore(options);
-      };
-      return { ...actual, createHighlighterCore };
-    });
-    vi.resetModules();
-
-    const { renderMarkdownToHtml: renderWithInjectedFailure } = await import('./markdown.js');
-
-    await expect(renderWithInjectedFailure('# hi')).rejects.toThrow(
-      'injected highlighter build failure',
-    );
-    // If the failed build's promise were still memoized (the bug this test
-    // guards against), this second render would reject again with the same
-    // cached error instead of rebuilding and succeeding.
-    const { html } = await renderWithInjectedFailure('# hi');
-    expect(html).toContain('<h1 id="heading-hi">hi</h1>');
-    expect(buildAttempts).toBe(2);
   });
 });
