@@ -10,7 +10,6 @@ function artifact(overrides: Partial<Artifact> & Pick<Artifact, 'id'>): Artifact
     mediaType: 'text/html',
     project: 'p',
     title: 't',
-    updatedAt: '2026-09-24T10:00:00.000Z',
     ...overrides,
   };
 }

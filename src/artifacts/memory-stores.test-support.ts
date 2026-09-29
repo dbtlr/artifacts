@@ -1,6 +1,6 @@
 import type { Artifact, ArtifactContentStore, ArtifactMetadataStore, MediaType } from './types.js';
 
-export type HoldableStep = 'contentWrite' | 'metadataUpdate';
+export type HoldableStep = 'contentRead' | 'contentRemove' | 'metadataCreate';
 
 export type Hold = {
   // Resolves once the held step has been called and is waiting.
@@ -42,31 +42,26 @@ export function createMemoryStores(seed: { artifact: Artifact; bytes: Uint8Array
 
   const metadata: ArtifactMetadataStore = {
     create: async (artifact) => {
+      await pass('metadataCreate');
+      if (rows.has(artifact.id)) {
+        throw new Error(`Duplicate artifact id ${artifact.id}`);
+      }
       rows.set(artifact.id, artifact);
     },
     find: async (id) => rows.get(id) ?? null,
     list: async () => [...rows.values()],
     remove: async (id) => rows.delete(id),
-    update: async (artifact) => {
-      await pass('metadataUpdate');
-      if (!rows.has(artifact.id)) {
-        return false;
-      }
-      rows.set(artifact.id, artifact);
-      return true;
-    },
   };
   const content: ArtifactContentStore = {
     read: async (id, mediaType) => {
-      const bytes = files.get(fileKey(id, mediaType));
-      if (bytes === undefined) {
-        throw new Error(`ENOENT ${fileKey(id, mediaType)}`);
-      }
-      return bytes;
+      await pass('contentRead');
+      return files.get(fileKey(id, mediaType)) ?? null;
     },
-    remove: async (id, mediaType) => files.delete(fileKey(id, mediaType)),
+    remove: async (id, mediaType) => {
+      await pass('contentRemove');
+      return files.delete(fileKey(id, mediaType));
+    },
     write: async (id, mediaType, bytes) => {
-      await pass('contentWrite');
       files.set(fileKey(id, mediaType), bytes);
     },
   };

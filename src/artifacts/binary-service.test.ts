@@ -84,22 +84,6 @@ describe('byte-native artifact service', () => {
     await expect(readdir(join(directory, 'files'))).resolves.toEqual([`${created.id}.jpg`]);
   });
 
-  it('requires valid replacement bytes for a media-type transition', async () => {
-    const created = await service.createArtifact(binaryInput());
-
-    await expect(
-      service.updateArtifact(created.id, { mediaType: 'application/pdf' }),
-    ).rejects.toThrow('requires replacement content');
-    await expect(
-      service.updateArtifact(created.id, {
-        content: new TextEncoder().encode('not a pdf'),
-        filename: 'preview.pdf',
-        mediaType: 'application/pdf',
-      }),
-    ).rejects.toThrow('signature does not match');
-    expect((await service.getArtifact(created.id))?.mediaType).toBe('image/png');
-  });
-
   it('accepts common SVG prologues', async () => {
     const content = new TextEncoder().encode(
       '<?xml version="1.0"?>\n<!-- generated -->\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n<svg xmlns="http://www.w3.org/2000/svg"></svg>',

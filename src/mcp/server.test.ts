@@ -3,7 +3,6 @@ import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { setImmediate } from 'node:timers/promises';
 import { promisify } from 'node:util';
 
 import type { ServerType } from '@hono/node-server';
@@ -23,9 +22,7 @@ import { z } from 'zod';
 // intercept without reimplementing part of the transport — booting on an
 // ephemeral port (PORT=0 pattern) is the smaller, more honest surface.
 import { createApp } from '../app.js';
-import { createMemoryStores } from '../artifacts/memory-stores.test-support.js';
-import { createArtifactService } from '../artifacts/service.js';
-import type { ArtifactService, ArtifactStore } from '../data/store.js';
+import type { Artifact, ArtifactService, ArtifactStore } from '../data/store.js';
 import { createArtifactStore, createByteNativeArtifactService } from '../data/store.js';
 import { createMcpServer } from './server.js';
 
@@ -41,7 +38,6 @@ const artifactSchema = z.object({
   project: z.string(),
   title: z.string(),
   type: z.string().optional(),
-  updatedAt: z.string(),
   url: z.string().optional(),
 });
 const removeResultSchema = z.object({ existed: z.boolean(), id: z.string() });
@@ -125,7 +121,7 @@ afterAll(async () => {
 });
 
 describe('tools/list', () => {
-  it('advertises all six tools with input schemas', async () => {
+  it('advertises all five tools with input schemas', async () => {
     const { tools } = await client.listTools();
 
     expect(tools.map((tool) => tool.name).toSorted()).toEqual([
@@ -134,7 +130,6 @@ describe('tools/list', () => {
       'list_artifacts',
       'list_collections',
       'remove_artifact',
-      'update_artifact',
     ]);
     for (const tool of tools) {
       expect(tool.description).toBeTruthy();
@@ -143,7 +138,7 @@ describe('tools/list', () => {
   });
 });
 
-describe('add -> get -> update -> remove', () => {
+describe('add -> get -> remove', () => {
   it('round-trips an artifact through the full tool surface', async () => {
     const added = await callTool(
       'add_artifact',
@@ -171,22 +166,6 @@ describe('add -> get -> update -> remove', () => {
     );
     expect(fetched.content).toBe('# hello');
     expect(fetched.title).toBe('Round Trip');
-
-    const updated = await callTool(
-      'update_artifact',
-      { content: '# goodbye', id: added.id, title: 'Round Trip, Updated' },
-      artifactSchema,
-    );
-    expect(updated.title).toBe('Round Trip, Updated');
-    expect(updated.project).toBe('mcp-tests');
-    expect(updated.url).toBe(added.url);
-
-    const refetched = await callTool(
-      'get_artifact',
-      { id: added.id, includeContent: true },
-      artifactSchema,
-    );
-    expect(refetched.content).toBe('# goodbye');
 
     const removed = await callTool('remove_artifact', { id: added.id }, removeResultSchema);
     expect(removed).toEqual({ existed: true, id: added.id });
@@ -275,22 +254,6 @@ describe('binary payloads and collections', () => {
       );
       expect(fetched.contentBase64).toBe(png.toString('base64'));
       expect(fetched.content).toBeUndefined();
-
-      const replacement = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 4, 5, 6]);
-      const updated = await callTool(
-        'update_artifact',
-        { contentBase64: replacement.toString('base64'), id: added.id },
-        artifactSchema,
-      );
-      expect(updated.url).toBe(added.url);
-      expect(updated.contentBase64).toBeUndefined();
-
-      const refetched = await callTool(
-        'get_artifact',
-        { id: added.id, includeContent: true },
-        artifactSchema,
-      );
-      expect(refetched.contentBase64).toBe(replacement.toString('base64'));
 
       const listed = await callTool(
         'list_artifacts',
@@ -404,13 +367,6 @@ describe('error paths', () => {
     expect(resultText(result)).toContain('unknown-id');
   });
 
-  it('reports a clean tool error for an unknown id on update_artifact', async () => {
-    const result = await callToolResult('update_artifact', { id: 'unknown-id', title: 'x' });
-
-    expect(result.isError).toBe(true);
-    expect(resultText(result)).toContain('unknown-id');
-  });
-
   it('reports existed: false for remove_artifact on an unknown id, without erroring', async () => {
     const result = await callTool('remove_artifact', { id: 'unknown-id' }, removeResultSchema);
 
@@ -463,51 +419,46 @@ describe('public base url override', () => {
   });
 });
 
-describe('update_artifact under concurrent updates', () => {
-  it('decodes content against the media type an in-flight update leaves', async () => {
-    const png = {
+describe('artifact results', () => {
+  it('return only the documented fields, whatever the service hands back', async () => {
+    // A caller-supplied store may still carry fields this contract dropped.
+    const stale = {
       createdAt: '2026-01-01T00:00:00.000Z',
       description: 'd',
-      filename: 'x.png',
       id: 'x',
-      mediaType: 'image/png',
+      mediaType: 'text/plain',
       project: 'p',
       title: 'X',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    } as const;
-    const stores = createMemoryStores([
-      { artifact: png, bytes: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]) },
-    ]);
-    const mcp = createMcpServer(createArtifactService(stores.metadata, stores.content));
-    const local = new Client({ name: 'artifacts-race-client', version: '0.0.0' });
+      updatedAt: '2026-02-01T00:00:00.000Z',
+    } as Artifact;
+    const service: ArtifactService = {
+      createArtifact: async () => stale,
+      findArtifact: async () => stale,
+      getArtifact: async () => ({ ...stale, content: new Uint8Array() }),
+      listArtifacts: async () => [stale],
+      removeArtifact: async () => true,
+    };
+    const mcp = createMcpServer(service);
+    const local = new Client({ name: 'artifacts-fields-client', version: '0.0.0' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await Promise.all([mcp.connect(serverTransport), local.connect(clientTransport)]);
-    const write = stores.hold('contentWrite');
 
-    const toMarkdown = local.callTool({
-      arguments: { content: 'hi', filename: null, id: 'x', mediaType: 'text/markdown' },
-      name: 'update_artifact',
-    });
-    await write.reached;
-    const binaryBytes = local.callTool({
-      arguments: { contentBase64: Buffer.from('hello').toString('base64'), id: 'x' },
-      name: 'update_artifact',
-    });
-    // Lets the second call reach the server while the first is mid-update.
-    await setImmediate();
-    write.release();
-
-    const [first, second] = (await Promise.all([toMarkdown, binaryBytes])).map((raw) =>
-      CallToolResultSchema.parse(raw),
-    );
+    const raw = await local.callTool({ arguments: {}, name: 'list_artifacts' });
     await local.close();
     await mcp.close();
 
-    expect(first?.isError).toBeFalsy();
-    expect(second?.isError).toBe(true);
-    expect(second === undefined ? '' : resultText(second)).toBe(
-      'content is required for text media type text/markdown',
-    );
-    expect(stores.files.get('x:text/markdown')).toEqual(new TextEncoder().encode('hi'));
+    const [listed] = z
+      .array(z.record(z.string(), z.unknown()))
+      .parse(JSON.parse(resultText(CallToolResultSchema.parse(raw))));
+    expect(Object.keys(listed ?? {}).toSorted()).toEqual([
+      'createdAt',
+      'description',
+      'id',
+      'mediaType',
+      'project',
+      'title',
+      'type',
+      'url',
+    ]);
   });
 });

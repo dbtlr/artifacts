@@ -40,8 +40,15 @@ export class FilesystemArtifactContentStore implements ArtifactContentStore {
     }
   }
 
-  async read(id: string, mediaType: MediaType): Promise<Uint8Array> {
-    return readFileSync(this.path(id, mediaType));
+  async read(id: string, mediaType: MediaType): Promise<Uint8Array | null> {
+    try {
+      return readFileSync(this.path(id, mediaType));
+    } catch (error) {
+      if (isErrnoException(error) && error.code === 'ENOENT') {
+        return null;
+      }
+      throw error;
+    }
   }
 
   async remove(id: string, mediaType: MediaType): Promise<boolean> {

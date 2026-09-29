@@ -12,6 +12,7 @@ import { SqliteArtifactMetadataStore } from './sqlite-artifact-metadata-store.js
 import {
   revertLastSqliteMigration,
   runSqliteMigrations,
+  sqliteMigrations,
   SqliteMigrationStorage,
 } from './sqlite-migrations.js';
 
@@ -26,6 +27,16 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(directory, { force: true, recursive: true });
 });
+
+// The schema as of 0002, before immutability dropped updated_at.
+const throughBinarySchema = sqliteMigrations.slice(0, 2);
+
+function columnNames(database: DatabaseSync): string[] {
+  return database
+    .prepare('PRAGMA table_info(artifacts)')
+    .all()
+    .map((column) => String(column.name));
+}
 
 function tableNames(database: DatabaseSync): string[] {
   return database
@@ -79,7 +90,7 @@ describe('SQLite migrations', () => {
     expect((await store.list()).map(({ id }) => id)).toEqual(['legacy-second', 'legacy']);
     const database = new DatabaseSync(databasePath);
     expect(database.prepare('SELECT COUNT(*) AS count FROM artifact_migrations').get()).toEqual({
-      count: 2,
+      count: 3,
     });
     database.close();
   });
@@ -90,14 +101,14 @@ describe('SQLite migrations', () => {
     const database = new DatabaseSync(databasePath);
 
     expect(database.prepare('SELECT COUNT(*) AS count FROM artifact_migrations').get()).toEqual({
-      count: 2,
+      count: 3,
     });
     database.close();
   });
 
   it('downgrades when every row remains representable by the legacy schema', async () => {
     const database = new DatabaseSync(databasePath);
-    await runSqliteMigrations(database);
+    await runSqliteMigrations(database, throughBinarySchema);
     database
       .prepare(
         `INSERT INTO artifacts
@@ -106,7 +117,7 @@ describe('SQLite migrations', () => {
       )
       .run('text', 'Text', 'artifacts', 'safe', 'text/plain', 'created', 'updated');
 
-    await revertLastSqliteMigration(database);
+    await revertLastSqliteMigration(database, throughBinarySchema);
 
     expect(database.prepare('SELECT id, type FROM artifacts').get()).toEqual({
       id: 'text',
@@ -115,18 +126,21 @@ describe('SQLite migrations', () => {
     expect(database.prepare('SELECT COUNT(*) AS count FROM artifact_migrations').get()).toEqual({
       count: 1,
     });
-    expect(
-      database
-        .prepare('PRAGMA table_info(artifacts)')
-        .all()
-        .map((column) => String(column.name)),
-    ).toEqual(['id', 'title', 'project', 'description', 'type', 'created_at', 'updated_at']);
+    expect(columnNames(database)).toEqual([
+      'id',
+      'title',
+      'project',
+      'description',
+      'type',
+      'created_at',
+      'updated_at',
+    ]);
     database.close();
   });
 
   it('refuses destructive downgrade without changing schema, rows, or history', async () => {
     const database = new DatabaseSync(databasePath);
-    await runSqliteMigrations(database);
+    await runSqliteMigrations(database, throughBinarySchema);
     database
       .prepare(
         `INSERT INTO artifacts
@@ -144,7 +158,7 @@ describe('SQLite migrations', () => {
         'updated',
       );
 
-    await expect(revertLastSqliteMigration(database)).rejects.toThrow(
+    await expect(revertLastSqliteMigration(database, throughBinarySchema)).rejects.toThrow(
       'restore a pre-migration snapshot',
     );
 
@@ -155,6 +169,53 @@ describe('SQLite migrations', () => {
       count: 2,
     });
     expect(tableNames(database)).not.toContain('artifacts_legacy');
+    database.close();
+  });
+
+  it('drops updated_at from existing rows, keeping their order', async () => {
+    const database = new DatabaseSync(databasePath);
+    await runSqliteMigrations(database, throughBinarySchema);
+    const insert = database.prepare(
+      `INSERT INTO artifacts
+        (id, title, project, description, media_type, created_at, updated_at)
+       VALUES (?, 'Title', 'artifacts', 'kept', 'text/plain', ?, ?)`,
+    );
+    insert.run('first', '2026-01-01T00:00:00.000Z', '2026-02-01T00:00:00.000Z');
+    insert.run('second', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    database.close();
+
+    const store = await SqliteArtifactMetadataStore.open(databasePath);
+
+    expect((await store.list()).map(({ id }) => id)).toEqual(['second', 'first']);
+    await expect(store.find('first')).resolves.toEqual({
+      createdAt: '2026-01-01T00:00:00.000Z',
+      description: 'kept',
+      id: 'first',
+      mediaType: 'text/plain',
+      project: 'artifacts',
+      title: 'Title',
+    });
+    const reopened = new DatabaseSync(databasePath);
+    expect(columnNames(reopened)).not.toContain('updated_at');
+    reopened.close();
+  });
+
+  it('restores updated_at from created_at on downgrade', async () => {
+    const database = new DatabaseSync(databasePath);
+    await runSqliteMigrations(database);
+    database
+      .prepare(
+        `INSERT INTO artifacts (id, title, project, description, media_type, created_at)
+         VALUES ('text', 'Text', 'artifacts', 'safe', 'text/plain', 'created')`,
+      )
+      .run();
+
+    await revertLastSqliteMigration(database);
+
+    expect(database.prepare('SELECT created_at, updated_at FROM artifacts').get()).toEqual({
+      created_at: 'created',
+      updated_at: 'created',
+    });
     database.close();
   });
 

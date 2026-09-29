@@ -102,8 +102,7 @@ function suppliedServices(
 
 export function createApp(store?: ArtifactStore | AppServices, mcpService?: ArtifactService): Hono {
   const app = new Hono();
-  // A supplied legacy store is adapted once, so every request shares the
-  // adapter's per-artifact ordering instead of each request getting its own.
+  // A supplied legacy store is adapted once, when the app is built.
   const supplied = store === undefined ? undefined : suppliedServices(store, mcpService);
   const resolveServices = (): Promise<AppServices> =>
     supplied === undefined ? defaultServices(mcpService) : Promise.resolve(supplied);
@@ -171,7 +170,7 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
   // The gallery card's <img>: the rendered JPEG when one exists, otherwise a
   // drawn per-kind placeholder. Both are `no-cache` so a browser revalidates
   // and picks up the real image once it lands; the JPEG carries an ETag so
-  // that revalidation is a 304 until the artifact is re-rendered.
+  // that revalidation is a 304 while the stored preview is unchanged.
   app.get('/a/:id/thumb', async (c) => {
     const services = await resolveServices();
     const id = c.req.param('id');

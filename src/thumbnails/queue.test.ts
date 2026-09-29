@@ -12,7 +12,6 @@ function artifact(id: string): Artifact {
     mediaType: 'text/html',
     project: 'p',
     title: id,
-    updatedAt: '2026-09-24T10:00:00.000Z',
   };
 }
 
@@ -255,11 +254,8 @@ describe('createThumbnailQueue', () => {
     await expect(store.has('fine')).resolves.toBe(true);
   });
 
-  it('drops any stored preview when the renderer declines with null', async () => {
+  it('stores nothing when the renderer declines with null', async () => {
     const store = memoryStore();
-    // A preview of the artifact's previous content, before an update made
-    // it something the renderer declines.
-    await store.write('a', bytesFor('old'));
     const renderer = fakeRenderer(() => Promise.resolve(null));
     const queue = createThumbnailQueue({ lookup: found, store });
     queue.start(renderer, BASE);

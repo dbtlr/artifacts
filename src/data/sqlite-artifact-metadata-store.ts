@@ -19,7 +19,6 @@ type ArtifactRow = {
   media_type: MediaType;
   project: string;
   title: string;
-  updated_at: string;
 };
 
 const SQLITE_BUSY_TIMEOUT_MS = 1_000;
@@ -42,7 +41,6 @@ function toArtifactRow(record: Record<string, SQLOutputValue>): ArtifactRow {
     media_type: mediaType,
     project: String(record.project),
     title: String(record.title),
-    updated_at: String(record.updated_at),
   };
 }
 
@@ -56,7 +54,6 @@ function toArtifact(row: ArtifactRow): Artifact {
     mediaType: row.media_type,
     project: row.project,
     title: row.title,
-    updatedAt: row.updated_at,
   };
 }
 
@@ -82,8 +79,8 @@ export class SqliteArtifactMetadataStore implements ArtifactMetadataStore {
     this.database
       .prepare(
         `INSERT INTO artifacts
-          (id, title, project, description, media_type, collection, filename, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, title, project, description, media_type, collection, filename, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         artifact.id,
@@ -94,7 +91,6 @@ export class SqliteArtifactMetadataStore implements ArtifactMetadataStore {
         artifact.collection ?? null,
         artifact.filename ?? null,
         artifact.createdAt,
-        artifact.updatedAt,
       );
   }
 
@@ -123,26 +119,5 @@ export class SqliteArtifactMetadataStore implements ArtifactMetadataStore {
 
   async remove(id: string): Promise<boolean> {
     return this.database.prepare('DELETE FROM artifacts WHERE id = ?').run(id).changes > 0;
-  }
-
-  async update(artifact: Artifact): Promise<boolean> {
-    return (
-      this.database
-        .prepare(
-          `UPDATE artifacts
-           SET title = ?, project = ?, description = ?, media_type = ?, collection = ?, filename = ?, updated_at = ?
-           WHERE id = ?`,
-        )
-        .run(
-          artifact.title,
-          artifact.project,
-          artifact.description,
-          artifact.mediaType,
-          artifact.collection ?? null,
-          artifact.filename ?? null,
-          artifact.updatedAt,
-          artifact.id,
-        ).changes > 0
-    );
   }
 }

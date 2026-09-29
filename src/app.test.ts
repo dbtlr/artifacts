@@ -538,21 +538,6 @@ describe('binary artifacts in browser routes', () => {
     expect(head.headers.get('content-length')).toBe(get.headers.get('content-length'));
   });
 
-  it('preserves the URL while an update changes the bytes and ETag', async () => {
-    const initial = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 1]);
-    const replacement = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 2]);
-    const artifact = await createBinary(initial, 'image/png', 'preview.png');
-    const first = await testApp.request(`/a/${artifact.id}`);
-    const firstEtag = first.headers.get('etag');
-
-    const updated = await service.updateArtifact(artifact.id, { content: replacement });
-    const second = await testApp.request(`/a/${artifact.id}`);
-
-    expect(updated?.id).toBe(artifact.id);
-    expect(new Uint8Array(await second.arrayBuffer())).toEqual(replacement);
-    expect(second.headers.get('etag')).not.toBe(firstEtag);
-  });
-
   it('applies a restrictive CSP to SVG responses', async () => {
     const artifact = await createBinary(
       new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>'),

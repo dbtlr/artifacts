@@ -6,8 +6,8 @@ export type ThumbnailQueue = {
   // Resolves once they are queued, not rendered; rejects if the store
   // cannot say which previews exist.
   backfill: (artifacts: Artifact[]) => Promise<void>;
-  // Queue one artifact for (re-)rendering. Never throws and never blocks the
-  // caller: a create/update returns as soon as the metadata is written.
+  // Queue one artifact for rendering. Never throws and never blocks the
+  // caller: a create returns as soon as the metadata is written.
   enqueue: (id: string) => void;
   // Resolves once nothing is rendering and nothing is waiting. For tests and
   // graceful shutdown; a queue that has not started resolves immediately.
@@ -19,7 +19,7 @@ export type ThumbnailQueue = {
 
 type ThumbnailQueueDeps = {
   // Fresh metadata at render time: an artifact removed while it was waiting
-  // is skipped, and an updated one renders its latest media type.
+  // is skipped.
   lookup: (id: string) => Promise<Artifact | null>;
   report?: (message: string) => void;
   store: ThumbnailStore;
@@ -35,7 +35,7 @@ function describe(error: unknown): string {
 
 // One render at a time, in enqueue order, so a burst of uploads never opens a
 // pile of browser pages at once. Ids are kept in a Set, so an artifact queued
-// twice before its turn renders once; queued again after, it renders again.
+// twice before its turn renders once.
 // Every failure (lookup, renderer, store) is reported and the queue moves on:
 // nothing here may reject into the caller or become an unhandled rejection.
 export function createThumbnailQueue({
@@ -67,10 +67,8 @@ export function createThumbnailQueue({
       if ((await lookup(id)) === null) {
         return;
       }
+      // Declined: the artifact has no rendered preview.
       if (bytes === null) {
-        // Declined (say, an update turned an html artifact into a PDF): a
-        // preview of the old content must not outlive it.
-        await store.remove(id);
         return;
       }
       await store.write(id, bytes);
