@@ -44,6 +44,10 @@ export async function resolveChromiumPath(env: NodeJS.ProcessEnv): Promise<strin
 
 type RendererOptions = {
   executablePath?: string | undefined;
+  // This instance's public base URL (ARTIFACTS_PUBLIC_BASE_URL). Artifacts
+  // embed each other by the full URL add_artifact returns; a render loads
+  // those from its own origin instead (see confineToOrigin).
+  publicBaseUrl?: string | undefined;
   report?: (message: string) => void;
   // Upper bound for one whole render, from opening the page to the
   // screenshot; a page that is still busy at the deadline is closed and the
@@ -79,12 +83,47 @@ function imagePage(url: string): string {
 // so every other connection the network stack makes, from any page or frame,
 // dies at the proxy. This request filter then narrows the one allowed origin
 // to GETs, which keeps /mcp out of reach even from a form.
-async function confineToOrigin(context: BrowserContext, origin: string): Promise<void> {
+//
+// A GET under the public base URL names this same server by the address
+// visitors use, which the renderer cannot reach. It never goes to the
+// network: the filter answers it with a redirect to the same path and query
+// on the render origin, so the embed shows and the render still loads only
+// from its own origin. Chromium follows that redirect as a GET, which
+// Playwright does not route again; its target is the one address the proxy
+// fence lets through.
+async function confineToOrigin(
+  context: BrowserContext,
+  origin: string,
+  publicBaseUrl: string | undefined,
+): Promise<void> {
   await context.route('**/*', (route) => {
     const request = route.request();
-    const allowed = request.method() === 'GET' && new URL(request.url()).origin === origin;
-    return allowed ? route.continue() : route.abort('blockedbyclient');
+    if (request.method() !== 'GET') {
+      return route.abort('blockedbyclient');
+    }
+    if (new URL(request.url()).origin === origin) {
+      return route.continue();
+    }
+    const local =
+      publicBaseUrl === undefined
+        ? undefined
+        : localUrlFor(request.url(), { origin, publicBaseUrl });
+    return local === undefined
+      ? route.abort('blockedbyclient')
+      : route.fulfill({ headers: { Location: local }, status: 302 });
   });
+}
+
+// The URL on the render origin for `url`, when `url` is under the public
+// base URL: the same path below the base, and the same query. Undefined for
+// anything else, including another scheme or port on the public host.
+export function localUrlFor(
+  url: string,
+  { origin, publicBaseUrl }: { origin: string; publicBaseUrl: string },
+): string | undefined {
+  const base = new URL(publicBaseUrl).href.replace(/\/+$/u, '');
+  const { href } = new URL(url);
+  return href.startsWith(`${base}/`) ? `${origin}${href.slice(base.length)}` : undefined;
 }
 
 // TCP port 9 (discard) on loopback: nothing listens there, so proxied
@@ -134,6 +173,7 @@ async function closeQuietly(context: BrowserContext): Promise<void> {
 // declines with null and the gallery keeps its drawn placeholders.
 export function createPlaywrightRenderer({
   executablePath,
+  publicBaseUrl,
   report = defaultReport,
   timeoutMs = 15_000,
 }: RendererOptions = {}): ThumbnailRenderer {
@@ -247,7 +287,7 @@ export function createPlaywrightRenderer({
       void closeQuietly(context);
     }, timeoutMs);
     try {
-      await confineToOrigin(context, origin);
+      await confineToOrigin(context, origin, publicBaseUrl);
       return await capture(context, target);
     } finally {
       clearTimeout(deadline);

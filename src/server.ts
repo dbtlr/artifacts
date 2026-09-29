@@ -6,6 +6,7 @@ import { createApp } from './app.js';
 import { resolvePort } from './port.js';
 import { getDefaultAppServices } from './services.js';
 import { createPlaywrightRenderer, resolveChromiumPath } from './thumbnails/playwright-renderer.js';
+import { resolvePublicBaseUrl } from './urls.js';
 
 // How long shutdown waits for the headless browser to close before exiting
 // anyway; well inside Docker's default 10s stop grace period.
@@ -14,7 +15,10 @@ const SHUTDOWN_GRACE_MS = 5_000;
 const port = resolvePort(process.env.ARTIFACTS_PORT);
 const services = await getDefaultAppServices();
 const chromiumPath = await resolveChromiumPath(process.env);
-const renderer = createPlaywrightRenderer({ executablePath: chromiumPath });
+const renderer = createPlaywrightRenderer({
+  executablePath: chromiumPath,
+  publicBaseUrl: resolvePublicBaseUrl(),
+});
 const app = createApp(services);
 
 // Previews are screenshots of this server's own pages, so rendering can
