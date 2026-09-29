@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -8,11 +8,12 @@ import { DatabaseSync } from 'node:sqlite';
 import type { RunnableMigration } from 'umzug';
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 
+import { MIGRATIONS_DIR } from '../migrations-dir.js';
 import { SqliteArtifactMetadataStore } from './sqlite-artifact-metadata-store.js';
 import {
+  loadSqlMigrations,
   revertLastSqliteMigration,
   runSqliteMigrations,
-  sqliteMigrations,
   SqliteMigrationStorage,
 } from './sqlite-migrations.js';
 
@@ -29,7 +30,7 @@ afterEach(() => {
 });
 
 // The schema as of 0002, before immutability dropped updated_at.
-const throughBinarySchema = sqliteMigrations.slice(0, 2);
+const throughBinarySchema = loadSqlMigrations(MIGRATIONS_DIR).slice(0, 2);
 
 function columnNames(database: DatabaseSync): string[] {
   return database
@@ -44,6 +45,57 @@ function tableNames(database: DatabaseSync): string[] {
     .all()
     .map((row) => String(row.name));
 }
+
+describe('SQL migration files', () => {
+  it('applies files in name order and reverts with the matching down file', async () => {
+    const migrationsDir = join(directory, 'migrations');
+    mkdirSync(join(migrationsDir, 'down'), { recursive: true });
+    writeFileSync(
+      join(migrationsDir, '0002-add-notes.sql'),
+      'ALTER TABLE items ADD COLUMN notes TEXT;',
+    );
+    writeFileSync(join(migrationsDir, '0001-create-items.sql'), 'CREATE TABLE items (id TEXT);');
+    writeFileSync(
+      join(migrationsDir, 'down', '0002-add-notes.sql'),
+      'ALTER TABLE items DROP COLUMN notes;',
+    );
+    writeFileSync(join(migrationsDir, 'README.md'), 'Not a migration.');
+    const migrations = loadSqlMigrations(migrationsDir);
+    const database = new DatabaseSync(databasePath);
+
+    await runSqliteMigrations(database, migrations);
+
+    expect(
+      database
+        .prepare('SELECT name FROM artifact_migrations ORDER BY rowid')
+        .all()
+        .map((row) => String(row.name)),
+    ).toEqual(['0001-create-items', '0002-add-notes']);
+    expect(
+      database
+        .prepare('PRAGMA table_info(items)')
+        .all()
+        .map((column) => column.name),
+    ).toEqual(['id', 'notes']);
+
+    await revertLastSqliteMigration(database, migrations);
+
+    expect(
+      database
+        .prepare('PRAGMA table_info(items)')
+        .all()
+        .map((column) => column.name),
+    ).toEqual(['id']);
+    await expect(revertLastSqliteMigration(database, migrations)).rejects.toThrow(
+      'Cannot revert migration 0001-create-items: it has no down file',
+    );
+    expect(tableNames(database)).toContain('items');
+    expect(database.prepare('SELECT name FROM artifact_migrations').get()).toEqual({
+      name: '0001-create-items',
+    });
+    database.close();
+  });
+});
 
 describe('SQLite migrations', () => {
   it('creates the schema and records the initial migration on a fresh database', async () => {
@@ -169,6 +221,7 @@ describe('SQLite migrations', () => {
       count: 2,
     });
     expect(tableNames(database)).not.toContain('artifacts_legacy');
+    expect(tableNames(database)).not.toContain('migration_guard');
     database.close();
   });
 
@@ -219,7 +272,7 @@ describe('SQLite migrations', () => {
     database.close();
   });
 
-  it('refuses unsupported legacy types deterministically, including null', async () => {
+  it('refuses unsupported legacy types, including null, without changing the rows', async () => {
     const database = new DatabaseSync(databasePath);
     try {
       database.exec(`
@@ -238,23 +291,30 @@ describe('SQLite migrations', () => {
       `);
 
       await expect(runSqliteMigrations(database)).rejects.toThrow(
-        'artifact "bad-first": unsupported legacy type "exe"',
+        'a row has a type other than html, md, or txt',
       );
       database.prepare("DELETE FROM artifacts WHERE id IN ('bad-first', 'bad-second')").run();
       await expect(runSqliteMigrations(database)).rejects.toThrow(
-        'artifact "bad-null": unsupported legacy type "null"',
+        'a row has a type other than html, md, or txt',
       );
       expect(database.prepare('SELECT type FROM artifacts WHERE id = ?').get('bad-null')).toEqual({
         type: null,
       });
       expect(tableNames(database)).not.toContain('artifacts_binary');
+      expect(tableNames(database)).not.toContain('migration_guard');
     } finally {
       database.close();
     }
   });
 
-  it('rolls back migration effects when a migration fails before history is recorded', async () => {
+  it('rolls back every migration of a failed run, including its history', async () => {
     const database = new DatabaseSync(databasePath);
+    const succeedingMigration: RunnableMigration<DatabaseSync> = {
+      name: 'working-migration',
+      up: async ({ context }) => {
+        context.exec('CREATE TABLE applied_first (id TEXT)');
+      },
+    };
     const failingMigration: RunnableMigration<DatabaseSync> = {
       name: 'broken-migration',
       up: async ({ context }) => {
@@ -263,13 +323,10 @@ describe('SQLite migrations', () => {
       },
     };
 
-    await expect(runSqliteMigrations(database, [failingMigration])).rejects.toThrow(
-      'injected migration failure',
-    );
-    expect(tableNames(database)).not.toContain('must_not_survive');
-    expect(database.prepare('SELECT COUNT(*) AS count FROM artifact_migrations').get()).toEqual({
-      count: 0,
-    });
+    await expect(
+      runSqliteMigrations(database, [succeedingMigration, failingMigration]),
+    ).rejects.toThrow('injected migration failure');
+    expect(tableNames(database)).toEqual([]);
     database.close();
 
     await expect(SqliteArtifactMetadataStore.open(databasePath)).resolves.toBeDefined();
@@ -291,7 +348,7 @@ describe('SQLite migrations', () => {
     database.close();
   });
 
-  it('preserves the history-write error when no transaction is available to roll back', async () => {
+  it('surfaces a history-write error', async () => {
     const database = new DatabaseSync(databasePath);
     const storage = new SqliteMigrationStorage(database);
     database
@@ -301,6 +358,43 @@ describe('SQLite migrations', () => {
     await expect(storage.logMigration({ context: database, name: 'duplicate' })).rejects.toThrow(
       'UNIQUE constraint failed',
     );
+    database.close();
+  });
+
+  it('skips migrations another process applied while this one waited for the lock', async () => {
+    // Another process has already started migrating: it holds the write lock
+    // and has recorded every migration, but has not committed yet.
+    const migrateScript = `
+      const { DatabaseSync } = require('node:sqlite');
+      const database = new DatabaseSync(process.argv[1]);
+      database.exec('CREATE TABLE artifact_migrations (name TEXT PRIMARY KEY, executed_at TEXT NOT NULL)');
+      database.exec('BEGIN IMMEDIATE');
+      database.exec(\`
+        CREATE TABLE artifacts (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL, project TEXT NOT NULL,
+          description TEXT NOT NULL, media_type TEXT NOT NULL,
+          collection TEXT COLLATE NOCASE, filename TEXT, created_at TEXT NOT NULL
+        );
+        INSERT INTO artifact_migrations VALUES
+          ('0001-initial-artifacts-schema', 'now'),
+          ('0002-binary-artifact-schema', 'now'),
+          ('0003-drop-artifact-updated-at', 'now');
+      \`);
+      process.stdout.write('locked');
+      setTimeout(() => { database.exec('COMMIT'); database.close(); }, 100);
+    `;
+    const migrateProcess = spawn(process.execPath, ['-e', migrateScript, databasePath], {
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    const exit = once(migrateProcess, 'exit');
+    await once(migrateProcess.stdout, 'data');
+
+    await expect(SqliteArtifactMetadataStore.open(databasePath)).resolves.toBeDefined();
+    await exit;
+    const database = new DatabaseSync(databasePath);
+    expect(database.prepare('SELECT COUNT(*) AS count FROM artifact_migrations').get()).toEqual({
+      count: 3,
+    });
     database.close();
   });
 
