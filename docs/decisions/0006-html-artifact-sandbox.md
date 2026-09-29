@@ -35,7 +35,7 @@ an error the author could see.
 - **Dialogs work.** `allow-modals` lets the page call `alert()`, `confirm()`, `prompt()`, and
   `print()`.
 - **No other sandbox flags.** Downloads, top-level navigation from a frame, pointer lock, and the
-  other flags stay off.
+  other flags stay off for the artifact's own page. They do not apply to a window it opens.
 
 ## Considered options
 
@@ -48,11 +48,13 @@ an error the author could see.
 
 ## Consequences
 
-- Compromised content in an artifact can open windows and show dialogs. It can already navigate its
-  own page to any URL, so this adds nuisance, not access.
-- A window that an artifact opens is not sandboxed. If it shows this server, it is an ordinary
-  top-level page with the reader's session, the same as a link the reader follows. The artifact
-  cannot read that page, because the two have different origins.
+- Compromised content in an artifact can open windows and show dialogs. A `prompt()` dialog shows
+  this server's host name and can ask for a password, but the same script can already draw a fake
+  sign-in form in the page and send what the reader types to another site. It can also navigate its
+  own page to any URL. So this adds nuisance, not access.
+- A window that an artifact opens is not sandboxed. It is an ordinary top-level page, the same as a
+  link the reader follows, so it can start downloads. If it shows this server, it has the reader's
+  session. The artifact cannot read that page, because the two have different origins.
 - A page opened with `window.open()`, unless the call passes `noopener`, keeps a `window.opener`
   handle and can navigate the artifact's tab to another URL, such as a phishing page. It cannot
   read the artifact, because the two have different origins. Browsers open `target="_blank"` links
