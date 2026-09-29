@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vite-plus/test';
 
-import type { Artifact, ArtifactContentStore, ArtifactMetadataStore } from '../artifacts/types.js';
+import type {
+  Artifact,
+  ArtifactContentStore,
+  ArtifactMetadataStore,
+  EmbedTemplate,
+} from '../artifacts/types.js';
 
 const first: Artifact = {
   createdAt: '2026-01-01T00:00:00.000Z',
@@ -21,6 +26,16 @@ const second: Artifact = {
   project: 'beta',
   title: 'Second',
 };
+
+const template: EmbedTemplate = {
+  extractorVersion: 1,
+  references: [
+    { id: 'image-one', start: 10 },
+    { id: 'image-two', start: 42 },
+  ],
+};
+
+const newerTemplate: EmbedTemplate = { extractorVersion: 2, references: [] };
 
 export function metadataStoreContract(
   name: string,
@@ -50,6 +65,29 @@ export function metadataStoreContract(
       await expect(store.create({ ...second, id: first.id })).rejects.toThrow();
 
       await expect(store.list()).resolves.toEqual([first]);
+    });
+
+    it('stores, replaces, and drops an embed template with its artifact', async () => {
+      const store = await createStore();
+      await store.create(first);
+
+      await expect(store.findEmbedTemplate(first.id)).resolves.toBeNull();
+      await store.saveEmbedTemplate(first.id, template);
+      await expect(store.findEmbedTemplate(first.id)).resolves.toEqual(template);
+      await store.saveEmbedTemplate(first.id, newerTemplate);
+      await expect(store.findEmbedTemplate(first.id)).resolves.toEqual(newerTemplate);
+
+      await store.remove(first.id);
+      await expect(store.findEmbedTemplate(first.id)).resolves.toBeNull();
+    });
+
+    // A save that loses a race with a remove must not leave an orphan.
+    it('stores no embed template for an id without an artifact', async () => {
+      const store = await createStore();
+
+      await store.saveEmbedTemplate('missing', template);
+
+      await expect(store.findEmbedTemplate('missing')).resolves.toBeNull();
     });
   });
 }

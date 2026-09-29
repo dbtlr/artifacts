@@ -1,4 +1,10 @@
-import type { Artifact, ArtifactContentStore, ArtifactMetadataStore, MediaType } from './types.js';
+import type {
+  Artifact,
+  ArtifactContentStore,
+  ArtifactMetadataStore,
+  EmbedTemplate,
+  MediaType,
+} from './types.js';
 
 export type HoldableStep = 'contentRead' | 'contentRemove' | 'metadataCreate';
 
@@ -18,6 +24,8 @@ export type MemoryStores = {
   hold: (step: HoldableStep) => Hold;
   metadata: ArtifactMetadataStore;
   rows: Map<string, Artifact>;
+  // Stored embed templates keyed by artifact id.
+  templates: Map<string, EmbedTemplate>;
 };
 
 const fileKey = (id: string, mediaType: MediaType) => `${id}:${mediaType}`;
@@ -28,6 +36,7 @@ export function createMemoryStores(seed: { artifact: Artifact; bytes: Uint8Array
   const files = new Map(
     seed.map(({ artifact, bytes }) => [fileKey(artifact.id, artifact.mediaType), bytes]),
   );
+  const templates = new Map<string, EmbedTemplate>();
   const holds = new Map<HoldableStep, { gate: Promise<void>; reached: () => void }>();
 
   async function pass(step: HoldableStep): Promise<void> {
@@ -49,8 +58,17 @@ export function createMemoryStores(seed: { artifact: Artifact; bytes: Uint8Array
       rows.set(artifact.id, artifact);
     },
     find: async (id) => rows.get(id) ?? null,
+    findEmbedTemplate: async (id) => templates.get(id) ?? null,
     list: async () => [...rows.values()],
-    remove: async (id) => rows.delete(id),
+    remove: async (id) => {
+      templates.delete(id);
+      return rows.delete(id);
+    },
+    saveEmbedTemplate: async (id, template) => {
+      if (rows.has(id)) {
+        templates.set(id, template);
+      }
+    },
   };
   const content: ArtifactContentStore = {
     read: async (id, mediaType) => {
@@ -77,5 +95,6 @@ export function createMemoryStores(seed: { artifact: Artifact; bytes: Uint8Array
     },
     metadata,
     rows,
+    templates,
   } satisfies MemoryStores;
 }

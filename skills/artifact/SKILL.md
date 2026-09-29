@@ -60,6 +60,10 @@ Create each image or PDF before the containing document, then use the absolute `
 `add_artifact`. Do not reconstruct the hostname. Embed images; link to PDFs with `<a href>` or a
 Markdown link, because an HTML document's sandbox stops an embedded PDF from displaying.
 
+In HTML, put the URL directly in the `src` or `srcset` attribute, without a query. When the server
+requires a login, it signs only those URLs so they load. URLs that scripts build, and CSS `url()`,
+do not load.
+
 ```html
 <img src="https://artifacts.example/a/returned-id" alt="Descriptive alternative text">
 ```

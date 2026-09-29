@@ -1,10 +1,10 @@
 import { isMediaType } from '../artifacts/media.js';
-import type { Artifact, ListArtifactsQuery } from '../artifacts/types.js';
+import type { Artifact, EmbedTemplate, ListArtifactsQuery } from '../artifacts/types.js';
 
 // The metadata statements that every SQLite-dialect adapter runs, so the
 // node:sqlite and D1 adapters differ only in how they execute them. Values
 // bind to `?` placeholders in the order given.
-export type SqlStatement = { sql: string; values: (string | null)[] };
+export type SqlStatement = { sql: string; values: (number | string | null)[] };
 
 export function insertArtifact(artifact: Artifact): SqlStatement {
   return {
@@ -52,6 +52,26 @@ export function removeArtifact(id: string): SqlStatement {
   return { sql: 'DELETE FROM artifacts WHERE id = ?', values: [id] };
 }
 
+export function findEmbedTemplate(id: string): SqlStatement {
+  return {
+    sql: 'SELECT extractor_version, embeds FROM artifact_embed_templates WHERE artifact_id = ?',
+    values: [id],
+  };
+}
+
+// One statement, so the existence check and the write cannot be split by a
+// remove from another process: an id without an artifact stores nothing.
+export function saveEmbedTemplate(id: string, template: EmbedTemplate): SqlStatement {
+  return {
+    sql: `INSERT INTO artifact_embed_templates (artifact_id, extractor_version, embeds)
+     SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM artifacts WHERE id = ?)
+     ON CONFLICT (artifact_id) DO UPDATE SET
+       extractor_version = excluded.extractor_version,
+       embeds = excluded.embeds`,
+    values: [id, template.extractorVersion, JSON.stringify(template.references), id],
+  };
+}
+
 function requiredString(record: Record<string, unknown>, column: string): string {
   const value = record[column];
   if (typeof value !== 'string') {
@@ -83,4 +103,29 @@ export function artifactFromRow(record: Record<string, unknown>): Artifact {
     project: requiredString(record, 'project'),
     title: requiredString(record, 'title'),
   };
+}
+
+function isEmbedReference(value: unknown): value is EmbedTemplate['references'][number] {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'id' in value &&
+    'start' in value &&
+    typeof value.id === 'string' &&
+    Number.isSafeInteger(value.start)
+  );
+}
+
+// Maps an `artifact_embed_templates` row to its template.
+export function embedTemplateFromRow(record: Record<string, unknown>): EmbedTemplate {
+  const version = record.extractor_version;
+  const references: unknown = JSON.parse(requiredString(record, 'embeds'));
+  if (
+    !Number.isSafeInteger(version) ||
+    !Array.isArray(references) ||
+    !references.every(isEmbedReference)
+  ) {
+    throw new Error('Corrupt artifact_embed_templates row');
+  }
+  return { extractorVersion: Number(version), references };
 }

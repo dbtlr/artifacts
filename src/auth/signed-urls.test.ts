@@ -36,6 +36,18 @@ describe('createArtifactUrlSigner', () => {
     expect(signer.verify('abc', query)).toBe(false);
   });
 
+  it('signs for a longer lifetime when asked to', () => {
+    let now = SIGNED_AT;
+    const signer = signerAt(() => now);
+    const query = queryOf(signer.signedPath('abc', 600));
+
+    now = new Date(SIGNED_AT.getTime() + 599 * 1000);
+    expect(signer.verify('abc', query)).toBe(true);
+
+    now = new Date(SIGNED_AT.getTime() + 600 * 1000);
+    expect(signer.verify('abc', query)).toBe(false);
+  });
+
   it('grants nothing for another artifact', () => {
     const signer = signerAt(() => SIGNED_AT);
 

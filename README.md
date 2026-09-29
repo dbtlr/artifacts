@@ -114,8 +114,8 @@ Images, stylesheets, and classic scripts that the page loads by URL still work, 
 sends `Access-Control-Allow-Origin: *`. Frames inside an HTML artifact inherit its sandbox. A PDF in
 an `<iframe>`, `<embed>`, or `<object>` does not display, so link to the PDF instead. A Markdown
 artifact in an `<iframe>` shows no syntax highlighting or Mermaid diagrams. When an owner password
-is set, embedded `/a/:id` files do not load, because the browser does not send the session cookie
-on requests from the sandbox.
+is set, the browser does not send the session cookie on requests from the sandbox, so embedded
+`/a/:id` files load through signed URLs instead. See [Owner login](#owner-login).
 
 ### Optional artifact skill
 
@@ -210,7 +210,12 @@ With a password set:
   answers `429` with a `Retry-After` header.
 - `/mcp` answers `401` unless the request carries `Authorization: Bearer <key>` with a key from the
   **API keys** page. A session cookie does not open `/mcp`.
-- HTML artifacts cannot embed other artifacts.
+- HTML artifacts still show embedded artifacts. When an HTML artifact is added, the server records
+  each `/a/:id` URL in the `src`, `srcset`, `poster`, or `href` of an `img`, `source`, `iframe`,
+  `video`, `audio`, or `link` element. The URL must be root-relative or start with
+  `ARTIFACTS_PUBLIC_BASE_URL`, and it may have a fragment but no query. Each view replaces those
+  URLs with signed URLs that work for 10 minutes. URLs that scripts build, and CSS `url()`, are not
+  signed and do not load.
 - Gallery previews still render. The renderer reads each artifact through a signed URL that works
   for 60 seconds and for that one artifact only. An expired or altered signature gets `403`.
 - Set `ARTIFACTS_PUBLIC_BASE_URL` to the URL the browser uses. Login and logout forms are accepted

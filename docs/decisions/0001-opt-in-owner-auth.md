@@ -73,3 +73,6 @@ Passkeys can later use the same session model.
 - 2026-09-29: [ADR-0002](0002-signed-artifact-urls.md) adds short-lived signed URLs as the one way
   to read an artifact without a session. With auth on, gallery previews render through them, so
   the consequence above about placeholders no longer holds.
+- 2026-09-29: [ADR-0003](0003-signed-embed-urls.md) signs the `/a/:id` URLs in an HTML artifact's
+  loading attributes on every view, so the consequence above about HTML artifacts no longer holds
+  for them.

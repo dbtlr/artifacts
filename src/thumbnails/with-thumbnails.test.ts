@@ -17,6 +17,7 @@ function stubService(overrides: Partial<ArtifactService> = {}): ArtifactService 
     createArtifact: async () => sample,
     findArtifact: async () => sample,
     getArtifact: async () => ({ ...sample, content: new Uint8Array() }),
+    getEmbedReferences: async () => [],
     listArtifacts: async () => [sample],
     removeArtifact: async () => true,
     ...overrides,
