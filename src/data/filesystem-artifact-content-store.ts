@@ -4,12 +4,11 @@ import { join } from 'node:path';
 
 import { mediaDefinition } from '../artifacts/media.js';
 import type { ArtifactContentStore, MediaType } from '../artifacts/types.js';
+import { isSafeId } from './safe-id.js';
 
 function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error;
 }
-
-const SAFE_ARTIFACT_ID = /^[A-Za-z0-9_-]+$/u;
 
 export class FilesystemArtifactContentStore implements ArtifactContentStore {
   private readonly filesDir: string;
@@ -20,7 +19,7 @@ export class FilesystemArtifactContentStore implements ArtifactContentStore {
   }
 
   private path(id: string, mediaType: MediaType): string {
-    if (!SAFE_ARTIFACT_ID.test(id)) {
+    if (!isSafeId(id)) {
       throw new Error(
         `Invalid artifact id ${JSON.stringify(id)}: must be a plain filename segment`,
       );

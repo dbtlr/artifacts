@@ -60,5 +60,20 @@ export function contentStoreContract(name: string, createStore: () => ArtifactCo
     it('reads missing content as null', async () => {
       await expect(createStore().read('missing', 'text/plain')).resolves.toBeNull();
     });
+
+    // Ids reach the stores from URL parameters, so every adapter refuses
+    // anything but a plain id segment, whatever its backend would accept.
+    it.each(['../escape', 'nested/escape', String.raw`nested\escape`, '.', ''])(
+      'rejects the unsafe id %j',
+      async (id) => {
+        const store = createStore();
+
+        await expect(store.write(id, 'text/plain', new Uint8Array())).rejects.toThrow(
+          'Invalid artifact id',
+        );
+        await expect(store.read(id, 'text/plain')).rejects.toThrow('Invalid artifact id');
+        await expect(store.remove(id, 'text/plain')).rejects.toThrow('Invalid artifact id');
+      },
+    );
   });
 }
