@@ -78,6 +78,11 @@ Both agents read the variable each time they connect, so the key is not stored i
 configuration. Keep the single quotes in the Claude Code command: they stop the shell from
 expanding the variable, and Claude Code expands `${ARTIFACTS_API_KEY}` itself.
 
+`/mcp` refuses a request whose `Origin` header names any origin but the server's own, with or
+without an owner password. Command-line and desktop MCP clients, such as Codex and Claude Code, send
+no `Origin` and work. A browser-based MCP client sends the origin of its own page, so it is refused.
+For example, MCP Inspector in direct connection mode cannot connect.
+
 The server exposes `add_artifact`, `remove_artifact`, `list_artifacts`, `list_collections`, and
 `get_artifact`. Artifacts are immutable: there is no update tool. A revision or variation is a new
 artifact, usually in the same collection, so earlier versions keep their links.
@@ -152,6 +157,7 @@ override Docker defaults.
 | `ARTIFACTS_DATABASE_MOUNT` | `artifacts-database` | Separate Docker volume name or existing absolute host directory for SQLite. |
 | `ARTIFACTS_THUMBS_MOUNT` | `artifacts-thumbs` | Separate Docker volume name or existing absolute host directory for rendered gallery previews. |
 | `ARTIFACTS_OWNER_PASSWORD` | unset | Turns on owner login; see [Owner login](#owner-login). Passed to the container by name, so the value does not appear on the Docker command line. |
+| `ARTIFACTS_CLIENT_ADDRESS_HEADER` | unset | With owner login, the header that your proxy sets to the client's address, such as `CF-Connecting-IP`; see [Owner login](#owner-login). |
 
 Named volumes survive container replacement and `pnpm docker:stop`. The three mounts must be
 different. Absolute bind-mount directories must exist and be writable from the container by the
@@ -192,6 +198,7 @@ Direct development uses `.env.development` and intentionally separate paths:
 | `ARTIFACTS_THUMBS_DIR` | `data/development/thumbs` |
 | `ARTIFACTS_CHROMIUM_PATH` | probed: Alpine `chromium`, Linux `google-chrome`, macOS Chrome |
 | `ARTIFACTS_OWNER_PASSWORD` | unset: no login |
+| `ARTIFACTS_CLIENT_ADDRESS_HEADER` | unset: the connection's address |
 
 See `.env.development.example` for copyable overrides. Docker mount variables and direct-runtime
 path variables are deliberately different; one is not an alias for the other.
@@ -199,15 +206,24 @@ path variables are deliberately different; one is not an alias for the other.
 ### Owner login
 
 Set `ARTIFACTS_OWNER_PASSWORD` to require a login. When it is unset, there is no login and every
-route is open, as described above. A blank value stops the server at startup.
+route is open, as described above. A blank value, or one shorter than 16 characters, stops the
+server at startup. Use a long, random password.
 
 With a password set:
 
 - Every page and every `/a/:id` link redirects to `/login` until the owner logs in. The login form,
   `/assets/*`, and the root icons stay public, so the Docker health check still passes.
 - A login lasts 7 days. **Log out** in the gallery header ends it.
-- Login allows 10 attempts in any 15-minute window for the whole instance, after which the form
-  answers `429` with a `Retry-After` header.
+- Login allows 10 attempts from one client address in any 15-minute window, and 100 from all
+  addresses together. After that the form answers `429` with a `Retry-After` header. A successful
+  login clears the count for its own address only.
+- The client address is the connection's address. Behind a reverse proxy, every connection comes
+  from the proxy, so all clients share one count. Set `ARTIFACTS_CLIENT_ADDRESS_HEADER` to the
+  header that your proxy sets to the client's address: `CF-Connecting-IP` behind Cloudflare, or
+  `X-Real-IP` or `X-Forwarded-For` behind a proxy that you configure to set it. For a list header,
+  the last entry counts. The server reads no other header, and a request without the named header
+  counts against its connection's address. Any client can send this header, so make sure that the
+  server is reachable only through the proxy.
 - `/mcp` answers `401` unless the request carries `Authorization: Bearer <key>` with a key from the
   **API keys** page. A session cookie does not open `/mcp`.
 - HTML artifacts still show embedded artifacts. When an HTML artifact is added, the server records

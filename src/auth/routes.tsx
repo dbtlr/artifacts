@@ -2,6 +2,7 @@ import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { CookieOptions } from 'hono/utils/cookie';
+import { z } from 'zod';
 
 import { ApiKeysPage } from '../components/api-keys-page.js';
 import { Layout } from '../components/layout.js';
@@ -91,6 +92,25 @@ function loginPage(c: Context, next: string, status: 200 | 401 | 429, error?: st
     </Layout>,
     status,
   );
+}
+
+// The part of @hono/node-server's request bindings that names the peer.
+// Other runtimes, and app.request() in tests, pass no such bindings.
+const NODE_SOCKET = z.object({ remoteAddress: z.string().optional() });
+const NODE_PEER = z.object({ incoming: z.object({ socket: NODE_SOCKET }) });
+
+// The address a login attempt counts against. It is the header the operator
+// named, which a trusted proxy sets, and otherwise the connection's peer
+// address on Node. A header that is not named is never read, since any client
+// can send one. For a list such as X-Forwarded-For the last entry is used:
+// the nearest proxy appends it, while a client can write the ones before it.
+// Empty when neither is known, so all such attempts share one count.
+function clientAddress(c: Context, header: string | undefined): string {
+  const fromProxy = header === undefined ? undefined : c.req.header(header)?.split(',').at(-1);
+  if (fromProxy !== undefined && fromProxy.trim() !== '') {
+    return fromProxy.trim();
+  }
+  return NODE_PEER.safeParse(c.env).data?.incoming.socket.remoteAddress ?? '';
 }
 
 // The token from an `Authorization: Bearer <token>` header. The scheme is
@@ -205,7 +225,10 @@ export function installOwnerAuth(
     }
     const form = await c.req.parseBody();
     const next = safeNextPath(form.next);
-    const result = await auth.logIn(typeof form.password === 'string' ? form.password : '');
+    const result = await auth.logIn(
+      typeof form.password === 'string' ? form.password : '',
+      clientAddress(c, auth.clientAddressHeader),
+    );
     if (result.ok) {
       setCookie(c, SESSION_COOKIE, result.token, {
         ...cookieOptions(),

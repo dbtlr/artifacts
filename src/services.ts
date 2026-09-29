@@ -1,5 +1,9 @@
 import type { ArtifactService } from './artifacts/types.js';
-import { createOwnerAuth, resolveOwnerPassword } from './auth/owner-auth.js';
+import {
+  createOwnerAuth,
+  resolveClientAddressHeader,
+  resolveOwnerPassword,
+} from './auth/owner-auth.js';
 import type { OwnerAuth } from './auth/owner-auth.js';
 import { resolveStoragePaths } from './data-dir.js';
 import { FilesystemThumbnailStore } from './data/filesystem-thumbnail-store.js';
@@ -33,10 +37,17 @@ async function createDefaultAppServices(): Promise<DefaultAppServices> {
     const password = resolveOwnerPassword();
     const base = await getDefaultByteNativeArtifactService();
     const paths = resolveStoragePaths();
+    // The client address header is read only with auth on, so without a
+    // password the variable has no effect at all.
+    const clientAddressHeader = password === undefined ? undefined : resolveClientAddressHeader();
     const auth =
       password === undefined
         ? undefined
-        : createOwnerAuth({ password, store: await SqliteOwnerAuthStore.open(paths.databasePath) });
+        : createOwnerAuth({
+            ...(clientAddressHeader === undefined ? {} : { clientAddressHeader }),
+            password,
+            store: await SqliteOwnerAuthStore.open(paths.databasePath),
+          });
     const thumbnails = new FilesystemThumbnailStore(paths.thumbsDir);
     // With auth on, the renderer has no session, so it reads each artifact
     // through a signed URL made for that render.

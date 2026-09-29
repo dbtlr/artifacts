@@ -2,16 +2,20 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 
 import { createArtifactUrlSigner } from './signed-urls.js';
 import type { ArtifactUrlSigner } from './signed-urls.js';
-import type { ApiKeySummary, OwnerAuthStore } from './types.js';
+import type { ApiKeySummary, LoginAttemptCount, OwnerAuthStore } from './types.js';
 
 // A session lasts a fixed 7 days from login; using it does not extend it.
 export const SESSION_LIFETIME_SECONDS = 7 * 24 * 60 * 60;
-// At most this many login attempts, right or wrong, in any rolling window.
-// The limit is global rather than per client: behind a proxy every client
-// has the proxy's address. An attacker can therefore keep the owner locked
-// out, which is the accepted cost of bounding guesses to about 1,000 a day.
+// At most LOGIN_ATTEMPT_LIMIT login attempts, right or wrong, from one client
+// address in any rolling window, so one address cannot lock the owner out
+// from another. LOGIN_ATTEMPT_TOTAL_LIMIT caps every address together, which
+// bounds guesses from many addresses to under 10,000 a day (ADR-0005).
 export const LOGIN_ATTEMPT_LIMIT = 10;
+export const LOGIN_ATTEMPT_TOTAL_LIMIT = 100;
 export const LOGIN_ATTEMPT_WINDOW_SECONDS = 15 * 60;
+// With guesses bounded as above, a password of this many characters cannot
+// be guessed online.
+export const OWNER_PASSWORD_MIN_LENGTH = 16;
 
 export type LoginResult =
   | { ok: true; token: string }
@@ -28,11 +32,16 @@ export type OwnerAuth = {
   // shares the database accepts them and no signature can reveal anything
   // about the password.
   artifactUrls: ArtifactUrlSigner;
+  // The request header that a trusted proxy sets to the client's address,
+  // as the operator named it, or undefined when none is named.
+  clientAddressHeader: string | undefined;
   createApiKey: (name: string) => Promise<CreatedApiKey>;
   hasApiKey: (key: string | undefined) => Promise<boolean>;
   hasSession: (token: string | undefined) => Promise<boolean>;
   listApiKeys: () => Promise<ApiKeySummary[]>;
-  logIn: (password: string) => Promise<LoginResult>;
+  // `clientAddress` is the address the attempt counts against, or empty
+  // when it is unknown.
+  logIn: (password: string, clientAddress: string) => Promise<LoginResult>;
   logOut: (token: string | undefined) => Promise<void>;
   revokeApiKey: (id: string) => Promise<void>;
 };
@@ -41,6 +50,7 @@ export type OwnerAuth = {
 const API_KEY_PREFIX = 'art_';
 
 type OwnerAuthOptions = {
+  clientAddressHeader?: string;
   now?: () => Date;
   password: string;
   store: OwnerAuthStore;
@@ -48,13 +58,50 @@ type OwnerAuthOptions = {
 
 // Owner auth is on exactly when ARTIFACTS_OWNER_PASSWORD is set. A blank
 // value is refused rather than read as "off", so a half-written secret
-// cannot silently leave an instance open.
+// cannot silently leave an instance open. A short one is refused because the
+// login limits bound guesses, not their success.
 export function resolveOwnerPassword(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const password = env.ARTIFACTS_OWNER_PASSWORD;
-  if (password !== undefined && password.trim() === '') {
+  if (password === undefined) {
+    return undefined;
+  }
+  if (password.trim() === '') {
     throw new Error('ARTIFACTS_OWNER_PASSWORD must not be blank; unset it to turn auth off');
   }
+  // Characters as a reader sees them, so an emoji counts once.
+  if ([...new Intl.Segmenter().segment(password)].length < OWNER_PASSWORD_MIN_LENGTH) {
+    throw new Error(
+      `ARTIFACTS_OWNER_PASSWORD must be at least ${String(OWNER_PASSWORD_MIN_LENGTH)} characters; use a long, random password`,
+    );
+  }
   return password;
+}
+
+// An HTTP field name (RFC 9110 `token`).
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
+
+// The header that a trusted proxy sets to the client's address, such as
+// `CF-Connecting-IP`, from ARTIFACTS_CLIENT_ADDRESS_HEADER. Only the operator
+// can name it: a header that is not named is never read, because any client
+// can send one.
+export function resolveClientAddressHeader(
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const header = env.ARTIFACTS_CLIENT_ADDRESS_HEADER;
+  if (header === undefined) {
+    return undefined;
+  }
+  if (header.trim() === '') {
+    throw new Error(
+      'ARTIFACTS_CLIENT_ADDRESS_HEADER must not be blank; unset it to use the connection address',
+    );
+  }
+  if (!HEADER_NAME.test(header)) {
+    throw new Error(
+      `ARTIFACTS_CLIENT_ADDRESS_HEADER must be an HTTP header name, got ${JSON.stringify(header)}`,
+    );
+  }
+  return header;
 }
 
 function sha256(value: string): Buffer {
@@ -80,38 +127,50 @@ function secondsFrom(from: Date, until: Date): number {
   return Math.max(1, Math.ceil((until.getTime() - from.getTime()) / 1000));
 }
 
+// When a full count admits another attempt: once its earliest attempt leaves
+// the window. Undefined when the count is not full.
+function reopensAt({ count, oldest }: LoginAttemptCount, limit: number): Date | undefined {
+  return count < limit || oldest === null
+    ? undefined
+    : new Date(new Date(oldest).getTime() + LOGIN_ATTEMPT_WINDOW_SECONDS * 1000);
+}
+
 // The single owner's password login, database sessions, and API keys. It
 // knows nothing about HTTP: auth/routes.tsx maps it onto cookies, forms, and
 // the Authorization header.
 export function createOwnerAuth({
+  clientAddressHeader,
   now = () => new Date(),
   password,
   store,
 }: OwnerAuthOptions): OwnerAuth {
   const passwordHash = sha256(password);
 
-  async function logIn(candidate: string): Promise<LoginResult> {
+  async function logIn(candidate: string, clientAddress: string): Promise<LoginResult> {
     const at = now();
-    const windowStart = new Date(at.getTime() - LOGIN_ATTEMPT_WINDOW_SECONDS * 1000);
+    const since = new Date(at.getTime() - LOGIN_ATTEMPT_WINDOW_SECONDS * 1000).toISOString();
     const reserved = await store.reserveLoginAttempt(
-      at.toISOString(),
-      windowStart.toISOString(),
-      LOGIN_ATTEMPT_LIMIT,
+      { at: at.toISOString(), clientAddress },
+      since,
+      { perClient: LOGIN_ATTEMPT_LIMIT, total: LOGIN_ATTEMPT_TOTAL_LIMIT },
     );
     if (!reserved) {
-      const oldest = await store.oldestLoginAttemptAfter(windowStart.toISOString());
-      const reopensAt =
-        oldest === null
-          ? at
-          : new Date(new Date(oldest).getTime() + LOGIN_ATTEMPT_WINDOW_SECONDS * 1000);
-      return { ok: false, reason: 'rate-limited', retryAfterSeconds: secondsFrom(at, reopensAt) };
+      // When both counts are full, the attempt waits for the later one.
+      const counts = await store.countLoginAttemptsAfter(since, clientAddress);
+      const reopenTimes = [
+        reopensAt(counts.client, LOGIN_ATTEMPT_LIMIT),
+        reopensAt(counts.total, LOGIN_ATTEMPT_TOTAL_LIMIT),
+      ].filter((time) => time !== undefined);
+      const reopens = new Date(Math.max(at.getTime(), ...reopenTimes.map((t) => t.getTime())));
+      return { ok: false, reason: 'rate-limited', retryAfterSeconds: secondsFrom(at, reopens) };
     }
     // Comparing fixed-length digests keeps the comparison constant-time
     // whatever the candidate's length.
     if (!timingSafeEqual(sha256(candidate), passwordHash)) {
       return { ok: false, reason: 'incorrect-password' };
     }
-    await store.clearLoginAttempts();
+    // Only the address that proved it knows the password is forgiven.
+    await store.clearLoginAttempts(clientAddress);
     const token = randomBytes(32).toString('base64url');
     await store.createSession({
       createdAt: at.toISOString(),
@@ -156,6 +215,7 @@ export function createOwnerAuth({
 
   return {
     artifactUrls: createArtifactUrlSigner({ keys: store, now }),
+    clientAddressHeader,
     createApiKey,
     hasApiKey,
     hasSession,

@@ -117,7 +117,9 @@ describe('bare Docker command construction', () => {
   });
 
   it('passes a configured owner password by name only, so its value stays off the command line', () => {
-    const args = buildBareRunArgs(resolveDockerConfig({ ARTIFACTS_OWNER_PASSWORD: 'hunter2' }));
+    const args = buildBareRunArgs(
+      resolveDockerConfig({ ARTIFACTS_OWNER_PASSWORD: 'hunter2 is far too famous' }),
+    );
 
     expect(args.slice(args.indexOf('ARTIFACTS_OWNER_PASSWORD') - 1).slice(0, 2)).toEqual([
       '--env',
@@ -130,6 +132,45 @@ describe('bare Docker command construction', () => {
     expect(() => resolveDockerConfig({ ARTIFACTS_OWNER_PASSWORD: ' ' })).toThrow(
       /ARTIFACTS_OWNER_PASSWORD must not be blank/u,
     );
+  });
+
+  it('rejects a short owner password before replacing the container', () => {
+    expect(() => resolveDockerConfig({ ARTIFACTS_OWNER_PASSWORD: 'hunter2' })).toThrow(
+      /ARTIFACTS_OWNER_PASSWORD must be at least 16 characters/u,
+    );
+  });
+
+  it('passes a configured client address header to the container', () => {
+    const args = buildBareRunArgs(
+      resolveDockerConfig({
+        ARTIFACTS_CLIENT_ADDRESS_HEADER: 'CF-Connecting-IP',
+        ARTIFACTS_OWNER_PASSWORD: 'a long random owner password',
+      }),
+    );
+
+    const setting = args.indexOf('ARTIFACTS_CLIENT_ADDRESS_HEADER=CF-Connecting-IP');
+
+    expect(args.slice(setting - 1, setting + 1)).toEqual([
+      '--env',
+      'ARTIFACTS_CLIENT_ADDRESS_HEADER=CF-Connecting-IP',
+    ]);
+  });
+
+  it('rejects a client address header that is not a header name', () => {
+    expect(() =>
+      resolveDockerConfig({
+        ARTIFACTS_CLIENT_ADDRESS_HEADER: 'CF Connecting IP',
+        ARTIFACTS_OWNER_PASSWORD: 'a long random owner password',
+      }),
+    ).toThrow(/ARTIFACTS_CLIENT_ADDRESS_HEADER must be an HTTP header name/u);
+  });
+
+  it('ignores the client address header without an owner password, as the server does', () => {
+    const args = buildBareRunArgs(
+      resolveDockerConfig({ ARTIFACTS_CLIENT_ADDRESS_HEADER: 'CF Connecting IP' }),
+    );
+
+    expect(args.join(' ')).not.toContain('ARTIFACTS_CLIENT_ADDRESS_HEADER');
   });
 
   it('mounts an absolute thumbnails directory as a bind mount at the container thumbs path', () => {

@@ -18,8 +18,10 @@ authentication-capable reverse proxy in front of it, and verify that the applica
 directly reachable.
 
 `/mcp` refuses a request whose Origin header names another origin, or is `null`. This keeps web
-pages and HTML artifacts from creating or removing artifacts through a visitor's browser. MCP
-clients send no Origin header.
+pages and HTML artifacts from creating or removing artifacts through a visitor's browser.
+Command-line and desktop MCP clients send no Origin header, so they work. A browser-based MCP
+client sends the origin of its own page, so `/mcp` refuses it. For example, MCP Inspector in
+direct connection mode cannot connect. The same rule applies with an owner password.
 
 ### With an owner password
 
@@ -30,8 +32,16 @@ only for the owner.
 - Sessions are stored in the database as keyed hashes of random tokens and last 7 days. A new
   password ends every session. The cookie is `HttpOnly` and `SameSite=Lax`. It is `Secure` when
   `ARTIFACTS_PUBLIC_BASE_URL` uses HTTPS.
-- Login allows 10 attempts in any 15-minute window for the whole instance. An attacker who can
-  reach the login form can keep the owner locked out.
+- The server refuses to start when the password is shorter than 16 characters.
+- Login allows 10 attempts from one client address in any 15-minute window, and 100 from all
+  addresses together. The total limit bounds guesses to fewer than 10,000 a day. An attacker who
+  controls enough addresses to reach it can keep the owner locked out.
+- The client address is the connection's address, unless the operator names a header in
+  `ARTIFACTS_CLIENT_ADDRESS_HEADER`, such as `CF-Connecting-IP`. The server reads only that header,
+  and for a list it takes the last entry. A client that reaches the server without passing through
+  the proxy can set the header to any address, and so can escape the per-address limit, but not the
+  total limit. Name a header only when the proxy always sets it and the server is reachable only
+  through the proxy. Without a named header, all clients behind a proxy share one address.
 - A POST with a missing, foreign, or `null` Origin header is refused.
 - Pages other than `/a/:id` are sent with `X-Frame-Options: DENY` and
   `Content-Security-Policy: frame-ancestors 'none'`, so no other page can frame the login, key, or

@@ -2,13 +2,20 @@
 // ports (see artifacts/types.ts): an adapter over an async-only database
 // fits behind it. Times are ISO 8601 UTC strings, which sort as text.
 export type OwnerAuthStore = UrlSigningKeyStore & {
-  // Records an attempt at `at` unless `limit` attempts are already recorded
-  // after `since`, and resolves whether it was recorded. The check and the
-  // insert are one step, so parallel attempts cannot all slip under the limit.
-  reserveLoginAttempt: (at: string, since: string, limit: number) => Promise<boolean>;
-  // The earliest attempt recorded after `since`, or null when there is none.
-  oldestLoginAttemptAfter: (since: string) => Promise<string | null>;
-  clearLoginAttempts: () => Promise<void>;
+  // Records an attempt from `attempt.clientAddress` at `attempt.at` unless,
+  // after `since`, that address already has `limits.perClient` attempts or
+  // all addresses together have `limits.total`. Resolves whether it was
+  // recorded. The check and the insert are one step, so parallel attempts
+  // cannot all slip under a limit.
+  reserveLoginAttempt: (
+    attempt: LoginAttempt,
+    since: string,
+    limits: LoginAttemptLimits,
+  ) => Promise<boolean>;
+  // The attempts recorded after `since`: those from `clientAddress`, and all.
+  countLoginAttemptsAfter: (since: string, clientAddress: string) => Promise<LoginAttemptCounts>;
+  // Forgets every attempt from `clientAddress`.
+  clearLoginAttempts: (clientAddress: string) => Promise<void>;
   // Stores a session and removes every session that expired by `createdAt`.
   createSession: (session: StoredSession) => Promise<void>;
   // The session's expiry, or null when no session has this hash.
@@ -21,6 +28,18 @@ export type OwnerAuthStore = UrlSigningKeyStore & {
   // Removing an unknown id is not an error.
   removeApiKey: (id: string) => Promise<void>;
 };
+
+// `clientAddress` is empty when the request's address is unknown; all such
+// attempts share one count.
+export type LoginAttempt = { at: string; clientAddress: string };
+
+export type LoginAttemptLimits = { perClient: number; total: number };
+
+// How many attempts a count holds, and the time of the earliest, or null
+// when it holds none.
+export type LoginAttemptCount = { count: number; oldest: string | null };
+
+export type LoginAttemptCounts = { client: LoginAttemptCount; total: LoginAttemptCount };
 
 export type StoredSession = { createdAt: string; expiresAt: string; tokenHash: string };
 

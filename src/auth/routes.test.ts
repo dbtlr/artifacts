@@ -834,3 +834,111 @@ describe('with an owner password', () => {
     expect(new TextDecoder().decode(store.get(artifact.id))).toContain('preview me');
   });
 });
+
+// The bindings @hono/node-server passes a request, reduced to its peer address.
+function socket(remoteAddress: string) {
+  return { incoming: { socket: { remoteAddress } } };
+}
+
+describe('login limits per client address', () => {
+  // Fills one client's login limit with wrong passwords.
+  async function exhaust(app: ReturnType<typeof createApp>, headers: Record<string, string>) {
+    await Promise.all(
+      Array.from({ length: LOGIN_ATTEMPT_LIMIT }, async () =>
+        app.request('/login', loginRequest('wrong', { headers: { Origin: ORIGIN, ...headers } })),
+      ),
+    );
+  }
+
+  async function appWithHeader(clientAddressHeader?: string) {
+    const auth = createOwnerAuth({
+      ...(clientAddressHeader === undefined ? {} : { clientAddressHeader }),
+      password: PASSWORD,
+      store: await SqliteOwnerAuthStore.open(join(dataDir, 'artifacts.db')),
+    });
+    return createApp({ artifacts: service, auth, mcp: service });
+  }
+
+  it('reads the client address from the configured header', async () => {
+    const app = await appWithHeader('CF-Connecting-IP');
+    await exhaust(app, { 'CF-Connecting-IP': '203.0.113.7' });
+
+    const other = await app.request(
+      '/login',
+      loginRequest(PASSWORD, { headers: { 'CF-Connecting-IP': '198.51.100.20', Origin: ORIGIN } }),
+    );
+    const same = await app.request(
+      '/login',
+      loginRequest(PASSWORD, { headers: { 'CF-Connecting-IP': '203.0.113.7', Origin: ORIGIN } }),
+    );
+
+    expect(other.status).toBe(303);
+    expect(same.status).toBe(429);
+  });
+
+  it('ignores a client address header that is not configured', async () => {
+    const app = await appWithHeader();
+    await exhaust(app, { 'CF-Connecting-IP': '203.0.113.7', 'X-Forwarded-For': '203.0.113.7' });
+
+    const res = await app.request(
+      '/login',
+      loginRequest(PASSWORD, {
+        headers: {
+          'CF-Connecting-IP': '198.51.100.20',
+          Origin: ORIGIN,
+          'X-Forwarded-For': '1.2.3.4',
+        },
+      }),
+    );
+
+    expect(res.status).toBe(429);
+  });
+
+  it('ignores other headers when one is configured', async () => {
+    const app = await appWithHeader('CF-Connecting-IP');
+    await exhaust(app, { 'X-Forwarded-For': '203.0.113.7' });
+
+    const res = await app.request(
+      '/login',
+      loginRequest(PASSWORD, { headers: { Origin: ORIGIN, 'X-Forwarded-For': '198.51.100.20' } }),
+    );
+
+    expect(res.status).toBe(429);
+  });
+
+  it('counts a list-valued header by its last entry, which the nearest proxy added', async () => {
+    const app = await appWithHeader('X-Forwarded-For');
+    await Promise.all(
+      Array.from({ length: LOGIN_ATTEMPT_LIMIT }, async (_, index) =>
+        app.request(
+          '/login',
+          loginRequest('wrong', {
+            headers: { Origin: ORIGIN, 'X-Forwarded-For': `10.0.0.${String(index)}, 203.0.113.7` },
+          }),
+        ),
+      ),
+    );
+
+    const res = await app.request(
+      '/login',
+      loginRequest(PASSWORD, { headers: { Origin: ORIGIN, 'X-Forwarded-For': '203.0.113.7' } }),
+    );
+
+    expect(res.status).toBe(429);
+  });
+
+  it('falls back to the socket address when no header is configured', async () => {
+    const app = await appWithHeader();
+    await Promise.all(
+      Array.from({ length: LOGIN_ATTEMPT_LIMIT }, async () =>
+        app.request('/login', loginRequest('wrong'), socket('203.0.113.7')),
+      ),
+    );
+
+    const other = await app.request('/login', loginRequest(PASSWORD), socket('198.51.100.20'));
+    const same = await app.request('/login', loginRequest(PASSWORD), socket('203.0.113.7'));
+
+    expect(other.status).toBe(303);
+    expect(same.status).toBe(429);
+  });
+});

@@ -9,13 +9,18 @@ import { SqliteOwnerAuthStore } from '../data/sqlite-owner-auth-store.js';
 import {
   createOwnerAuth,
   LOGIN_ATTEMPT_LIMIT,
+  LOGIN_ATTEMPT_TOTAL_LIMIT,
   LOGIN_ATTEMPT_WINDOW_SECONDS,
+  OWNER_PASSWORD_MIN_LENGTH,
+  resolveClientAddressHeader,
   resolveOwnerPassword,
   SESSION_LIFETIME_SECONDS,
 } from './owner-auth.js';
 import type { OwnerAuth } from './owner-auth.js';
 
 const PASSWORD = 'correct horse battery staple';
+const CLIENT = '203.0.113.7';
+const OTHER_CLIENT = '198.51.100.20';
 
 describe('resolveOwnerPassword', () => {
   it('leaves auth off when the variable is unset', () => {
@@ -29,7 +34,52 @@ describe('resolveOwnerPassword', () => {
   });
 
   it('returns the configured password verbatim', () => {
-    expect(resolveOwnerPassword({ ARTIFACTS_OWNER_PASSWORD: ' secret ' })).toBe(' secret ');
+    expect(resolveOwnerPassword({ ARTIFACTS_OWNER_PASSWORD: ' a long secret phrase ' })).toBe(
+      ' a long secret phrase ',
+    );
+  });
+
+  it('refuses a password shorter than the minimum', () => {
+    expect(() =>
+      resolveOwnerPassword({ ARTIFACTS_OWNER_PASSWORD: 'x'.repeat(OWNER_PASSWORD_MIN_LENGTH - 1) }),
+    ).toThrow(/ARTIFACTS_OWNER_PASSWORD must be at least 16 characters/u);
+  });
+
+  it('accepts a password of exactly the minimum length', () => {
+    const password = 'x'.repeat(OWNER_PASSWORD_MIN_LENGTH);
+
+    expect(resolveOwnerPassword({ ARTIFACTS_OWNER_PASSWORD: password })).toBe(password);
+  });
+
+  it('counts characters, not UTF-16 code units', () => {
+    // Eight emoji are 16 code units but only 8 characters.
+    expect(() => resolveOwnerPassword({ ARTIFACTS_OWNER_PASSWORD: '🔑'.repeat(8) })).toThrow(
+      /at least 16 characters/u,
+    );
+  });
+});
+
+describe('resolveClientAddressHeader', () => {
+  it('names no header when the variable is unset', () => {
+    expect(resolveClientAddressHeader({})).toBeUndefined();
+  });
+
+  it('returns the configured header name', () => {
+    expect(
+      resolveClientAddressHeader({ ARTIFACTS_CLIENT_ADDRESS_HEADER: 'CF-Connecting-IP' }),
+    ).toBe('CF-Connecting-IP');
+  });
+
+  it('refuses a blank header name', () => {
+    expect(() => resolveClientAddressHeader({ ARTIFACTS_CLIENT_ADDRESS_HEADER: ' ' })).toThrow(
+      /ARTIFACTS_CLIENT_ADDRESS_HEADER must not be blank/u,
+    );
+  });
+
+  it('refuses a value that is not a header name', () => {
+    expect(() =>
+      resolveClientAddressHeader({ ARTIFACTS_CLIENT_ADDRESS_HEADER: 'CF-Connecting-IP: 1.2.3.4' }),
+    ).toThrow(/ARTIFACTS_CLIENT_ADDRESS_HEADER must be an HTTP header name/u);
   });
 });
 
@@ -59,16 +109,18 @@ describe('owner auth', () => {
   }
 
   // Sequential on purpose: each attempt lands after the previous one.
-  async function failLogins(count: number): Promise<void> {
+  async function failLogins(count: number, client = CLIENT): Promise<void> {
     if (count === 0) {
       return;
     }
-    await expect(auth.logIn('wrong')).resolves.toMatchObject({ reason: 'incorrect-password' });
-    await failLogins(count - 1);
+    await expect(auth.logIn('wrong', client)).resolves.toMatchObject({
+      reason: 'incorrect-password',
+    });
+    await failLogins(count - 1, client);
   }
 
-  async function logInToken(): Promise<string> {
-    const result = await auth.logIn(PASSWORD);
+  async function logInToken(client = CLIENT): Promise<string> {
+    const result = await auth.logIn(PASSWORD, client);
     if (!result.ok) {
       throw new Error(`login failed: ${result.reason}`);
     }
@@ -82,7 +134,7 @@ describe('owner auth', () => {
   });
 
   it('rejects a wrong password without creating a session', async () => {
-    await expect(auth.logIn('wrong')).resolves.toEqual({
+    await expect(auth.logIn('wrong', CLIENT)).resolves.toEqual({
       ok: false,
       reason: 'incorrect-password',
     });
@@ -132,19 +184,41 @@ describe('owner auth', () => {
     await expect(auth.hasSession(token)).resolves.toBe(false);
   });
 
-  it('refuses every attempt, even the right password, once the attempt limit is reached', async () => {
+  it('refuses every attempt from a client, even the right password, once its limit is reached', async () => {
     await failLogins(LOGIN_ATTEMPT_LIMIT);
 
-    await expect(auth.logIn(PASSWORD)).resolves.toEqual({
+    await expect(auth.logIn(PASSWORD, CLIENT)).resolves.toEqual({
       ok: false,
       reason: 'rate-limited',
       retryAfterSeconds: LOGIN_ATTEMPT_WINDOW_SECONDS,
     });
   });
 
+  it('does not lock out another client when one exhausts its limit', async () => {
+    await failLogins(LOGIN_ATTEMPT_LIMIT, CLIENT);
+
+    await expect(auth.logIn(PASSWORD, OTHER_CLIENT)).resolves.toMatchObject({ ok: true });
+    await expect(auth.logIn(PASSWORD, CLIENT)).resolves.toMatchObject({ reason: 'rate-limited' });
+  });
+
+  it('refuses every client once the total limit is reached across clients', async () => {
+    const clients = Array.from(
+      { length: LOGIN_ATTEMPT_TOTAL_LIMIT / LOGIN_ATTEMPT_LIMIT },
+      (_, index) => `192.0.2.${String(index)}`,
+    );
+    await Promise.all(clients.map(async (client) => failLogins(LOGIN_ATTEMPT_LIMIT, client)));
+    advance(60);
+
+    await expect(auth.logIn(PASSWORD, OTHER_CLIENT)).resolves.toEqual({
+      ok: false,
+      reason: 'rate-limited',
+      retryAfterSeconds: LOGIN_ATTEMPT_WINDOW_SECONDS - 60,
+    });
+  });
+
   it('counts parallel attempts, so a burst cannot outrun the limit', async () => {
     const results = await Promise.all(
-      Array.from({ length: LOGIN_ATTEMPT_LIMIT + 5 }, () => auth.logIn('wrong')),
+      Array.from({ length: LOGIN_ATTEMPT_LIMIT + 5 }, () => auth.logIn('wrong', CLIENT)),
     );
 
     expect(results.filter((result) => !result.ok && result.reason === 'rate-limited')).toHaveLength(
@@ -153,22 +227,34 @@ describe('owner auth', () => {
   });
 
   it('allows attempts again once the oldest counted attempt leaves the window', async () => {
-    await auth.logIn('wrong');
+    await auth.logIn('wrong', CLIENT);
     advance(60);
     await failLogins(LOGIN_ATTEMPT_LIMIT - 1);
 
-    await expect(auth.logIn(PASSWORD)).resolves.toMatchObject({
+    await expect(auth.logIn(PASSWORD, CLIENT)).resolves.toMatchObject({
       retryAfterSeconds: LOGIN_ATTEMPT_WINDOW_SECONDS - 60,
     });
     advance(LOGIN_ATTEMPT_WINDOW_SECONDS - 60);
-    await expect(auth.logIn(PASSWORD)).resolves.toMatchObject({ ok: true });
+    await expect(auth.logIn(PASSWORD, CLIENT)).resolves.toMatchObject({ ok: true });
   });
 
   it('clears counted attempts after a successful login', async () => {
     await failLogins(LOGIN_ATTEMPT_LIMIT - 1);
     await logInToken();
 
-    await expect(auth.logIn('wrong')).resolves.toMatchObject({ reason: 'incorrect-password' });
+    await expect(auth.logIn('wrong', CLIENT)).resolves.toMatchObject({
+      reason: 'incorrect-password',
+    });
+  });
+
+  it('keeps counting another client’s attempts after a successful login', async () => {
+    await failLogins(LOGIN_ATTEMPT_LIMIT - 1, OTHER_CLIENT);
+    await logInToken(CLIENT);
+
+    await failLogins(1, OTHER_CLIENT);
+    await expect(auth.logIn(PASSWORD, OTHER_CLIENT)).resolves.toMatchObject({
+      reason: 'rate-limited',
+    });
   });
 });
 
