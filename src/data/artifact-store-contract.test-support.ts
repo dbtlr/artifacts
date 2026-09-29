@@ -5,6 +5,7 @@ import type {
   ArtifactContentStore,
   ArtifactMetadataStore,
   EmbedTemplate,
+  StoredMarkdownRendering,
 } from '../artifacts/types.js';
 
 const first: Artifact = {
@@ -36,6 +37,22 @@ const template: EmbedTemplate = {
 };
 
 const newerTemplate: EmbedTemplate = { extractorVersion: 2, references: [] };
+
+const rendering: StoredMarkdownRendering = {
+  hasHighlightableCode: false,
+  hasMermaid: true,
+  html: '<p>first</p>',
+  rendererVersion: 1,
+  toc: undefined,
+};
+
+const renderingWithToc: StoredMarkdownRendering = {
+  hasHighlightableCode: true,
+  hasMermaid: false,
+  html: '<h2 id="heading-a">A</h2>',
+  rendererVersion: 2,
+  toc: '<nav class="toc"></nav>',
+};
 
 export function metadataStoreContract(
   name: string,
@@ -88,6 +105,29 @@ export function metadataStoreContract(
       await store.saveEmbedTemplate('missing', template);
 
       await expect(store.findEmbedTemplate('missing')).resolves.toBeNull();
+    });
+
+    it('stores, replaces, and drops a rendering with its artifact', async () => {
+      const store = await createStore();
+      await store.create(second);
+
+      await expect(store.findRendering(second.id)).resolves.toBeNull();
+      await store.saveRendering(second.id, rendering);
+      await expect(store.findRendering(second.id)).resolves.toEqual(rendering);
+      await store.saveRendering(second.id, renderingWithToc);
+      await expect(store.findRendering(second.id)).resolves.toEqual(renderingWithToc);
+
+      await store.remove(second.id);
+      await expect(store.findRendering(second.id)).resolves.toBeNull();
+    });
+
+    // A save that loses a race with a remove must not leave an orphan.
+    it('stores no rendering for an id without an artifact', async () => {
+      const store = await createStore();
+
+      await store.saveRendering('missing', rendering);
+
+      await expect(store.findRendering('missing')).resolves.toBeNull();
     });
   });
 }

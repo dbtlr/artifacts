@@ -1,3 +1,4 @@
+import type { RenderedMarkdown } from '../markdown.js';
 import type { EmbedReference } from './embeds.js';
 import type { LegacyArtifactType as ArtifactType, MediaType } from './media.js';
 
@@ -32,6 +33,11 @@ export type CreateArtifactInput = {
 // `extractorVersion` is outdated and is extracted again.
 export type EmbedTemplate = { extractorVersion: number; references: EmbedReference[] };
 
+// A Markdown artifact's rendering, stored as derived data so a view never
+// parses Markdown. `rendererVersion` names the renderer that produced it; a
+// rendering from any other version is outdated and is rendered again.
+export type StoredMarkdownRendering = RenderedMarkdown & { rendererVersion: number };
+
 export type ListArtifactsQuery = { collection?: string; project?: string };
 
 // Storage ports are async so that adapters over async-only backends fit
@@ -47,12 +53,16 @@ export type ArtifactMetadataStore = {
   find: (id: string) => Promise<Artifact | null>;
   // Resolves null when no embed template is stored for the id.
   findEmbedTemplate: (id: string) => Promise<EmbedTemplate | null>;
+  // Resolves null when no rendering is stored for the id.
+  findRendering: (id: string) => Promise<StoredMarkdownRendering | null>;
   list: (query?: ListArtifactsQuery) => Promise<Artifact[]>;
-  // Also drops the artifact's embed template.
+  // Also drops the artifact's embed template and stored rendering.
   remove: (id: string) => Promise<boolean>;
   // Replaces any stored template. Stores nothing when no artifact has the
   // id, so a save that loses a race with a remove leaves no orphan.
   saveEmbedTemplate: (id: string, template: EmbedTemplate) => Promise<void>;
+  // Replaces any stored rendering, under the same rule as saveEmbedTemplate.
+  saveRendering: (id: string, rendering: StoredMarkdownRendering) => Promise<void>;
 };
 
 export type ArtifactContentStore = {
@@ -71,6 +81,9 @@ export type ArtifactService = {
   // Where an HTML artifact loads other artifacts of this instance, in text
   // order. Resolves null when no HTML artifact has the id.
   getEmbedReferences: (id: string) => Promise<EmbedReference[] | null>;
+  // The rendering of a Markdown artifact, for viewing it without parsing
+  // Markdown. Resolves null when no Markdown artifact has the id.
+  getRenderedMarkdown: (id: string) => Promise<RenderedMarkdown | null>;
   listArtifacts: (query?: ListArtifactsQuery) => Promise<Artifact[]>;
   removeArtifact: (id: string) => Promise<boolean>;
 };

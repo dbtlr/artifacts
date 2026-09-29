@@ -286,8 +286,10 @@ files first.
 Artifacts is a Node.js 24 TypeScript application built on Hono. The same process serves the web UI,
 artifact routes, static assets, and the streamable HTTP MCP endpoint at `/mcp`. Metadata lives in
 SQLite while byte-native content lives in a separate files directory. The MCP adapter uses bounded
-base64 for binary transport; base64 is not part of the storage or service model. Markdown is rendered on the server
-with syntax highlighting; Mermaid diagrams are rendered in the browser. Allowlisted images and PDFs
+base64 for binary transport; base64 is not part of the storage or service model. Markdown is rendered once, when it
+is created, and its HTML is stored in SQLite as derived data, so a view parses no Markdown; a missing rendering, or
+one from an older renderer version, is rendered again on the next view. Code highlighting and Mermaid diagrams are
+rendered in the browser. Allowlisted images and PDFs
 are served directly from `/a/:id`; SVG responses receive an additional restrictive content security
 policy, and HTML artifacts are served in a script-enabled CSP sandbox with an opaque origin. Gallery
 previews are screenshots taken by Alpine's Chromium package, driven by playwright-core from a serial

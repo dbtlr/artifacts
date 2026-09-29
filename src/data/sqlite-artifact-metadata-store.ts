@@ -5,16 +5,20 @@ import type {
   ArtifactMetadataStore,
   EmbedTemplate,
   ListArtifactsQuery,
+  StoredMarkdownRendering,
 } from '../artifacts/types.js';
 import {
   artifactFromRow,
   embedTemplateFromRow,
   findArtifact,
   findEmbedTemplate,
+  findRendering,
   insertArtifact,
   listArtifacts,
   removeArtifact,
+  renderingFromRow,
   saveEmbedTemplate,
+  saveRendering,
 } from './artifact-metadata-sql.js';
 import type { SqlStatement } from './artifact-metadata-sql.js';
 import { runSqliteMigrations } from './sqlite-migrations.js';
@@ -59,6 +63,12 @@ export class SqliteArtifactMetadataStore implements ArtifactMetadataStore {
     return record === undefined ? null : embedTemplateFromRow(record);
   }
 
+  async findRendering(id: string): Promise<StoredMarkdownRendering | null> {
+    const { sql, values } = findRendering(id);
+    const record = this.database.prepare(sql).get(...values);
+    return record === undefined ? null : renderingFromRow(record);
+  }
+
   async list(query: ListArtifactsQuery = {}): Promise<Artifact[]> {
     const { sql, values } = listArtifacts(query);
     return this.database
@@ -67,12 +77,17 @@ export class SqliteArtifactMetadataStore implements ArtifactMetadataStore {
       .map((record) => artifactFromRow(record));
   }
 
-  // The embed template goes with the row: its foreign key cascades.
+  // The embed template and rendering go with the row: their foreign keys
+  // cascade.
   async remove(id: string): Promise<boolean> {
     return this.run(removeArtifact(id)).changes > 0;
   }
 
   async saveEmbedTemplate(id: string, template: EmbedTemplate): Promise<void> {
     this.run(saveEmbedTemplate(id, template));
+  }
+
+  async saveRendering(id: string, rendering: StoredMarkdownRendering): Promise<void> {
+    this.run(saveRendering(id, rendering));
   }
 }

@@ -1,5 +1,10 @@
 import { isMediaType } from '../artifacts/media.js';
-import type { Artifact, EmbedTemplate, ListArtifactsQuery } from '../artifacts/types.js';
+import type {
+  Artifact,
+  EmbedTemplate,
+  ListArtifactsQuery,
+  StoredMarkdownRendering,
+} from '../artifacts/types.js';
 
 // The metadata statements that every SQLite-dialect adapter runs, so the
 // node:sqlite and D1 adapters differ only in how they execute them. Values
@@ -72,6 +77,35 @@ export function saveEmbedTemplate(id: string, template: EmbedTemplate): SqlState
   };
 }
 
+export function findRendering(id: string): SqlStatement {
+  return { sql: 'SELECT * FROM artifact_renderings WHERE artifact_id = ?', values: [id] };
+}
+
+// One statement, so the existence check and the write cannot be split by a
+// remove from another process: an id without an artifact stores nothing.
+export function saveRendering(id: string, rendering: StoredMarkdownRendering): SqlStatement {
+  return {
+    sql: `INSERT INTO artifact_renderings
+      (artifact_id, renderer_version, html, toc, has_mermaid, has_highlightable_code)
+     SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM artifacts WHERE id = ?)
+     ON CONFLICT (artifact_id) DO UPDATE SET
+       renderer_version = excluded.renderer_version,
+       html = excluded.html,
+       toc = excluded.toc,
+       has_mermaid = excluded.has_mermaid,
+       has_highlightable_code = excluded.has_highlightable_code`,
+    values: [
+      id,
+      rendering.rendererVersion,
+      rendering.html,
+      rendering.toc ?? null,
+      rendering.hasMermaid ? 1 : 0,
+      rendering.hasHighlightableCode ? 1 : 0,
+      id,
+    ],
+  };
+}
+
 function requiredString(record: Record<string, unknown>, column: string): string {
   const value = record[column];
   if (typeof value !== 'string') {
@@ -128,4 +162,23 @@ export function embedTemplateFromRow(record: Record<string, unknown>): EmbedTemp
     throw new Error('Corrupt artifact_embed_templates row');
   }
   return { extractorVersion: Number(version), references };
+}
+
+// Maps an `artifact_renderings` row to the rendering it stores.
+export function renderingFromRow(record: Record<string, unknown>): StoredMarkdownRendering {
+  const { html, renderer_version: version, toc } = record;
+  if (
+    !Number.isSafeInteger(version) ||
+    typeof html !== 'string' ||
+    (toc !== null && typeof toc !== 'string')
+  ) {
+    throw new Error('Corrupt artifact_renderings row');
+  }
+  return {
+    hasHighlightableCode: record.has_highlightable_code === 1,
+    hasMermaid: record.has_mermaid === 1,
+    html,
+    rendererVersion: Number(version),
+    toc: toc ?? undefined,
+  };
 }

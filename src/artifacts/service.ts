@@ -1,5 +1,7 @@
 import { nanoid } from 'nanoid';
 
+import { markdownRenderer } from '../markdown.js';
+import type { MarkdownRenderer, RenderedMarkdown } from '../markdown.js';
 import { resolvePublicBaseUrl } from '../urls.js';
 import { EMBED_EXTRACTOR_VERSION, extractEmbedReferences } from './embeds.js';
 import type { EmbedReference } from './embeds.js';
@@ -13,12 +15,14 @@ import type {
   CreateArtifactInput,
   EmbedTemplate,
   MediaType,
+  StoredMarkdownRendering,
 } from './types.js';
 
 const ID_LENGTH = 10;
 const MAX_ID_ATTEMPTS = 5;
 const SAFE_FILENAME = /^[^/\\]+$/u;
 const HTML: MediaType = 'text/html';
+const MARKDOWN: MediaType = 'text/markdown';
 
 function hasControlCharacter(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
@@ -122,15 +126,45 @@ function reportFailure(step: string, error: unknown): void {
 // parsing HTML. The template is derived data: a failure to store it never
 // fails the create, and a view extracts and stores it again when it is
 // missing or was made by another extractor version.
+//
+// A Markdown artifact is rendered once, when it is created, and the
+// rendering is stored beside its metadata, so viewing it parses nothing.
+// The rendering is derived data: a failure to store or read it never fails
+// the create or the view, and a view renders and stores it again when it is
+// missing, unreadable, or was made by another renderer version.
 export function createArtifactService(
   metadata: ArtifactMetadataStore,
   content: ArtifactContentStore,
+  renderer: MarkdownRenderer = markdownRenderer,
 ): ArtifactService {
   async function saveTemplate(id: string, template: EmbedTemplate): Promise<void> {
     try {
       await metadata.saveEmbedTemplate(id, template);
     } catch (error) {
       reportFailure('embed template save', error);
+    }
+  }
+
+  function render(bytes: Uint8Array): StoredMarkdownRendering {
+    const markdown = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return { ...renderer.render(markdown), rendererVersion: renderer.version };
+  }
+
+  // A stored rendering that cannot be read is treated as missing.
+  async function findRendering(id: string): Promise<StoredMarkdownRendering | null> {
+    try {
+      return await metadata.findRendering(id);
+    } catch (error) {
+      reportFailure('rendering read', error);
+      return null;
+    }
+  }
+
+  async function saveRendering(id: string, rendering: StoredMarkdownRendering): Promise<void> {
+    try {
+      await metadata.saveRendering(id, rendering);
+    } catch (error) {
+      reportFailure('rendering save', error);
     }
   }
 
@@ -189,9 +223,13 @@ export function createArtifactService(
     assertValidFilename(input.mediaType, input.filename);
     assertValidContent(input.mediaType, input.content);
     const template = input.mediaType === HTML ? extractTemplate(input.content) : undefined;
+    const rendering = input.mediaType === MARKDOWN ? render(input.content) : undefined;
     const created = await storeNew(input);
     if (template !== undefined) {
       await saveTemplate(created.id, template);
+    }
+    if (rendering !== undefined) {
+      await saveRendering(created.id, rendering);
     }
     return created;
   }
@@ -230,6 +268,24 @@ export function createArtifactService(
     return template.references;
   }
 
+  async function getRenderedMarkdown(id: string): Promise<RenderedMarkdown | null> {
+    const artifact = await metadata.find(id);
+    if (artifact?.mediaType !== MARKDOWN) {
+      return null;
+    }
+    const stored = await findRendering(id);
+    if (stored?.rendererVersion === renderer.version) {
+      return stored;
+    }
+    const source = await getArtifact(id);
+    if (source === null) {
+      return null;
+    }
+    const rendering = render(source.content);
+    await saveRendering(id, rendering);
+    return rendering;
+  }
+
   async function removeArtifact(id: string): Promise<boolean> {
     const artifact = await metadata.find(id);
     if (!artifact || !(await metadata.remove(id))) {
@@ -248,6 +304,7 @@ export function createArtifactService(
     findArtifact: (id) => metadata.find(id),
     getArtifact,
     getEmbedReferences,
+    getRenderedMarkdown,
     listArtifacts: (query) => metadata.list(query),
     removeArtifact,
   };

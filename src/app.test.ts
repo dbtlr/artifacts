@@ -9,13 +9,28 @@ import { serve } from '@hono/node-server';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vite-plus/test';
+import MarkdownIt from 'markdown-it';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vite-plus/test';
 import { z } from 'zod';
 
 import { app, createApp } from './app.js';
+import { createArtifactService } from './artifacts/service.js';
+import { FilesystemArtifactContentStore } from './data/filesystem-artifact-content-store.js';
 import { FilesystemThumbnailStore } from './data/filesystem-thumbnail-store.js';
+import { SqliteArtifactMetadataStore } from './data/sqlite-artifact-metadata-store.js';
 import type { ArtifactService, ArtifactStore } from './data/store.js';
 import { createArtifactStore, createByteNativeArtifactService } from './data/store.js';
+import { markdownRenderer } from './markdown.js';
+import type { MarkdownRenderer } from './markdown.js';
 
 describe('app', () => {
   it('renders the homepage with the stylesheet linked', async () => {
@@ -417,6 +432,76 @@ describe('get /a/:id', () => {
     const res = await testApp.request(`/a/${artifact.id}`);
 
     expect(res.status).toBe(500);
+  });
+});
+
+describe('get /a/:id for a Markdown artifact', () => {
+  let dataDir: string;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), 'artifacts-rendering-'));
+  });
+
+  afterEach(async () => {
+    await rm(dataDir, { force: true, recursive: true });
+  });
+
+  // The real renderer under a chosen version, counting every parse.
+  async function openService(version: number) {
+    let parses = 0;
+    const renderer: MarkdownRenderer = {
+      render: (markdown) => {
+        parses += 1;
+        return markdownRenderer.render(markdown);
+      },
+      version,
+    };
+    const service = createArtifactService(
+      await SqliteArtifactMetadataStore.open(join(dataDir, 'artifacts.db')),
+      new FilesystemArtifactContentStore(join(dataDir, 'artifacts')),
+      renderer,
+    );
+    return { app: createApp({ artifacts: service, mcp: service }), parses: () => parses, service };
+  }
+
+  const notes = {
+    content: new TextEncoder().encode('# Notes\n\n## One\n\n## Two\n\n```ts\nconst x = 1;\n```\n'),
+    description: 'Rendered at create',
+    mediaType: 'text/markdown' as const,
+    project: 'renderings',
+    title: 'Stored Notes',
+  };
+
+  it('serves the rendering stored at create without parsing Markdown', async () => {
+    const opened = await openService(1);
+    const artifact = await opened.service.createArtifact(notes);
+    const parse = vi.spyOn(MarkdownIt.prototype, 'parse');
+
+    const get = await opened.app.request(`/a/${artifact.id}`);
+    const head = await opened.app.request(`/a/${artifact.id}`, { method: 'HEAD' });
+    const parses = parse.mock.calls.length;
+    parse.mockRestore();
+
+    expect(get.status).toBe(200);
+    expect(head.status).toBe(200);
+    const body = await get.text();
+    expect(body).toContain('Stored Notes');
+    expect(body).toContain('<h2 id="heading-one">One</h2>');
+    expect(body).toContain('class="toc"');
+    expect(body).toContain('<script src="/assets/highlight.js" type="module">');
+    expect(parses).toBe(0);
+  });
+
+  it('renders an outdated rendering again on its first view only', async () => {
+    const artifact = await (await openService(1)).service.createArtifact(notes);
+    const upgraded = await openService(2);
+
+    const first = await upgraded.app.request(`/a/${artifact.id}`);
+    const second = await upgraded.app.request(`/a/${artifact.id}`);
+
+    await expect(first.text()).resolves.toContain('<h2 id="heading-one">One</h2>');
+    await expect(second.text()).resolves.toContain('<h2 id="heading-one">One</h2>');
+    expect(upgraded.parses()).toBe(1);
   });
 });
 

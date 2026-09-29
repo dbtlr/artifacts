@@ -4,6 +4,9 @@
 // grammars themselves load in the browser, never on the server.
 //
 // Names are the `@shikijs/langs/<name>` module each grammar loads from.
+//
+// This table decides `hasHighlightableCode` in stored Markdown renderings, so
+// a change here needs a bump of `markdownRenderer.version` in markdown.ts.
 export const CODE_LANGUAGES = [
   'c',
   'cpp',

@@ -1,6 +1,10 @@
+import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
+
 import { describe, expect, it } from 'vite-plus/test';
 
-import { renderMarkdownToHtml } from './markdown.js';
+import { CODE_LANGUAGES } from './code-languages.js';
+import { markdownRenderer, renderMarkdownToHtml } from './markdown.js';
 
 describe('renderMarkdownToHtml', () => {
   it('renders headings and lists to HTML', () => {
@@ -229,5 +233,61 @@ describe('heading anchors and table of contents', () => {
 
     expect(toc).toBeDefined();
     expect(toc).not.toContain('<img');
+  });
+});
+
+describe('markdownRenderer.version', () => {
+  // A document touching every part of the output: markup, heading ids, the
+  // TOC, both flags, and the escaping of unsafe input.
+  const SAMPLE = [
+    '# Title',
+    '',
+    '## Section',
+    '',
+    '## Section',
+    '',
+    'Text with `code`, <b>html</b>, [a link](https://example.com), and [bad](javascript:alert(1)).',
+    '',
+    '| a | b |',
+    '| - | - |',
+    '| 1 | 2 |',
+    '',
+    '```ts',
+    'const x = 1;',
+    '```',
+    '',
+    '```not-a-language',
+    'plain',
+    '```',
+    '',
+    '```mermaid',
+    'graph TD; A-->B',
+    '```',
+    '',
+  ].join('\n');
+
+  // Stored renderings are reused until `version` changes, so the version is
+  // pinned to a fingerprint of what decides the output: the sample's
+  // rendering, the language table in code-languages.ts, and markdown-it's
+  // version. When this fails, bump markdownRenderer.version, then update
+  // both values below.
+  it('is bumped whenever the rendered output can change', () => {
+    const markdownItVersion: unknown = createRequire(import.meta.url)(
+      'markdown-it/package.json',
+    ).version;
+    const fingerprint = createHash('sha256')
+      .update(
+        JSON.stringify({
+          languages: CODE_LANGUAGES,
+          markdownIt: markdownItVersion,
+          sample: markdownRenderer.render(SAMPLE),
+        }),
+      )
+      .digest('hex');
+
+    expect({ fingerprint, version: markdownRenderer.version }).toEqual({
+      fingerprint: '514d04100cf0019c097c60cde138fa919f21fb5bf453e1454a0a297a8806eb89',
+      version: 1,
+    });
   });
 });
