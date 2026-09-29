@@ -40,8 +40,11 @@ credentials. Links serve the owner only, and sharing with other people is not su
 - **Origin-checked forms.** Nothing changes state on GET. A POST with a missing, foreign, or `null`
   Origin is refused. Together with `SameSite=Lax`, this blocks cross-site form submission and
   requests from sandboxed HTML artifacts.
-- **`/mcp` is closed while auth is on** until it has a credential of its own, because an MCP client
-  cannot hold a session cookie.
+- **`/mcp` takes API keys, not sessions,** because an MCP client cannot hold a session cookie. The
+  owner creates and revokes keys on a server-rendered page. A new key, `art_` and 256 random bits,
+  is shown once and stored in `api_keys` only as its SHA-256 hash. A request to `/mcp` must carry
+  `Authorization: Bearer <key>`. The hash is not keyed by the password, so a new password keeps
+  agents connected. Keys do not expire, and revoking one deletes its row.
 
 Passkeys can later use the same session model.
 
@@ -58,8 +61,8 @@ Passkeys can later use the same session model.
 
 ## Consequences
 
-- Artifacts now owns security-sensitive code: password checks, sessions, CSRF defense, and rate
-  limiting.
+- Artifacts now owns security-sensitive code: password checks, sessions, API keys, CSRF defense,
+  and rate limiting.
 - With auth on, gallery previews stay as placeholders, because the headless renderer has no
   session and would capture the login form.
 - With auth on, an HTML artifact cannot load other artifacts by URL. Its sandbox gives it an opaque

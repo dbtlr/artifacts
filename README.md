@@ -64,8 +64,19 @@ Claude Code:
 claude mcp add --transport http --scope user artifacts http://localhost:4242/mcp
 ```
 
-When an owner password is set, `/mcp` refuses every request, because it has no credential of its
-own yet. Connect agents only to an instance without an owner password.
+When an owner password is set, `/mcp` requires an API key. Log in, open **API keys** in the
+gallery header, and create a key. The page shows the key once. Put it in an environment variable,
+here `ARTIFACTS_API_KEY`, and then add the server:
+
+```sh
+codex mcp add artifacts --url http://localhost:4242/mcp --bearer-token-env-var ARTIFACTS_API_KEY
+claude mcp add --transport http --scope user artifacts http://localhost:4242/mcp \
+  --header 'Authorization: Bearer ${ARTIFACTS_API_KEY}'
+```
+
+Both agents read the variable each time they connect, so the key is not stored in their
+configuration. Keep the single quotes in the Claude Code command: they stop the shell from
+expanding the variable, and Claude Code expands `${ARTIFACTS_API_KEY}` itself.
 
 The server exposes `add_artifact`, `remove_artifact`, `list_artifacts`, `list_collections`, and
 `get_artifact`. Artifacts are immutable: there is no update tool. A revision or variation is a new
@@ -197,14 +208,15 @@ With a password set:
 - A login lasts 7 days. **Log out** in the gallery header ends it.
 - Login allows 10 attempts in any 15-minute window for the whole instance, after which the form
   answers `429` with a `Retry-After` header.
-- `/mcp` answers `401`, gallery previews stay as placeholders, and HTML artifacts cannot embed other
-  artifacts.
+- `/mcp` answers `401` unless the request carries `Authorization: Bearer <key>` with a key from the
+  **API keys** page. A session cookie does not open `/mcp`.
+- Gallery previews stay as placeholders, and HTML artifacts cannot embed other artifacts.
 - Set `ARTIFACTS_PUBLIC_BASE_URL` to the URL the browser uses. Login and logout forms are accepted
   only from that origin or the origin the request arrived on, and an `https:` base URL marks the
   session cookie `Secure`.
 
-Sessions are stored in the SQLite database. Changing the password and restarting ends every
-session. The design is recorded in [ADR-0001](docs/decisions/0001-opt-in-owner-auth.md).
+Sessions and API keys are stored in the SQLite database, keys only as SHA-256 hashes. Changing the
+password and restarting ends every session but keeps API keys; revoke them on the **API keys** page. The design is recorded in [ADR-0001](docs/decisions/0001-opt-in-owner-auth.md).
 
 ### Gallery previews
 

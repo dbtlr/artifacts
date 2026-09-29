@@ -14,6 +14,17 @@ export type OwnerAuthStore = {
   // The session's expiry, or null when no session has this hash.
   findSessionExpiry: (tokenHash: string) => Promise<string | null>;
   removeSession: (tokenHash: string) => Promise<void>;
+  createApiKey: (key: StoredApiKey) => Promise<void>;
+  // Every key, oldest first, without its hash.
+  listApiKeys: () => Promise<ApiKeySummary[]>;
+  hasApiKeyHash: (keyHash: string) => Promise<boolean>;
+  // Removing an unknown id is not an error.
+  removeApiKey: (id: string) => Promise<void>;
 };
 
 export type StoredSession = { createdAt: string; expiresAt: string; tokenHash: string };
+
+// What the key page shows about a key. The secret itself is never kept.
+export type ApiKeySummary = { createdAt: string; id: string; name: string };
+
+export type StoredApiKey = ApiKeySummary & { keyHash: string };

@@ -54,6 +54,34 @@ function loginRequest(
   };
 }
 
+function formPost(fields: Record<string, string>, headers: Record<string, string>): RequestInit {
+  return {
+    body: new URLSearchParams(fields).toString(),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: ORIGIN, ...headers },
+    method: 'POST',
+  };
+}
+
+// An MCP tool call as an agent sends it: no Origin, JSON body.
+function listArtifactsCall(headers: Record<string, string> = {}): RequestInit {
+  return {
+    body: JSON.stringify({
+      id: 1,
+      jsonrpc: '2.0',
+      method: 'tools/call',
+      params: { arguments: {}, name: 'list_artifacts' },
+    }),
+    headers: {
+      Accept: 'application/json, text/event-stream',
+      'Content-Type': 'application/json',
+      ...headers,
+    },
+    method: 'POST',
+  };
+}
+
+const SHOWN_KEY = /art_[\w-]{43}/u;
+
 // The `name=value` pair a browser would send back from a Set-Cookie header.
 function sessionCookie(res: Response): string {
   const header = res.headers.get('set-cookie');
@@ -77,18 +105,29 @@ describe('with no owner password', () => {
     const page = await testApp.request(`/a/${artifact.id}`);
 
     expect(home.status).toBe(200);
-    await expect(home.text()).resolves.not.toContain('action="/logout"');
+    const homeBody = await home.text();
+    expect(homeBody).not.toContain('action="/logout"');
+    expect(homeBody).not.toContain('href="/keys"');
     expect(page.status).toBe(200);
     await expect(page.text()).resolves.toContain('open to the trusted network');
     expect(page.headers.get('set-cookie')).toBeNull();
   });
 
-  it('has no login or logout routes', async () => {
+  it('has no login, logout, or API key routes', async () => {
     expect((await testApp.request('/login')).status).toBe(404);
     expect((await testApp.request('/login', loginRequest(PASSWORD))).status).toBe(404);
     expect(
       (await testApp.request('/logout', { headers: { Origin: ORIGIN }, method: 'POST' })).status,
     ).toBe(404);
+    expect((await testApp.request('/keys')).status).toBe(404);
+    expect((await testApp.request('/keys', formPost({ name: 'agent' }, {}))).status).toBe(404);
+    expect((await testApp.request('/keys/any/revoke', formPost({}, {}))).status).toBe(404);
+  });
+
+  it('serves /mcp without a key', async () => {
+    const res = await testApp.request('/mcp', listArtifactsCall());
+
+    expect(res.status).toBe(200);
   });
 });
 
@@ -145,14 +184,139 @@ describe('with an owner password', () => {
     expect(res.status).toBe(401);
   });
 
-  it('keeps /mcp closed until it has its own credentials', async () => {
-    const res = await testApp.request('/mcp', {
-      body: '{}',
-      headers: { 'Content-Type': 'application/json' },
-      method: 'POST',
-    });
+  // Creates a key through the page, as the owner would, and returns what
+  // the page showed.
+  async function createKey(cookie: string, name = 'laptop agent'): Promise<string> {
+    const res = await testApp.request('/keys', formPost({ name }, { Cookie: cookie }));
+    expect(res.status).toBe(200);
+    const shown = SHOWN_KEY.exec(await res.text());
+    if (shown === null) {
+      throw new Error('the key page showed no key');
+    }
+    return shown[0];
+  }
+
+  it('sends a request for the key page without a session to the login form', async () => {
+    const res = await testApp.request('/keys');
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/login?next=%2Fkeys');
+  });
+
+  it('refuses to create a key without a session', async () => {
+    const res = await testApp.request('/keys', formPost({ name: 'agent' }, {}));
 
     expect(res.status).toBe(401);
+  });
+
+  it('refuses to create a key from another origin', async () => {
+    const cookie = await logIn();
+
+    const res = await testApp.request(
+      '/keys',
+      formPost({ name: 'agent' }, { Cookie: cookie, Origin: 'https://evil.example' }),
+    );
+
+    expect(res.status).toBe(403);
+  });
+
+  it('shows a new key once, in a response no cache keeps', async () => {
+    const cookie = await logIn();
+
+    const res = await testApp.request(
+      '/keys',
+      formPost({ name: 'laptop agent' }, { Cookie: cookie }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toContain('no-store');
+    const body = await res.text();
+    const key = SHOWN_KEY.exec(body)?.[0];
+    expect(key).toBeDefined();
+
+    const later = await (await testApp.request('/keys', { headers: { Cookie: cookie } })).text();
+    expect(later).toContain('laptop agent');
+    expect(later).not.toContain(key);
+  });
+
+  it('refuses a key without a name', async () => {
+    const cookie = await logIn();
+
+    const res = await testApp.request('/keys', formPost({ name: '  ' }, { Cookie: cookie }));
+
+    expect(res.status).toBe(400);
+    expect(SHOWN_KEY.test(await res.text())).toBe(false);
+  });
+
+  it('serves /mcp to a request with a key', async () => {
+    const key = await createKey(await logIn());
+
+    const res = await testApp.request(
+      '/mcp',
+      listArtifactsCall({ Authorization: `Bearer ${key}` }),
+    );
+
+    expect(res.status).toBe(200);
+  });
+
+  it.each([
+    ['no Authorization header', {}],
+    ['a wrong key', { Authorization: 'Bearer art_wrong' }],
+    ['a key in another scheme', { Authorization: 'Basic art_wrong' }],
+  ])('refuses /mcp with %s', async (_label, headers) => {
+    await createKey(await logIn());
+
+    const res = await testApp.request('/mcp', listArtifactsCall(headers));
+
+    expect(res.status).toBe(401);
+    expect(res.headers.get('www-authenticate')).toBe('Bearer');
+  });
+
+  it('refuses /mcp to a session without a key', async () => {
+    const cookie = await logIn();
+
+    const res = await testApp.request('/mcp', listArtifactsCall({ Cookie: cookie }));
+
+    expect(res.status).toBe(401);
+  });
+
+  it('refuses /mcp with a revoked key and lists the key no more', async () => {
+    const cookie = await logIn();
+    const key = await createKey(cookie, 'revoke me');
+    const page = await (await testApp.request('/keys', { headers: { Cookie: cookie } })).text();
+    const action = /action="(\/keys\/[\w-]+\/revoke)"/u.exec(page)?.[1];
+    expect(action).toBeDefined();
+
+    const revoked = await testApp.request(action!, formPost({}, { Cookie: cookie }));
+
+    expect(revoked.status).toBe(303);
+    expect(revoked.headers.get('location')).toBe('/keys');
+    const res = await testApp.request(
+      '/mcp',
+      listArtifactsCall({ Authorization: `Bearer ${key}` }),
+    );
+    expect(res.status).toBe(401);
+    const after = await (await testApp.request('/keys', { headers: { Cookie: cookie } })).text();
+    expect(after).not.toContain('revoke me');
+  });
+
+  it('refuses to revoke a key from another origin', async () => {
+    const cookie = await logIn();
+    const key = await createKey(cookie);
+    const page = await (await testApp.request('/keys', { headers: { Cookie: cookie } })).text();
+    const action = /action="(\/keys\/[\w-]+\/revoke)"/u.exec(page)![1]!;
+
+    const res = await testApp.request(
+      action,
+      formPost({}, { Cookie: cookie, Origin: 'https://evil.example' }),
+    );
+
+    expect(res.status).toBe(403);
+    const call = await testApp.request(
+      '/mcp',
+      listArtifactsCall({ Authorization: `Bearer ${key}` }),
+    );
+    expect(call.status).toBe(200);
   });
 
   it('keeps /mcp closed at a percent-encoded path, even with a session', async () => {
@@ -299,7 +463,9 @@ describe('with an owner password', () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toMatch(/^private\b/u);
-    await expect(res.text()).resolves.toContain('action="/logout"');
+    const body = await res.text();
+    expect(body).toContain('action="/logout"');
+    expect(body).toContain('href="/keys"');
   });
 
   it('keeps an artifact response revalidatable while marking it private', async () => {
