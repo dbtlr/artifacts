@@ -49,8 +49,9 @@ only for the owner.
   gallery pages. Artifacts stay frameable, because HTML artifacts embed them.
 - `/mcp` requires `Authorization: Bearer <key>` with an API key. The owner creates and revokes keys
   on the `/keys` page. A new key is shown once and stored only as a SHA-256 hash. Keys do not
-  expire, and a new password does not revoke them. After a password leak, change the password and
-  revoke every key that you did not create.
+  expire, and a new password does not revoke them. The page shows when each key was created and
+  last used. After a password leak, change the password, use **Revoke all keys**, and create new
+  keys for your agents.
 - The thumbnail renderer reads artifacts through signed URLs. Each one allows `GET` or `HEAD` of one
   `/a/:id` for 60 seconds. It is an HMAC-SHA-256 over the artifact ID and the expiry. The key is
   random, there is a new one for each clock hour, and it is stored in the database. A URL verifies

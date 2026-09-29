@@ -16,6 +16,9 @@ export const LOGIN_ATTEMPT_WINDOW_SECONDS = 15 * 60;
 // With guesses bounded as above, a password of this many characters cannot
 // be guessed online.
 export const OWNER_PASSWORD_MIN_LENGTH = 16;
+// A key's last use is written at most once in this many seconds, so a busy
+// agent does not write to the database on every /mcp request.
+export const API_KEY_USE_RESOLUTION_SECONDS = 60;
 
 export type LoginResult =
   | { ok: true; token: string }
@@ -36,6 +39,7 @@ export type OwnerAuth = {
   // as the operator named it, or undefined when none is named.
   clientAddressHeader: string | undefined;
   createApiKey: (name: string) => Promise<CreatedApiKey>;
+  // Whether the key opens /mcp. A key that does is recorded as used now.
   hasApiKey: (key: string | undefined) => Promise<boolean>;
   hasSession: (token: string | undefined) => Promise<boolean>;
   listApiKeys: () => Promise<ApiKeySummary[]>;
@@ -44,6 +48,8 @@ export type OwnerAuth = {
   logIn: (password: string, clientAddress: string) => Promise<LoginResult>;
   logOut: (token: string | undefined) => Promise<void>;
   revokeApiKey: (id: string) => Promise<void>;
+  // The recovery path after a suspected leak, since a new password keeps keys.
+  revokeAllApiKeys: () => Promise<void>;
 };
 
 // Keys read `art_` and 256 random bits, so a leaked key is recognizable.
@@ -118,7 +124,7 @@ function tokenHash(token: string, passwordHash: Buffer): string {
 // API keys are 256 random bits, so an unkeyed hash is enough to keep a copy
 // of the database from holding usable keys. Unlike session tokens, the hash
 // is not keyed by the password: a new password leaves agents connected, and
-// the owner revokes keys one by one.
+// the owner revokes keys on the key page, one by one or all at once.
 function apiKeyHash(key: string): string {
   return createHash('sha256').update(key).digest('hex');
 }
@@ -210,7 +216,16 @@ export function createOwnerAuth({
     if (key === undefined || key === '') {
       return false;
     }
-    return store.hasApiKeyHash(apiKeyHash(key));
+    const found = await store.findApiKeyByHash(apiKeyHash(key));
+    if (found === null) {
+      return false;
+    }
+    const at = now();
+    const recordedBefore = new Date(at.getTime() - API_KEY_USE_RESOLUTION_SECONDS * 1000);
+    if (found.lastUsedAt === null || new Date(found.lastUsedAt) <= recordedBefore) {
+      await store.recordApiKeyUse(found.id, at.toISOString());
+    }
+    return true;
   }
 
   return {
@@ -222,6 +237,7 @@ export function createOwnerAuth({
     listApiKeys: () => store.listApiKeys(),
     logIn,
     logOut,
+    revokeAllApiKeys: () => store.removeAllApiKeys(),
     revokeApiKey: (id) => store.removeApiKey(id),
   };
 }

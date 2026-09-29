@@ -79,3 +79,7 @@ Passkeys can later use the same session model.
 - 2026-09-29: [ADR-0005](0005-per-client-login-limit.md) replaces the single login count with a
   per-address limit under a total ceiling, and requires a password of at least 16 characters. The
   rate-limit decision and the rejected per-client option above no longer hold.
+- 2026-09-29: The key page can revoke every key at once, the recovery path after a password leak,
+  since a new password keeps keys. It shows when each key was created and last used; a key's use
+  is recorded at most once a minute. Creating a key redirects, and the new key reaches the page it
+  lands on in a short-lived cookie scoped to `/keys`, so a refresh creates no second key.

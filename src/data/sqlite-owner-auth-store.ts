@@ -3,6 +3,7 @@ import type { SQLOutputValue } from 'node:sqlite';
 
 import type {
   ApiKeySummary,
+  ApiKeyUse,
   LoginAttempt,
   LoginAttemptCounts,
   LoginAttemptLimits,
@@ -104,23 +105,38 @@ export class SqliteOwnerAuthStore implements OwnerAuthStore {
 
   async listApiKeys(): Promise<ApiKeySummary[]> {
     return this.database
-      .prepare('SELECT id, name, created_at FROM api_keys ORDER BY created_at, rowid')
+      .prepare('SELECT id, name, created_at, last_used_at FROM api_keys ORDER BY created_at, rowid')
       .all()
       .map((row) => ({
         createdAt: String(row.created_at),
         id: String(row.id),
+        lastUsedAt: textOrNull(row.last_used_at),
         name: String(row.name),
       }));
   }
 
-  async hasApiKeyHash(keyHash: string): Promise<boolean> {
-    return (
-      this.database.prepare('SELECT 1 FROM api_keys WHERE key_hash = ?').get(keyHash) !== undefined
-    );
+  async findApiKeyByHash(keyHash: string): Promise<ApiKeyUse | null> {
+    const record = this.database
+      .prepare('SELECT id, last_used_at FROM api_keys WHERE key_hash = ?')
+      .get(keyHash);
+    return record === undefined
+      ? null
+      : {
+          id: String(record.id),
+          lastUsedAt: textOrNull(record.last_used_at),
+        };
+  }
+
+  async recordApiKeyUse(id: string, at: string): Promise<void> {
+    this.database.prepare('UPDATE api_keys SET last_used_at = ? WHERE id = ?').run(at, id);
   }
 
   async removeApiKey(id: string): Promise<void> {
     this.database.prepare('DELETE FROM api_keys WHERE id = ?').run(id);
+  }
+
+  async removeAllApiKeys(): Promise<void> {
+    this.database.exec('DELETE FROM api_keys');
   }
 
   async createUrlSigningKey(bucket: number, key: string): Promise<string> {
