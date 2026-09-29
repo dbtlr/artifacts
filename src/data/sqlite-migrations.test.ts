@@ -31,6 +31,9 @@ afterEach(() => {
 
 // The schema as of 0002, before immutability dropped updated_at.
 const throughBinarySchema = loadSqlMigrations(MIGRATIONS_DIR).slice(0, 2);
+// The schema as of 0003, when updated_at was dropped.
+const throughImmutableSchema = loadSqlMigrations(MIGRATIONS_DIR).slice(0, 3);
+const shippedMigrationCount = loadSqlMigrations(MIGRATIONS_DIR).length;
 
 function columnNames(database: DatabaseSync): string[] {
   return database
@@ -142,7 +145,7 @@ describe('SQLite migrations', () => {
     expect((await store.list()).map(({ id }) => id)).toEqual(['legacy-second', 'legacy']);
     const database = new DatabaseSync(databasePath);
     expect(database.prepare('SELECT COUNT(*) AS count FROM artifact_migrations').get()).toEqual({
-      count: 3,
+      count: shippedMigrationCount,
     });
     database.close();
   });
@@ -153,7 +156,7 @@ describe('SQLite migrations', () => {
     const database = new DatabaseSync(databasePath);
 
     expect(database.prepare('SELECT COUNT(*) AS count FROM artifact_migrations').get()).toEqual({
-      count: 3,
+      count: shippedMigrationCount,
     });
     database.close();
   });
@@ -255,7 +258,7 @@ describe('SQLite migrations', () => {
 
   it('restores updated_at from created_at on downgrade', async () => {
     const database = new DatabaseSync(databasePath);
-    await runSqliteMigrations(database);
+    await runSqliteMigrations(database, throughImmutableSchema);
     database
       .prepare(
         `INSERT INTO artifacts (id, title, project, description, media_type, created_at)
@@ -263,7 +266,7 @@ describe('SQLite migrations', () => {
       )
       .run();
 
-    await revertLastSqliteMigration(database);
+    await revertLastSqliteMigration(database, throughImmutableSchema);
 
     expect(database.prepare('SELECT created_at, updated_at FROM artifacts').get()).toEqual({
       created_at: 'created',
@@ -393,7 +396,7 @@ describe('SQLite migrations', () => {
     await exit;
     const database = new DatabaseSync(databasePath);
     expect(database.prepare('SELECT COUNT(*) AS count FROM artifact_migrations').get()).toEqual({
-      count: 3,
+      count: shippedMigrationCount,
     });
     database.close();
   });

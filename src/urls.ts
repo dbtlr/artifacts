@@ -1,8 +1,9 @@
 const DEFAULT_BASE_URL = 'http://localhost:3000';
 
 // Read lazily on every call (not cached at module scope) so tests can flip the
-// public base URL between cases without a module reset.
-function resolveBaseUrl(): string {
+// public base URL between cases without a module reset. Owner auth also reads
+// it: its origin is an allowed form Origin, and https makes cookies Secure.
+export function resolvePublicBaseUrl(): string {
   const raw = process.env.ARTIFACTS_PUBLIC_BASE_URL;
   if (raw === undefined) {
     return DEFAULT_BASE_URL;
@@ -34,5 +35,5 @@ function resolveBaseUrl(): string {
 // The display route (/a/<id>) lands in a later task; this stays importable
 // from there too so both the MCP layer and that route build identical URLs.
 export function buildArtifactUrl(id: string): string {
-  return `${resolveBaseUrl()}/a/${id}`;
+  return `${resolvePublicBaseUrl()}/a/${id}`;
 }

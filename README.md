@@ -14,9 +14,10 @@ finding them.
 > Artifacts is unversioned pre-alpha software. It has no compatibility guarantees: configuration,
 > storage, MCP tools, and URLs may change or be removed without a migration path.
 
-Artifacts has no authentication or authorization. Run it only on a trusted internal network or
-loopback interface, and put an authentication-capable proxy in front of it before granting broader
-network access. Do not expose it directly to the public internet.
+By default, Artifacts has no authentication or authorization. Run it that way only on a trusted
+internal network or loopback interface. To reach it from elsewhere, set an owner password (see
+[Owner login](#owner-login)) and serve it over HTTPS, or put an authentication-capable proxy in front
+of it.
 
 ## Prerequisites
 
@@ -63,6 +64,9 @@ Claude Code:
 claude mcp add --transport http --scope user artifacts http://localhost:4242/mcp
 ```
 
+When an owner password is set, `/mcp` refuses every request, because it has no credential of its
+own yet. Connect agents only to an instance without an owner password.
+
 The server exposes `add_artifact`, `remove_artifact`, `list_artifacts`, `list_collections`, and
 `get_artifact`. Artifacts are immutable: there is no update tool. A revision or variation is a new
 artifact, usually in the same collection, so earlier versions keep their links.
@@ -98,7 +102,9 @@ Images, stylesheets, and classic scripts that the page loads by URL still work, 
 `crossorigin` attribute, fail for files from this server; files from other hosts load when the host
 sends `Access-Control-Allow-Origin: *`. Frames inside an HTML artifact inherit its sandbox. A PDF in
 an `<iframe>`, `<embed>`, or `<object>` does not display, so link to the PDF instead. A Markdown
-artifact in an `<iframe>` shows no syntax highlighting or Mermaid diagrams.
+artifact in an `<iframe>` shows no syntax highlighting or Mermaid diagrams. When an owner password
+is set, embedded `/a/:id` files do not load, because the browser does not send the session cookie
+on requests from the sandbox.
 
 ### Optional artifact skill
 
@@ -134,6 +140,7 @@ override Docker defaults.
 | `ARTIFACTS_FILES_MOUNT` | `artifacts-files` | Docker volume name or existing absolute host directory for document bodies. |
 | `ARTIFACTS_DATABASE_MOUNT` | `artifacts-database` | Separate Docker volume name or existing absolute host directory for SQLite. |
 | `ARTIFACTS_THUMBS_MOUNT` | `artifacts-thumbs` | Separate Docker volume name or existing absolute host directory for rendered gallery previews. |
+| `ARTIFACTS_OWNER_PASSWORD` | unset | Turns on owner login; see [Owner login](#owner-login). Passed to the container by name, so the value does not appear on the Docker command line. |
 
 Named volumes survive container replacement and `pnpm docker:stop`. The three mounts must be
 different. Absolute bind-mount directories must exist and be writable from the container by the
@@ -173,9 +180,31 @@ Direct development uses `.env.development` and intentionally separate paths:
 | `ARTIFACTS_DATABASE_PATH` | `data/development/database/artifacts.db` |
 | `ARTIFACTS_THUMBS_DIR` | `data/development/thumbs` |
 | `ARTIFACTS_CHROMIUM_PATH` | probed: Alpine `chromium`, Linux `google-chrome`, macOS Chrome |
+| `ARTIFACTS_OWNER_PASSWORD` | unset: no login |
 
 See `.env.development.example` for copyable overrides. Docker mount variables and direct-runtime
 path variables are deliberately different; one is not an alias for the other.
+
+### Owner login
+
+Set `ARTIFACTS_OWNER_PASSWORD` to require a login. When it is unset, there is no login and every
+route is open, as described above. A blank value stops the server at startup.
+
+With a password set:
+
+- Every page and every `/a/:id` link redirects to `/login` until the owner logs in. The login form,
+  `/assets/*`, and the root icons stay public, so the Docker health check still passes.
+- A login lasts 7 days. **Log out** in the gallery header ends it.
+- Login allows 10 attempts in any 15-minute window for the whole instance, after which the form
+  answers `429` with a `Retry-After` header.
+- `/mcp` answers `401`, gallery previews stay as placeholders, and HTML artifacts cannot embed other
+  artifacts.
+- Set `ARTIFACTS_PUBLIC_BASE_URL` to the URL the browser uses. Login and logout forms are accepted
+  only from that origin or the origin the request arrived on, and an `https:` base URL marks the
+  session cookie `Secure`.
+
+Sessions are stored in the SQLite database. Changing the password and restarting ends every
+session. The design is recorded in [ADR-0001](docs/decisions/0001-opt-in-owner-auth.md).
 
 ### Gallery previews
 
@@ -185,7 +214,8 @@ thumbnails directory. Until it exists the card shows a drawn placeholder for the
 PDF keeps its placeholder because headless Chromium downloads PDFs instead of drawing them. Previews
 are derived data: the server re-renders any that are missing at startup, so the thumbnails directory
 needs no backup and no mount. Without a Chromium the server logs one notice and keeps the
-placeholders.
+placeholders. With an owner password set, previews are not rendered and every card keeps its
+placeholder.
 
 A preview is a screenshot of the static document: the render context has JavaScript disabled, so
 an artifact's scripts never run on the server host, and a Mermaid fence shows as its source in the
@@ -249,8 +279,9 @@ temporary directory.
 
 The metadata and content adapters are deliberately narrow seams for a future hosting requirement,
 not a configurable backend system. PostgreSQL, object storage, multipart browser uploads, presigned
-uploads, tenancy, permissions, and public hosting remain out of scope. Artifacts is a trusted-network
-preview tool, not a general-purpose file-sharing service.
+uploads, tenancy, permissions, and public hosting remain out of scope. Owner login protects one
+owner's instance; it does not share artifacts with anyone else. Artifacts is a preview tool, not a
+general-purpose file-sharing service.
 
 ## Security and license
 

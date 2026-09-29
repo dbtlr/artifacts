@@ -116,6 +116,22 @@ describe('bare Docker command construction', () => {
     ).toThrow(/ARTIFACTS_FILES_MOUNT and ARTIFACTS_THUMBS_MOUNT must use different sources/u);
   });
 
+  it('passes a configured owner password by name only, so its value stays off the command line', () => {
+    const args = buildBareRunArgs(resolveDockerConfig({ ARTIFACTS_OWNER_PASSWORD: 'hunter2' }));
+
+    expect(args.slice(args.indexOf('ARTIFACTS_OWNER_PASSWORD') - 1).slice(0, 2)).toEqual([
+      '--env',
+      'ARTIFACTS_OWNER_PASSWORD',
+    ]);
+    expect(args.join(' ')).not.toContain('hunter2');
+  });
+
+  it('rejects a blank owner password instead of starting without auth', () => {
+    expect(() => resolveDockerConfig({ ARTIFACTS_OWNER_PASSWORD: ' ' })).toThrow(
+      /ARTIFACTS_OWNER_PASSWORD must not be blank/u,
+    );
+  });
+
   it('mounts an absolute thumbnails directory as a bind mount at the container thumbs path', () => {
     const config = resolveDockerConfig({ ARTIFACTS_THUMBS_MOUNT: '/srv/artifacts/thumbs' });
 

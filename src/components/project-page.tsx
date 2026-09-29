@@ -8,6 +8,7 @@ type ProjectPageProps = {
   project: string;
   // Every project with counts, so the selector can switch projects directly.
   projects: CountedProject[];
+  showLogOut?: boolean;
   // The project-scoped view: its items, kinds, and total.
   view: IndexView;
 };
@@ -20,12 +21,18 @@ function emptyMessage(project: string, view: IndexView): string {
     : `No artifacts in ${project} yet.`;
 }
 
-export const ProjectPage: FC<ProjectPageProps> = ({ project, projects, view }) => (
+export const ProjectPage: FC<ProjectPageProps> = ({
+  project,
+  projects,
+  showLogOut = false,
+  view,
+}) => (
   <main>
     <IndexHeader
       basePath={projectHref(project)}
       current={project}
       projects={projects}
+      showLogOut={showLogOut}
       view={view}
     />
     <ArtifactGallery artifacts={view.items} emptyMessage={emptyMessage(project, view)} />
