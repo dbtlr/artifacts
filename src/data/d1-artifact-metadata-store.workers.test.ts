@@ -2,6 +2,7 @@ import { applyD1Migrations } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vite-plus/test';
 
+import { CreateOutcomeUnknownError } from '../artifacts/errors.js';
 import type { Artifact } from '../artifacts/types.js';
 import { metadataStoreContract } from './artifact-store-contract.test-support.js';
 import { D1ArtifactMetadataStore } from './d1-artifact-metadata-store.js';
@@ -75,16 +76,20 @@ describe('D1ArtifactMetadataStore', () => {
     ).resolves.toBeNull();
   });
 
-  it('rejects with the insert error when its row cannot be checked', async () => {
+  it('rejects with an unknown outcome when its row cannot be checked', async () => {
+    const insertError = new Error('D1 unavailable');
     const store = storeWithFaults({
       first: async () => {
         throw new Error('D1 read failed');
       },
       run: async () => {
-        throw new Error('D1 unavailable');
+        throw insertError;
       },
     });
 
-    await expect(store.create(artifact)).rejects.toThrow('D1 unavailable');
+    const rejection = await store.create(artifact).catch((error) => error);
+
+    expect(rejection).toBeInstanceOf(CreateOutcomeUnknownError);
+    expect(rejection).toMatchObject({ cause: insertError });
   });
 });

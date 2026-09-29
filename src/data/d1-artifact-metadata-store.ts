@@ -1,3 +1,4 @@
+import { CreateOutcomeUnknownError } from '../artifacts/errors.js';
 import type {
   Artifact,
   ArtifactMetadataStore,
@@ -51,15 +52,21 @@ export class D1ArtifactMetadataStore implements ArtifactMetadataStore {
   }
 
   // A D1 call can fail after its write committed, for example by timing out
-  // on the way back. The port rejects only when nothing was stored, so a
-  // failed insert resolves when this artifact's row is found in place. The
-  // original error stands when the row is absent, belongs to another
-  // artifact, or cannot be checked.
+  // on the way back, so a failed insert checks for its row. It resolves when
+  // this artifact's row is in place, and the insert error stands when the row
+  // is absent or belongs to another artifact. When the row cannot be checked,
+  // the outcome is unknown and the create rejects with
+  // CreateOutcomeUnknownError.
   async create(artifact: Artifact): Promise<void> {
     try {
       await this.statement(insertArtifact(artifact)).run();
     } catch (error) {
-      const stored = await this.find(artifact.id).catch(() => null);
+      let stored: Artifact | null;
+      try {
+        stored = await this.find(artifact.id);
+      } catch {
+        throw new CreateOutcomeUnknownError(artifact.id, error);
+      }
       if (stored === null || !sameArtifact(stored, artifact)) {
         throw error;
       }
