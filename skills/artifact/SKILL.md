@@ -32,7 +32,7 @@ Before creating anything, call `list_collections` and `list_artifacts` (pass `pr
 ### Step 3: Choose a media type and payload
 
 - **`text/markdown`** (document default) — plans, design docs, reports, diagrams, and notes. Send UTF-8 text as `content`.
-- **`text/html`** — bespoke layouts that Markdown cannot express. HTML is served as-is. Send it as `content`.
+- **`text/html`** — bespoke layouts that Markdown cannot express. HTML is served as-is in a CSP sandbox: scripts run, but `localStorage`, cookies, forms, new windows, embedded PDFs, and `type="module"` scripts from this server do not work. Send it as `content`.
 - **`text/plain`** — logs and raw output. Send it as `content`.
 - **PNG, JPEG, GIF, WebP, SVG, or PDF** — use canonical `mediaType`, a safe `filename` whose extension agrees with it, and canonical base64 in `contentBase64`. The decoded limit is 10 MiB; binary files must not be empty and their signatures are validated.
 
@@ -57,7 +57,8 @@ None of these are mandatory — write plain markdown when a document doesn't fit
 ### Step 5: For embeds, create the file first
 
 Create each image or PDF before the containing document, then use the absolute `url` returned by
-`add_artifact`. Do not reconstruct the hostname.
+`add_artifact`. Do not reconstruct the hostname. Embed images; link to PDFs with `<a href>` or a
+Markdown link, because an HTML document's sandbox stops an embedded PDF from displaying.
 
 ```html
 <img src="https://artifacts.example/a/returned-id" alt="Descriptive alternative text">

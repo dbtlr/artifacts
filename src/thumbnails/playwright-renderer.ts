@@ -65,12 +65,13 @@ function imagePage(url: string): string {
 }
 
 // A preview is a screenshot of the static document. An artifact's scripts
-// run same-origin in a trusted viewer's browser, but a page rendered here
-// runs on the server host with nobody watching, and every script-driven
-// network path (fetch, WebSocket, WebTransport, WebRTC, workers, popups)
-// turned out to need its own fence with its own gaps. So the render context
-// has JavaScript off (see `render`), which removes that whole class: a
-// mermaid fence shows as its source in the thumbnail, and that is the trade.
+// run in a viewer's browser inside an opaque-origin sandbox, but a page
+// rendered here runs on the server host with nobody watching, and every
+// script-driven network path (fetch, WebSocket, WebTransport, WebRTC,
+// workers, popups) turned out to need its own fence with its own gaps. So
+// the render context has JavaScript off (see `render`), which removes that
+// whole class: a mermaid fence shows as its source in the thumbnail, and
+// that is the trade.
 //
 // What remains is declarative loads (img, iframe, stylesheet, meta refresh),
 // fenced twice. The browser is launched (see `launch`) with a proxy nobody
