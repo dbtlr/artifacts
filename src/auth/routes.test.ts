@@ -155,6 +155,18 @@ describe('with an owner password', () => {
     expect(res.status).toBe(401);
   });
 
+  it('keeps /mcp closed at a percent-encoded path, even with a session', async () => {
+    const cookie = await logIn();
+
+    const res = await testApp.request('/%6dcp', {
+      body: '{}',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie, Origin: ORIGIN },
+      method: 'POST',
+    });
+
+    expect(res.status).toBe(401);
+  });
+
   it('serves the login form', async () => {
     const res = await testApp.request('/login?next=%2Fa%2Fabc');
 
@@ -221,12 +233,38 @@ describe('with an owner password', () => {
     expect(res.headers.get('set-cookie')).toBeNull();
   });
 
-  it.each(['//evil.example/', 'https://evil.example/', String.raw`/\evil.example`, 'relative'])(
+  // The last four only become `//evil.example` once dot segments resolve.
+  const offSiteNextPaths = [
+    '//evil.example/',
+    'https://evil.example/',
+    String.raw`/\evil.example`,
+    'relative',
+    '/.//evil.example',
+    '/%2e//evil.example',
+    '/a/..//evil.example',
+    String.raw`/./\evil.example`,
+  ];
+
+  it.each(offSiteNextPaths)(
     'returns to the home page instead of the off-site next %j',
     async (next) => {
       const res = await testApp.request('/login', loginRequest(PASSWORD, { next }));
 
       expect(res.status).toBe(303);
+      expect(res.headers.get('location')).toBe('/');
+    },
+  );
+
+  it.each(offSiteNextPaths)(
+    'sends a signed-in owner home instead of the off-site next %j',
+    async (next) => {
+      const cookie = await logIn();
+
+      const res = await testApp.request(`/login?next=${encodeURIComponent(next)}`, {
+        headers: { Cookie: cookie },
+      });
+
+      expect(res.status).toBe(302);
       expect(res.headers.get('location')).toBe('/');
     },
   );

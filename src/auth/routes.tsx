@@ -20,16 +20,21 @@ function isPublicPath(path: string): boolean {
   return path === '/login' || path.startsWith('/assets/') || ICON_PATHS.has(path);
 }
 
+// A path that browsers read as this server: one slash, then not `/` or `\`
+// (`//host` and `/\host` name another host).
+const LOCAL_PATH = /^\/(?![/\\])/u;
+
 // Where a login may send the browser afterwards: a path on this server only.
-// Anything else, including `//host` and `/\host` (which browsers read as
-// another host), falls back to the home page.
+// Anything else falls back to the home page. The normalized result is checked
+// too, because resolving dot segments turns `/.//host` into `//host`.
 export function safeNextPath(value: unknown): string {
-  if (typeof value !== 'string' || !/^\/(?![/\\])/u.test(value)) {
+  if (typeof value !== 'string' || !LOCAL_PATH.test(value)) {
     return '/';
   }
   const base = 'http://artifacts.invalid';
   const url = new URL(value, base);
-  return url.origin === base ? `${url.pathname}${url.search}` : '/';
+  const path = `${url.pathname}${url.search}`;
+  return url.origin === base && LOCAL_PATH.test(path) ? path : '/';
 }
 
 // A state-changing request must name its origin, and that origin must be
@@ -76,19 +81,21 @@ function loginPage(c: Context, next: string, status: 200 | 401 | 429, error?: st
 // The response for a request that auth on does not let through, or
 // undefined when it may proceed.
 async function refuseWithoutSession(c: Context, auth: OwnerAuth): Promise<Response | undefined> {
-  const url = new URL(c.req.url);
+  // Decide on the percent-decoded path that routing uses, so `/%6dcp` is /mcp.
+  const path = c.req.path;
   // MCP clients cannot hold a session cookie, and /mcp has no credential of
   // its own yet, so it stays closed while auth is on.
-  if (url.pathname === '/mcp') {
+  if (path === '/mcp') {
     return c.text('Unauthorized: /mcp is unavailable while owner auth is on', 401);
   }
   if (!SAFE_METHODS.has(c.req.method) && !hasAllowedOrigin(c)) {
     return c.text('Forbidden', 403);
   }
-  if (isPublicPath(url.pathname) || (await auth.hasSession(getCookie(c, SESSION_COOKIE)))) {
+  if (isPublicPath(path) || (await auth.hasSession(getCookie(c, SESSION_COOKIE)))) {
     return undefined;
   }
   if (SAFE_METHODS.has(c.req.method)) {
+    const url = new URL(c.req.url);
     return c.redirect(`/login?next=${encodeURIComponent(`${url.pathname}${url.search}`)}`);
   }
   return c.text('Unauthorized', 401);
