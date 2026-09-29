@@ -1,6 +1,7 @@
 import type { nanoid } from 'nanoid';
 import { describe, expect, it, vi } from 'vite-plus/test';
 
+import type { MarkdownRenderer } from '../markdown.js';
 import { EMBED_EXTRACTOR_VERSION } from './embeds.js';
 import { createMemoryStores } from './memory-stores.test-support.js';
 import { createArtifactService } from './service.js';
@@ -34,9 +35,11 @@ function createRaceFixture() {
     create: async () => undefined,
     find: async () => artifact,
     findEmbedTemplate: async () => null,
+    findRendering: async () => null,
     list: async () => [artifact],
     remove: async () => false,
     saveEmbedTemplate: async () => undefined,
+    saveRendering: async () => undefined,
   };
   const content: ArtifactContentStore = {
     read: async () => new TextEncoder().encode('original'),
@@ -301,6 +304,123 @@ describe('ArtifactService embed templates', () => {
     await expect(service.getEmbedReferences(created.id)).resolves.toEqual([
       { id: 'chart-id', start: chartStart },
     ]);
+    stderr.mockRestore();
+  });
+});
+
+// A stand-in renderer whose output names its version and source, and which
+// records every source it is asked to parse.
+function countingRenderer(version: number) {
+  const parsed: string[] = [];
+  const renderer: MarkdownRenderer = {
+    render: (markdown) => {
+      parsed.push(markdown);
+      return {
+        hasHighlightableCode: false,
+        hasMermaid: false,
+        html: `<p>v${String(version)}: ${markdown}</p>`,
+        toc: undefined,
+      };
+    },
+    version,
+  };
+  return { parsed, renderer };
+}
+
+const markdownInput: CreateArtifactInput = {
+  content: new TextEncoder().encode('# Notes'),
+  description: 'description',
+  mediaType: 'text/markdown',
+  project: 'artifacts',
+  title: 'Notes',
+};
+
+describe('ArtifactService Markdown renderings', () => {
+  it('renders Markdown once, at create, so views parse nothing', async () => {
+    const stores = createMemoryStores();
+    const { parsed, renderer } = countingRenderer(1);
+    const service = createArtifactService(stores.metadata, stores.content, renderer);
+
+    const created = await service.createArtifact(markdownInput);
+    expect(parsed).toEqual(['# Notes']);
+
+    await expect(service.getRenderedMarkdown(created.id)).resolves.toMatchObject({
+      html: '<p>v1: # Notes</p>',
+    });
+    await service.getRenderedMarkdown(created.id);
+    expect(parsed).toEqual(['# Notes']);
+  });
+
+  it('renders and stores a missing rendering on its first view only', async () => {
+    const stores = createMemoryStores([
+      { artifact: { ...artifact, mediaType: 'text/markdown' }, bytes: markdownInput.content },
+    ]);
+    const { parsed, renderer } = countingRenderer(1);
+    const service = createArtifactService(stores.metadata, stores.content, renderer);
+
+    await expect(service.getRenderedMarkdown(artifact.id)).resolves.toMatchObject({
+      html: '<p>v1: # Notes</p>',
+    });
+    await service.getRenderedMarkdown(artifact.id);
+
+    expect(parsed).toEqual(['# Notes']);
+  });
+
+  it('renders again a rendering stored by another renderer version', async () => {
+    const stores = createMemoryStores();
+    const older = createArtifactService(
+      stores.metadata,
+      stores.content,
+      countingRenderer(1).renderer,
+    );
+    const created = await older.createArtifact(markdownInput);
+    const { parsed, renderer } = countingRenderer(2);
+    const newer = createArtifactService(stores.metadata, stores.content, renderer);
+
+    await expect(newer.getRenderedMarkdown(created.id)).resolves.toMatchObject({
+      html: '<p>v2: # Notes</p>',
+    });
+    await newer.getRenderedMarkdown(created.id);
+
+    expect(parsed).toEqual(['# Notes']);
+  });
+
+  it('renders nothing for other media types, and resolves null for them', async () => {
+    const stores = createMemoryStores();
+    const { parsed, renderer } = countingRenderer(1);
+    const service = createArtifactService(stores.metadata, stores.content, renderer);
+
+    const created = await service.createArtifact(input);
+
+    await expect(service.getRenderedMarkdown(created.id)).resolves.toBeNull();
+    await expect(service.getRenderedMarkdown('missing')).resolves.toBeNull();
+    expect(parsed).toEqual([]);
+  });
+
+  it('keeps a created artifact when storing its rendering fails', async () => {
+    const stores = createMemoryStores();
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const { parsed, renderer } = countingRenderer(1);
+    const service = createArtifactService(
+      {
+        ...stores.metadata,
+        saveRendering: async () => {
+          throw new Error('rendering write failed');
+        },
+      },
+      stores.content,
+      renderer,
+    );
+
+    const created = await service.createArtifact(markdownInput);
+
+    await expect(service.findArtifact(created.id)).resolves.toEqual(created);
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('rendering write failed'));
+    // Nothing was stored, so the view renders it again.
+    await expect(service.getRenderedMarkdown(created.id)).resolves.toMatchObject({
+      html: '<p>v1: # Notes</p>',
+    });
+    expect(parsed).toEqual(['# Notes', '# Notes']);
     stderr.mockRestore();
   });
 });

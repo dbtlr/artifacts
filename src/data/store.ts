@@ -13,6 +13,7 @@ import type {
 } from '../artifacts/types.js';
 import { resolveStoragePaths } from '../data-dir.js';
 import type { StoragePaths } from '../data-dir.js';
+import { renderMarkdownToHtml } from '../markdown.js';
 import { resolvePublicBaseUrl } from '../urls.js';
 import { FilesystemArtifactContentStore } from './filesystem-artifact-content-store.js';
 import { SqliteArtifactMetadataStore } from './sqlite-artifact-metadata-store.js';
@@ -99,6 +100,12 @@ export function adaptLegacyArtifactStore(store: ArtifactStore): ArtifactService 
       return artifact?.type === 'html'
         ? extractEmbedReferences(artifact.content, resolvePublicBaseUrl())
         : null;
+    },
+    // A caller-supplied store has nowhere to keep derived data, so its
+    // Markdown is rendered on every view.
+    getRenderedMarkdown: async (id) => {
+      const artifact = await store.getArtifact(id);
+      return artifact?.type === 'md' ? renderMarkdownToHtml(artifact.content) : null;
     },
     listArtifacts: async (query) => (await store.listArtifacts(query)).map(fromLegacyArtifact),
     removeArtifact: (id) => store.removeArtifact(id),

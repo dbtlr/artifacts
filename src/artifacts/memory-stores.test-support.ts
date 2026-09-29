@@ -4,6 +4,7 @@ import type {
   ArtifactMetadataStore,
   EmbedTemplate,
   MediaType,
+  StoredMarkdownRendering,
 } from './types.js';
 
 export type HoldableStep = 'contentRead' | 'contentRemove' | 'metadataCreate';
@@ -23,6 +24,8 @@ export type MemoryStores = {
   // start another operation while the first is partway through.
   hold: (step: HoldableStep) => Hold;
   metadata: ArtifactMetadataStore;
+  // Stored Markdown renderings keyed by artifact id.
+  renderings: Map<string, StoredMarkdownRendering>;
   rows: Map<string, Artifact>;
   // Stored embed templates keyed by artifact id.
   templates: Map<string, EmbedTemplate>;
@@ -36,6 +39,7 @@ export function createMemoryStores(seed: { artifact: Artifact; bytes: Uint8Array
   const files = new Map(
     seed.map(({ artifact, bytes }) => [fileKey(artifact.id, artifact.mediaType), bytes]),
   );
+  const renderings = new Map<string, StoredMarkdownRendering>();
   const templates = new Map<string, EmbedTemplate>();
   const holds = new Map<HoldableStep, { gate: Promise<void>; reached: () => void }>();
 
@@ -59,14 +63,21 @@ export function createMemoryStores(seed: { artifact: Artifact; bytes: Uint8Array
     },
     find: async (id) => rows.get(id) ?? null,
     findEmbedTemplate: async (id) => templates.get(id) ?? null,
+    findRendering: async (id) => renderings.get(id) ?? null,
     list: async () => [...rows.values()],
     remove: async (id) => {
       templates.delete(id);
+      renderings.delete(id);
       return rows.delete(id);
     },
     saveEmbedTemplate: async (id, template) => {
       if (rows.has(id)) {
         templates.set(id, template);
+      }
+    },
+    saveRendering: async (id, rendering) => {
+      if (rows.has(id)) {
+        renderings.set(id, rendering);
       }
     },
   };
@@ -94,6 +105,7 @@ export function createMemoryStores(seed: { artifact: Artifact; bytes: Uint8Array
       return { reached: reached.promise, release: gate.resolve };
     },
     metadata,
+    renderings,
     rows,
     templates,
   } satisfies MemoryStores;

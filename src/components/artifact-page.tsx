@@ -1,7 +1,7 @@
 import { raw } from 'hono/html';
 import type { FC } from 'hono/jsx';
 
-import type { LegacyArtifactWithContent } from '../data/store.js';
+import type { Artifact } from '../artifacts/types.js';
 import { formatDate } from '../format-date.js';
 import type { RenderedMarkdown } from '../markdown.js';
 
@@ -11,13 +11,14 @@ import type { RenderedMarkdown } from '../markdown.js';
 const HIGHLIGHT_SCRIPT_SRC = '/assets/highlight.js';
 const MERMAID_SCRIPT_SRC = '/assets/mermaid.js';
 
-// `rendered` is set by the /a/:id route (app.tsx) exactly when
-// `artifact.type === 'md'`, so markdown rendering happens once in the route
-// handler rather than inside this component. `txt` always leaves it
-// undefined and keeps the plain <pre> path.
-type ArtifactPageProps = { artifact: LegacyArtifactWithContent; rendered?: RenderedMarkdown };
+// A Markdown artifact arrives as its stored rendering (see
+// ArtifactService.getRenderedMarkdown), so this page never parses Markdown.
+// A `txt` artifact arrives as its text and keeps the plain <pre> path.
+type ArtifactPageProps = {
+  artifact: Pick<Artifact, 'createdAt' | 'description' | 'project' | 'title'>;
+} & ({ rendered: RenderedMarkdown; text?: never } | { rendered?: never; text: string });
 
-export const ArtifactPage: FC<ArtifactPageProps> = ({ artifact, rendered }) => (
+export const ArtifactPage: FC<ArtifactPageProps> = ({ artifact, rendered, text }) => (
   <article>
     <header class="border-b border-stone-200 pb-4 dark:border-ink-800">
       <h1 class="text-3xl font-semibold tracking-tight dark:text-ink-100">{artifact.title}</h1>
@@ -38,7 +39,7 @@ export const ArtifactPage: FC<ArtifactPageProps> = ({ artifact, rendered }) => (
     )}
     {rendered === undefined ? (
       <pre class="mt-8 overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-stone-200 bg-white p-4 font-mono text-sm leading-relaxed text-stone-800 dark:border-ink-800 dark:bg-ink-900 dark:text-ink-300">
-        {artifact.content}
+        {text}
       </pre>
     ) : (
       // The one spot in the app that intentionally injects markup instead of

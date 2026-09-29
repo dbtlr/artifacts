@@ -24,7 +24,6 @@ import type {
 } from './data/store.js';
 import { adaptLegacyArtifactStore } from './data/store.js';
 import { buildIndexView, kindOf } from './index-view.js';
-import { renderMarkdownToHtml } from './markdown.js';
 import { createMcpServer } from './mcp/server.js';
 import type { AppServices } from './services.js';
 import { getDefaultAppServices } from './services.js';
@@ -217,21 +216,42 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
   // With owner auth on, the sandbox's own requests carry no session, so each
   // embedded /a/:id URL its template records is signed for this view; a
   // request that got here was already allowed to read the page, by session
-  // or by signature. md/txt render inside the standard Layout instead. A
-  // row whose content file is missing makes getArtifact reject (see
-  // artifacts/service.ts) — that's deliberately left unguarded here too, so
-  // it surfaces as a 500 rather than masquerading as an ordinary 404.
+  // or by signature. md/txt render inside the standard Layout instead, md
+  // from its stored rendering. A row whose content file is missing makes
+  // getArtifact reject (see artifacts/service.ts) — that's deliberately left
+  // unguarded here too, so it surfaces as a 500 rather than masquerading as
+  // an ordinary 404. An md view reads its content only when the rendering
+  // must be made again.
   app.on(['GET', 'HEAD'], '/a/:id', async (c) => {
     const id = c.req.param('id');
     const { artifacts, auth } = await resolveServices();
-    const artifact = await artifacts.getArtifact(id);
-    if (!artifact) {
-      return c.html(
+    const notFound = () =>
+      c.html(
         <Layout title="Artifact not found">
           <NotFoundPage id={id} />
         </Layout>,
         404,
       );
+    const found = await artifacts.findArtifact(id);
+    if (!found) {
+      return notFound();
+    }
+    // Markdown is served from its stored rendering: no parsing, and no read
+    // of the content bytes. Null here means it was removed meanwhile.
+    if (found.mediaType === 'text/markdown') {
+      const rendered = await artifacts.getRenderedMarkdown(id);
+      if (rendered === null) {
+        return notFound();
+      }
+      return c.html(
+        <Layout title={found.title}>
+          <ArtifactPage artifact={found} rendered={rendered} />
+        </Layout>,
+      );
+    }
+    const artifact = await artifacts.getArtifact(id);
+    if (!artifact) {
+      return notFound();
     }
     const renderingMode = legacyTypeFromMediaType(artifact.mediaType);
     if (renderingMode === undefined) {
@@ -271,13 +291,9 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
             );
       return c.html(html, 200, { 'Content-Security-Policy': HTML_ARTIFACT_CSP });
     }
-    // Only `md` renders through the markdown pipeline; `txt` is passed
-    // through untouched (ArtifactPage falls back to a plain <pre> whenever
-    // `rendered` is undefined).
-    const rendered = legacy.type === 'md' ? renderMarkdownToHtml(legacy.content) : undefined;
     return c.html(
       <Layout title={legacy.title}>
-        <ArtifactPage artifact={legacy} rendered={rendered} />
+        <ArtifactPage artifact={legacy} text={legacy.content} />
       </Layout>,
     );
   });

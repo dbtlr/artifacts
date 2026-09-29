@@ -284,3 +284,10 @@ export function renderMarkdownToHtml(markdown: string): RenderedMarkdown {
   const html = markdownIt.renderer.render(tokens, markdownIt.options, env);
   return { hasHighlightableCode, hasMermaid, html, toc: renderToc(headings) };
 }
+
+export type MarkdownRenderer = { render: (markdown: string) => RenderedMarkdown; version: number };
+
+// The renderer artifacts are stored with. Bump `version` in any change that
+// alters the output above (markup, ids, TOC, or flags): stored renderings
+// from another version are rendered again when next viewed.
+export const markdownRenderer: MarkdownRenderer = { render: renderMarkdownToHtml, version: 1 };

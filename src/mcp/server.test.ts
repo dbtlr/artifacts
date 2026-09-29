@@ -436,6 +436,7 @@ describe('artifact results', () => {
       findArtifact: async () => stale,
       getArtifact: async () => ({ ...stale, content: new Uint8Array() }),
       getEmbedReferences: async () => null,
+      getRenderedMarkdown: async () => null,
       listArtifacts: async () => [stale],
       removeArtifact: async () => true,
     };

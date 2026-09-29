@@ -3,16 +3,20 @@ import type {
   ArtifactMetadataStore,
   EmbedTemplate,
   ListArtifactsQuery,
+  StoredMarkdownRendering,
 } from '../artifacts/types.js';
 import {
   artifactFromRow,
   embedTemplateFromRow,
   findArtifact,
   findEmbedTemplate,
+  findRendering,
   insertArtifact,
   listArtifacts,
   removeArtifact,
+  renderingFromRow,
   saveEmbedTemplate,
+  saveRendering,
 } from './artifact-metadata-sql.js';
 import type { SqlStatement } from './artifact-metadata-sql.js';
 import type { D1DatabaseBinding, D1PreparedStatementBinding } from './d1-database.js';
@@ -72,12 +76,18 @@ export class D1ArtifactMetadataStore implements ArtifactMetadataStore {
     return record === null ? null : embedTemplateFromRow(record);
   }
 
+  async findRendering(id: string): Promise<StoredMarkdownRendering | null> {
+    const record = await this.statement(findRendering(id)).first();
+    return record === null ? null : renderingFromRow(record);
+  }
+
   async list(query: ListArtifactsQuery = {}): Promise<Artifact[]> {
     const { results } = await this.statement(listArtifacts(query)).all();
     return results.map(artifactFromRow);
   }
 
-  // The embed template goes with the row: its foreign key cascades.
+  // The embed template and rendering go with the row: their foreign keys
+  // cascade.
   async remove(id: string): Promise<boolean> {
     const { meta } = await this.statement(removeArtifact(id)).run();
     return meta.changes > 0;
@@ -85,5 +95,9 @@ export class D1ArtifactMetadataStore implements ArtifactMetadataStore {
 
   async saveEmbedTemplate(id: string, template: EmbedTemplate): Promise<void> {
     await this.statement(saveEmbedTemplate(id, template)).run();
+  }
+
+  async saveRendering(id: string, rendering: StoredMarkdownRendering): Promise<void> {
+    await this.statement(saveRendering(id, rendering)).run();
   }
 }
