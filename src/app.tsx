@@ -29,6 +29,7 @@ import { createMcpServer } from './mcp/server.js';
 import type { AppServices } from './services.js';
 import { getDefaultAppServices } from './services.js';
 import { placeholderSvg } from './thumbnails/placeholder.js';
+import { isOwnOrigin } from './urls.js';
 
 // Resolve the static asset root relative to this module, not process.cwd(),
 // so a different WORKDIR/cwd (e.g. Docker) can't silently 404 every asset.
@@ -296,12 +297,14 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
   app.use('/mcp', bodyLimit({ maxSize: MAX_MCP_BODY_BYTES }));
 
   app.all('/mcp', async (c) => {
-    // A sandboxed HTML artifact's requests carry `Origin: null`, and it can
-    // POST here without a CORS preflight (a text/plain content type that
-    // mentions application/json passes the transport's check). MCP clients
-    // send no Origin, or a real one, so null is refused to keep artifact
-    // scripts from creating or removing artifacts.
-    if (c.req.header('Origin') === 'null') {
+    // Any web page, and any sandboxed HTML artifact (whose requests carry
+    // `Origin: null`), can POST here without a CORS preflight: a text/plain
+    // content type that mentions application/json passes the transport's
+    // check. MCP clients send no Origin, so a request from any origin but this
+    // server's is refused, to keep pages and artifact scripts from creating
+    // or removing artifacts when no owner password is set.
+    const origin = c.req.header('Origin');
+    if (origin !== undefined && !isOwnOrigin(origin, c.req.url)) {
       return c.body(null, 403);
     }
     if (c.req.method === 'GET') {

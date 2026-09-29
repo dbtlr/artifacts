@@ -17,6 +17,10 @@ internal network. If broader access is required, set an owner password or place 
 authentication-capable reverse proxy in front of it, and verify that the application itself is not
 directly reachable.
 
+`/mcp` refuses a request whose Origin header names another origin, or is `null`. This keeps web
+pages and HTML artifacts from creating or removing artifacts through a visitor's browser. MCP
+clients send no Origin header.
+
 ### With an owner password
 
 Every page and every `/a/:id` link requires a session from the login form. Only the login form,
@@ -29,6 +33,9 @@ only for the owner.
 - Login allows 10 attempts in any 15-minute window for the whole instance. An attacker who can
   reach the login form can keep the owner locked out.
 - A POST with a missing, foreign, or `null` Origin header is refused.
+- Pages other than `/a/:id` are sent with `X-Frame-Options: DENY` and
+  `Content-Security-Policy: frame-ancestors 'none'`, so no other page can frame the login, key, or
+  gallery pages. Artifacts stay frameable, because HTML artifacts embed them.
 - `/mcp` requires `Authorization: Bearer <key>` with an API key. The owner creates and revokes keys
   on the `/keys` page. A new key is shown once and stored only as a SHA-256 hash. Keys do not
   expire, and a new password does not revoke them. After a password leak, change the password and

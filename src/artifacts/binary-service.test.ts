@@ -111,6 +111,26 @@ describe('byte-native artifact service', () => {
     ).rejects.toThrow('signature does not match');
   });
 
+  // The check runs on the event loop, so a prologue that makes it backtrack
+  // stalls every other request. A linear check answers these at once.
+  it.each([
+    ['many empty comments', `${'<!---->'.repeat(28)}x`],
+    ['whitespace-only XML declaration', `<?xml${' '.repeat(100_000)}`],
+  ])('rejects an SVG prologue of %s without backtracking', async (_name, source) => {
+    const started = performance.now();
+
+    await expect(
+      service.createArtifact(
+        binaryInput({
+          content: new TextEncoder().encode(source),
+          filename: 'slow.svg',
+          mediaType: 'image/svg+xml',
+        }),
+      ),
+    ).rejects.toThrow('signature does not match');
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
   it('rejects invalid UTF-8 text before durable mutation', async () => {
     await expect(
       service.createArtifact({
