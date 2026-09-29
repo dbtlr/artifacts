@@ -200,23 +200,23 @@ export function createMcpServer(service: ArtifactService): McpServer {
     },
     async ({ id, ...args }) => {
       try {
-        const existing = await service.findArtifact(id);
-        if (!existing) {
-          return toolError(`No artifact found with id ${JSON.stringify(id)}`);
-        }
-        const mediaType =
-          args.mediaType === undefined && args.type === undefined
-            ? existing.mediaType
-            : resolveMediaType(args.mediaType, args.type);
-        const content = decodeContent(mediaType, args.content, args.contentBase64, false);
-        const updated = await service.updateArtifact(id, {
-          ...(args.collection === undefined ? {} : { collection: args.collection }),
-          ...(content === undefined ? {} : { content }),
-          ...(args.description === undefined ? {} : { description: args.description }),
-          ...(args.filename === undefined ? {} : { filename: args.filename }),
-          ...(args.mediaType === undefined && args.type === undefined ? {} : { mediaType }),
-          ...(args.project === undefined ? {} : { project: args.project }),
-          ...(args.title === undefined ? {} : { title: args.title }),
+        // Decoding depends on the stored media type, so the patch is built
+        // from the artifact as the service holds it when the update runs.
+        const updated = await service.updateArtifact(id, (existing) => {
+          const mediaType =
+            args.mediaType === undefined && args.type === undefined
+              ? existing.mediaType
+              : resolveMediaType(args.mediaType, args.type);
+          const content = decodeContent(mediaType, args.content, args.contentBase64, false);
+          return {
+            ...(args.collection === undefined ? {} : { collection: args.collection }),
+            ...(content === undefined ? {} : { content }),
+            ...(args.description === undefined ? {} : { description: args.description }),
+            ...(args.filename === undefined ? {} : { filename: args.filename }),
+            ...(args.mediaType === undefined && args.type === undefined ? {} : { mediaType }),
+            ...(args.project === undefined ? {} : { project: args.project }),
+            ...(args.title === undefined ? {} : { title: args.title }),
+          };
         });
         return updated === null
           ? toolError(`No artifact found with id ${JSON.stringify(id)}`)

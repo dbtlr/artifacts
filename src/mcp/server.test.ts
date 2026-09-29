@@ -3,12 +3,14 @@ import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setImmediate } from 'node:timers/promises';
 import { promisify } from 'node:util';
 
 import type { ServerType } from '@hono/node-server';
 import { serve } from '@hono/node-server';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { z } from 'zod';
@@ -21,8 +23,11 @@ import { z } from 'zod';
 // intercept without reimplementing part of the transport — booting on an
 // ephemeral port (PORT=0 pattern) is the smaller, more honest surface.
 import { createApp } from '../app.js';
+import { createMemoryStores } from '../artifacts/memory-stores.test-support.js';
+import { createArtifactService } from '../artifacts/service.js';
 import type { ArtifactService, ArtifactStore } from '../data/store.js';
 import { createArtifactStore, createByteNativeArtifactService } from '../data/store.js';
+import { createMcpServer } from './server.js';
 
 const artifactSchema = z.object({
   collection: z.string().optional(),
@@ -455,5 +460,54 @@ describe('public base url override', () => {
     expect(added.url).toBe(`https://artifacts.example/a/${added.id}`);
 
     await callTool('remove_artifact', { id: added.id }, removeResultSchema);
+  });
+});
+
+describe('update_artifact under concurrent updates', () => {
+  it('decodes content against the media type an in-flight update leaves', async () => {
+    const png = {
+      createdAt: '2026-01-01T00:00:00.000Z',
+      description: 'd',
+      filename: 'x.png',
+      id: 'x',
+      mediaType: 'image/png',
+      project: 'p',
+      title: 'X',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    } as const;
+    const stores = createMemoryStores([
+      { artifact: png, bytes: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]) },
+    ]);
+    const mcp = createMcpServer(createArtifactService(stores.metadata, stores.content));
+    const local = new Client({ name: 'artifacts-race-client', version: '0.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([mcp.connect(serverTransport), local.connect(clientTransport)]);
+    const write = stores.hold('contentWrite');
+
+    const toMarkdown = local.callTool({
+      arguments: { content: 'hi', filename: null, id: 'x', mediaType: 'text/markdown' },
+      name: 'update_artifact',
+    });
+    await write.reached;
+    const binaryBytes = local.callTool({
+      arguments: { contentBase64: Buffer.from('hello').toString('base64'), id: 'x' },
+      name: 'update_artifact',
+    });
+    // Lets the second call reach the server while the first is mid-update.
+    await setImmediate();
+    write.release();
+
+    const [first, second] = (await Promise.all([toMarkdown, binaryBytes])).map((raw) =>
+      CallToolResultSchema.parse(raw),
+    );
+    await local.close();
+    await mcp.close();
+
+    expect(first?.isError).toBeFalsy();
+    expect(second?.isError).toBe(true);
+    expect(second === undefined ? '' : resultText(second)).toBe(
+      'content is required for text media type text/markdown',
+    );
+    expect(stores.files.get('x:text/markdown')).toEqual(new TextEncoder().encode('hi'));
   });
 });

@@ -17,8 +17,8 @@ export function withThumbnails(service: ArtifactService, hooks: ThumbnailHooks):
       hooks.enqueue(created.id);
       return created;
     },
-    removeArtifact: async (id) => {
-      const removed = await service.removeArtifact(id);
+    removeArtifact: async (id, when) => {
+      const removed = await service.removeArtifact(id, when);
       if (removed) {
         await hooks.remove(id);
       }

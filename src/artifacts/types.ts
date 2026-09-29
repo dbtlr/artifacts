@@ -58,13 +58,25 @@ export type ArtifactContentStore = {
   write: (id: string, mediaType: MediaType, content: Uint8Array) => Promise<void>;
 };
 
+// A decision made from the artifact as it is when the service acts on it,
+// after any earlier operation on the same artifact has finished. Use it
+// instead of a separate findArtifact whenever what to write depends on what
+// is stored, so nothing can change in between.
+export type FromCurrent<T> = (current: Artifact) => T;
+
 export type ArtifactService = {
   createArtifact: (input: CreateArtifactInput) => Promise<Artifact>;
   findArtifact: (id: string) => Promise<Artifact | null>;
   getArtifact: (id: string) => Promise<ArtifactWithContent | null>;
   listArtifacts: (query?: ListArtifactsQuery) => Promise<Artifact[]>;
-  removeArtifact: (id: string) => Promise<boolean>;
-  updateArtifact: (id: string, patch: UpdateArtifactInput) => Promise<Artifact | null>;
+  // With `when`, removes only if it returns true; otherwise resolves false.
+  removeArtifact: (id: string, when?: FromCurrent<boolean>) => Promise<boolean>;
+  // A patch resolved to null leaves the artifact alone and resolves null, as
+  // for an unknown id. Errors thrown while resolving it reject the update.
+  updateArtifact: (
+    id: string,
+    patch: UpdateArtifactInput | FromCurrent<UpdateArtifactInput | null>,
+  ) => Promise<Artifact | null>;
 };
 
 export type LegacyArtifact = Omit<Artifact, 'collection' | 'filename' | 'mediaType'> & {

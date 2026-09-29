@@ -10,6 +10,7 @@ import {
   adaptLegacyArtifactStore,
   createArtifactStore,
   createByteNativeArtifactService,
+  legacyArtifactStoreFromService,
 } from './store.js';
 
 let dir: string;
@@ -518,6 +519,50 @@ describe('listArtifacts', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('legacy store over a shared service', () => {
+  const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const toPng = { content: png, filename: 'x.png', mediaType: 'image/png' } as const;
+
+  async function markdownArtifact() {
+    const service = await createByteNativeArtifactService({
+      databasePath: join(dir, 'shared.db'),
+      filesDir: join(dir, 'shared'),
+    });
+    const created = await service.createArtifact({
+      content: new TextEncoder().encode('# md'),
+      description: 'd',
+      mediaType: 'text/markdown',
+      project: 'p',
+      title: 'Markdown',
+    });
+    return { created, legacy: legacyArtifactStoreFromService(service), service };
+  }
+
+  it('does not remove an artifact that a concurrent update made binary', async () => {
+    const { created, legacy, service } = await markdownArtifact();
+
+    const [, removed] = await Promise.all([
+      service.updateArtifact(created.id, toPng),
+      legacy.removeArtifact(created.id),
+    ]);
+
+    expect(removed).toBe(false);
+    expect((await service.findArtifact(created.id))?.mediaType).toBe('image/png');
+  });
+
+  it('does not update an artifact that a concurrent update made binary', async () => {
+    const { created, legacy, service } = await markdownArtifact();
+
+    const [, updated] = await Promise.all([
+      service.updateArtifact(created.id, toPng),
+      legacy.updateArtifact(created.id, { title: 'Hidden mutation' }),
+    ]);
+
+    expect(updated).toBeNull();
+    expect((await service.findArtifact(created.id))?.title).toBe('Markdown');
   });
 });
 

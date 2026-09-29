@@ -9,6 +9,7 @@ import type {
   ArtifactService,
   ArtifactWithContent,
   CreateArtifactInput,
+  FromCurrent,
   MediaType,
   UpdateArtifactInput,
 } from './types.js';
@@ -190,9 +191,16 @@ export function createArtifactService(
       : { ...artifact, content: await content.read(id, artifact.mediaType) };
   }
 
-  async function updateArtifact(id: string, patch: UpdateArtifactInput): Promise<Artifact | null> {
+  async function updateArtifact(
+    id: string,
+    patchOrPlan: UpdateArtifactInput | FromCurrent<UpdateArtifactInput | null>,
+  ): Promise<Artifact | null> {
     const previous = await metadata.find(id);
     if (!previous) {
+      return null;
+    }
+    const patch = typeof patchOrPlan === 'function' ? patchOrPlan(previous) : patchOrPlan;
+    if (patch === null) {
       return null;
     }
     const nextMediaType = patch.mediaType ?? previous.mediaType;
@@ -270,9 +278,9 @@ export function createArtifactService(
     return next;
   }
 
-  async function removeArtifact(id: string): Promise<boolean> {
+  async function removeArtifact(id: string, when?: FromCurrent<boolean>): Promise<boolean> {
     const artifact = await metadata.find(id);
-    if (!artifact || !(await metadata.remove(id))) {
+    if (!artifact || (when !== undefined && !when(artifact)) || !(await metadata.remove(id))) {
       return false;
     }
     try {
@@ -288,7 +296,7 @@ export function createArtifactService(
     findArtifact: (id) => metadata.find(id),
     getArtifact: (id) => lane.run(id, () => getArtifact(id)),
     listArtifacts: (query) => metadata.list(query),
-    removeArtifact: (id) => lane.run(id, () => removeArtifact(id)),
+    removeArtifact: (id, when) => lane.run(id, () => removeArtifact(id, when)),
     updateArtifact: (id, patch) => lane.run(id, () => updateArtifact(id, patch)),
   };
 }

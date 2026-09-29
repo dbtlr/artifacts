@@ -8,7 +8,9 @@ import type {
   ArtifactService,
   ArtifactStore,
   ArtifactWithContent,
+  FromCurrent,
   LegacyArtifact,
+  UpdateArtifactInput,
 } from '../artifacts/types.js';
 import { resolveStoragePaths } from '../data-dir.js';
 import type { StoragePaths } from '../data-dir.js';
@@ -37,6 +39,10 @@ function toLegacyArtifact(artifact: Artifact) {
   return { ...metadataFields, type };
 }
 
+function isLegacyText(artifact: Artifact): boolean {
+  return legacyTypeFromMediaType(artifact.mediaType) !== undefined;
+}
+
 function fromLegacyArtifact(artifact: LegacyArtifact): Artifact {
   const { type, ...metadata } = artifact;
   return { ...metadata, mediaType: mediaTypeFromLegacyType(type) };
@@ -45,8 +51,24 @@ function fromLegacyArtifact(artifact: LegacyArtifact): Artifact {
 // Preserve createApp(store)'s established one-argument embedding API. Its MCP
 // surface remains text-only, as the supplied legacy store is, but both the UI
 // and MCP operate on the same caller-owned data rather than silently splitting
-// across that store and the process default.
+// across that store and the process default. The supplied store has no
+// per-artifact ordering, so a FromCurrent decision here is made from a
+// separate read and is not atomic with the write that follows it.
 export function adaptLegacyArtifactStore(store: ArtifactStore): ArtifactService {
+  const findArtifact = async (id: string): Promise<Artifact | null> => {
+    const artifact = (await store.listArtifacts()).find((candidate) => candidate.id === id);
+    return artifact === undefined ? null : fromLegacyArtifact(artifact);
+  };
+  const resolvePatch = async (
+    id: string,
+    patchOrPlan: UpdateArtifactInput | FromCurrent<UpdateArtifactInput | null>,
+  ): Promise<UpdateArtifactInput | null> => {
+    if (typeof patchOrPlan !== 'function') {
+      return patchOrPlan;
+    }
+    const current = await findArtifact(id);
+    return current === null ? null : patchOrPlan(current);
+  };
   const get = async (id: string): Promise<ArtifactWithContent | null> => {
     const artifact = await store.getArtifact(id);
     if (artifact === null) {
@@ -74,14 +96,23 @@ export function adaptLegacyArtifactStore(store: ArtifactStore): ArtifactService 
         }),
       );
     },
-    findArtifact: async (id) => {
-      const artifact = (await store.listArtifacts()).find((candidate) => candidate.id === id);
-      return artifact === undefined ? null : fromLegacyArtifact(artifact);
-    },
+    findArtifact,
     getArtifact: get,
     listArtifacts: async (query) => (await store.listArtifacts(query)).map(fromLegacyArtifact),
-    removeArtifact: (id) => store.removeArtifact(id),
-    updateArtifact: async (id, patch) => {
+    removeArtifact: async (id, when) => {
+      if (when !== undefined) {
+        const current = await findArtifact(id);
+        if (current === null || !when(current)) {
+          return false;
+        }
+      }
+      return store.removeArtifact(id);
+    },
+    updateArtifact: async (id, patchOrPlan) => {
+      const patch = await resolvePatch(id, patchOrPlan);
+      if (patch === null) {
+        return null;
+      }
       const type =
         patch.mediaType === undefined ? undefined : legacyTypeFromMediaType(patch.mediaType);
       if (patch.mediaType !== undefined && type === undefined) {
@@ -156,27 +187,22 @@ export function legacyArtifactStoreFromService(service: ArtifactService): Artifa
       (await service.listArtifacts(query))
         .map(toLegacyArtifact)
         .filter((artifact) => artifact !== null),
-    removeArtifact: async (id) => {
-      const artifact = await service.findArtifact(id);
-      if (artifact === null || legacyTypeFromMediaType(artifact.mediaType) === undefined) {
-        return false;
-      }
-      return service.removeArtifact(id);
-    },
+    removeArtifact: (id) => service.removeArtifact(id, isLegacyText),
     updateArtifact: async (id, patch) => {
       const { content: text, type, ...metadataFields } = patch;
       if (type !== undefined) {
         assertLegacyType(type);
       }
-      const existing = await service.findArtifact(id);
-      if (existing === null || legacyTypeFromMediaType(existing.mediaType) === undefined) {
-        return null;
-      }
-      const updated = await service.updateArtifact(id, {
-        ...metadataFields,
-        ...(text === undefined ? {} : { content: new TextEncoder().encode(text) }),
-        ...(type === undefined ? {} : { mediaType: mediaTypeFromLegacyType(type) }),
-      });
+      // Text-only view: a binary artifact is invisible here, as if missing.
+      const updated = await service.updateArtifact(id, (current) =>
+        isLegacyText(current)
+          ? {
+              ...metadataFields,
+              ...(text === undefined ? {} : { content: new TextEncoder().encode(text) }),
+              ...(type === undefined ? {} : { mediaType: mediaTypeFromLegacyType(type) }),
+            }
+          : null,
+      );
       return updated === null ? null : toLegacyArtifact(updated);
     },
   };

@@ -219,4 +219,49 @@ describe('ArtifactService concurrent operations', () => {
     write.release();
     await Promise.all([update, get]);
   });
+
+  it('resolves a patch from the artifact as an in-flight update leaves it', async () => {
+    const stores = createMemoryStores([{ artifact: png, bytes: pngBytes }]);
+    const service = createArtifactService(stores.metadata, stores.content);
+    const write = stores.hold('contentWrite');
+    const seen: string[] = [];
+
+    const update = service.updateArtifact(png.id, toPdf);
+    await write.reached;
+    const retitle = service.updateArtifact(png.id, (current) => {
+      seen.push(current.mediaType);
+      return { title: 'Retitled' };
+    });
+    write.release();
+
+    await update;
+    await expect(retitle).resolves.toMatchObject({
+      mediaType: 'application/pdf',
+      title: 'Retitled',
+    });
+    expect(seen).toEqual(['application/pdf']);
+  });
+
+  it('treats a patch resolved to null as no match and changes nothing', async () => {
+    const stores = createMemoryStores([{ artifact: png, bytes: pngBytes }]);
+    const service = createArtifactService(stores.metadata, stores.content);
+
+    await expect(service.updateArtifact(png.id, () => null)).resolves.toBeNull();
+    expect(stores.rows.get(png.id)).toEqual(png);
+  });
+
+  it('checks a remove precondition against the artifact as an in-flight update leaves it', async () => {
+    const stores = createMemoryStores([{ artifact: png, bytes: pngBytes }]);
+    const service = createArtifactService(stores.metadata, stores.content);
+    const write = stores.hold('contentWrite');
+
+    const update = service.updateArtifact(png.id, toPdf);
+    await write.reached;
+    const remove = service.removeArtifact(png.id, (current) => current.mediaType === 'image/png');
+    write.release();
+
+    await update;
+    await expect(remove).resolves.toBe(false);
+    expect(stores.rows.get(png.id)?.mediaType).toBe('application/pdf');
+  });
 });
