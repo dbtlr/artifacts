@@ -10,7 +10,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { substituteEmbedReferences } from './artifacts/embeds.js';
 import { legacyTypeFromMediaType } from './artifacts/media.js';
 import { installOwnerAuth } from './auth/routes.js';
-import { EMBED_URL_LIFETIME_SECONDS } from './auth/signed-urls.js';
+import { EMBED_URL_EXPIRY } from './auth/signed-urls.js';
 import { ArtifactPage } from './components/artifact-page.js';
 import { HomePage } from './components/home-page.js';
 import { Layout } from './components/layout.js';
@@ -287,7 +287,7 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
           : await substituteEmbedReferences(
               legacy.content,
               (await artifacts.getEmbedReferences(id)) ?? [],
-              (embedded) => auth.artifactUrls.signedPath(embedded, EMBED_URL_LIFETIME_SECONDS),
+              (embedded) => auth.artifactUrls.signedPath(embedded, EMBED_URL_EXPIRY),
             );
       return c.html(html, 200, { 'Content-Security-Policy': HTML_ARTIFACT_CSP });
     }

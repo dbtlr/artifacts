@@ -13,7 +13,7 @@ import { createThumbnailQueue } from '../thumbnails/queue.js';
 import { buildArtifactUrl } from '../urls.js';
 import { createOwnerAuth, LOGIN_ATTEMPT_LIMIT, SESSION_LIFETIME_SECONDS } from './owner-auth.js';
 import type { OwnerAuth } from './owner-auth.js';
-import { EMBED_URL_LIFETIME_SECONDS, SIGNED_URL_LIFETIME_SECONDS } from './signed-urls.js';
+import { SIGNED_URL_LIFETIME_SECONDS } from './signed-urls.js';
 
 const PASSWORD = 'correct horse battery staple';
 // app.request() resolves paths against http://localhost.
@@ -715,7 +715,8 @@ describe('with an owner password', () => {
   });
 
   it('keeps an embed URL working past the renderer’s lifetime, then refuses it', async () => {
-    let now = new Date();
+    // The start of a five-minute window, so the embed URL lasts 15 minutes.
+    let now = new Date('2026-09-29T12:05:00.000Z');
     const timedAuth = createOwnerAuth({
       now: () => now,
       password: PASSWORD,
@@ -731,8 +732,33 @@ describe('with an owner password', () => {
     now = new Date(viewedAt + SIGNED_URL_LIFETIME_SECONDS * 1000);
     expect((await timedApp.request(embedUrl!)).status).toBe(200);
 
-    now = new Date(viewedAt + EMBED_URL_LIFETIME_SECONDS * 1000);
+    now = new Date(viewedAt + 15 * 60_000 - 1000);
+    expect((await timedApp.request(embedUrl!)).status).toBe(200);
+
+    now = new Date(viewedAt + 15 * 60_000);
     expect((await timedApp.request(embedUrl!)).status).toBe(403);
+  });
+
+  it('serves the same embed URLs to every view in the same five minutes', async () => {
+    let now = new Date('2026-09-29T12:05:00.000Z');
+    const timedAuth = createOwnerAuth({
+      now: () => now,
+      password: PASSWORD,
+      store: await SqliteOwnerAuthStore.open(join(dataDir, 'artifacts.db')),
+    });
+    const timedApp = createApp({ artifacts: service, auth: timedAuth, mcp: service });
+    const image = await createImage();
+    const html = await createHtml(`<img src="/a/${image.id}">`);
+    const view = async (): Promise<string[]> => {
+      const page = await timedApp.request(await timedAuth.artifactUrls.signedPath(html.id));
+      return sources(await page.text());
+    };
+
+    const first = await view();
+    now = new Date('2026-09-29T12:09:59.000Z');
+    const second = await view();
+
+    expect(second).toEqual(first);
   });
 
   it('refuses an embed signature used for another artifact or altered', async () => {

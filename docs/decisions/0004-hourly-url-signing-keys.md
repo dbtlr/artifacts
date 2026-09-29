@@ -28,7 +28,7 @@ already read every artifact.
   the bucket has none, then reads the bucket's key back. An insert never replaces a key, so
   processes that sign at the same moment all use the first key stored.
 - **Sign with the current hour, verify with the current and previous hour.** A URL signed just
-  before the hour still works for its full lifetime, which is at most 10 minutes. A URL whose key
+  before the hour still works for its full lifetime, which is at most 15 minutes. A URL whose key
   is two or more hours old fails, whatever its expiry says. This bounds every signed URL to about
   two hours even if the expiry check were wrong or a caller asked for a long lifetime.
 - **Old keys are deleted.** Making a bucket's key deletes every key older than the previous bucket.
@@ -43,7 +43,7 @@ already read every artifact.
   fixed key also never expires, so the expiry check would be the only bound on a URL's life.
 - **Put the bucket in the URL.** It would save one HMAC per failed check. Trying two keys is cheap,
   and it keeps the URL format unchanged.
-- **Refuse lifetimes over an hour.** Every lifetime in use is 10 minutes or less. The two-key rule
+- **Refuse lifetimes over an hour.** Every lifetime in use is 15 minutes or less. The two-key rule
   already cuts a longer URL short, so a separate check adds nothing.
 
 ## Consequences

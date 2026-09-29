@@ -34,8 +34,12 @@ derived from an artifact's content can be computed once and kept.
 - **Each view signs every reference again.** With auth on, a view replaces each recorded `/a/<id>`
   with a signed path to that artifact and keeps the author's host and fragment. The view does no
   HTML parsing. With auth off, the page is served unchanged.
-- **Embed URLs last 10 minutes.** A lazy image or frame loads when the reader scrolls to it, well
-  after the page arrived. Thumbnail URLs keep their 60 seconds. Both use the same signer and key.
+- **Embed URLs last 10 to 15 minutes.** A lazy image or frame loads when the reader scrolls to it,
+  well after the page arrived. The expiry is rounded up to a five-minute boundary at least 10
+  minutes after the end of the current clock five minutes, so every view in the same five minutes
+  gets the same URLs and the browser can reuse what it cached. Five minutes divides an hour, so
+  those views also share one [hourly signing key](0004-hourly-url-signing-keys.md). Thumbnail URLs
+  keep their 60 seconds. Both use the same signer.
 - **A signed page signs its own embeds.** A request that reaches an HTML artifact, by session or by
   signature, gets that artifact's embeds signed. This lets a framed HTML artifact and a gallery
   preview show their images.
@@ -64,8 +68,13 @@ derived from an artifact's content can be computed once and kept.
   knows another artifact's ID, for example from a shared link, the page can name it and send its
   signed URL to them when the owner views the page. Without signed embeds, a known ID gave no read
   access without a session. This risk is accepted: it needs both injected markup and a known ID,
-  and each signed URL expires after 10 minutes. An agent that publishes HTML from an untrusted
-  source can expose any artifact that the HTML names.
-- A signed URL copied from a page reads that one artifact for up to 10 minutes.
+  and each signed URL expires after at most 15 minutes. An agent that publishes HTML from an
+  untrusted source can expose any artifact that the HTML names.
+- A signed URL copied from a page reads that one artifact for up to 15 minutes.
 - Embeds that the extractor does not find, such as script-built URLs or CSS `url()`, still fail
   with auth on.
+
+## Changelog
+
+- 2026-09-29: Embed URLs round their expiry up to a five-minute boundary, so views in the same
+  five minutes share URLs and the browser cache. They last 10 to 15 minutes instead of exactly 10.

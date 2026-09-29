@@ -7,15 +7,30 @@ import type { UrlSigningKeyStore } from './types.js';
 // render, which the renderer caps at 15 s, with room to spare.
 export const SIGNED_URL_LIFETIME_SECONDS = 60;
 
-// How long the embedded URLs in a viewed HTML artifact stay usable. A page
-// can load an embed well after it is served: a lazy image or frame loads
-// when scrolled to. Reloading the page signs them again.
-export const EMBED_URL_LIFETIME_SECONDS = 10 * 60;
-
 // Each clock hour has its own signing key. A URL verifies only against the
 // current hour's key and the previous hour's, so none outlives about two
 // hours, whatever its expiry says. A lifetime over an hour can be cut short.
 export const SIGNING_KEY_BUCKET_SECONDS = 60 * 60;
+
+export type SignedPathOptions = {
+  // The least time the URL stays usable. The signer's lifetime when omitted.
+  lifetimeSeconds?: number;
+  // Signings in the same clock window of this many seconds get the same
+  // expiry, and so the same URL: the expiry is rounded up to a window
+  // boundary that leaves every signing in the window its whole lifetime.
+  // Divides an hour, so a window never spans two signing keys.
+  expiryWindowSeconds?: number;
+};
+
+// How the embedded URLs in a viewed HTML artifact expire. A page can load an
+// embed well after it is served: a lazy image or frame loads when scrolled
+// to. Views in the same five minutes get the same URLs, so the browser can
+// reuse what it cached; each URL lasts 10 to 15 minutes. Reloading the page
+// after that signs them again.
+export const EMBED_URL_EXPIRY = {
+  expiryWindowSeconds: 5 * 60,
+  lifetimeSeconds: 10 * 60,
+} as const satisfies SignedPathOptions;
 
 // Unix seconds, digits only, so `123.0` or `+123` cannot pass for a
 // signed `123`.
@@ -23,9 +38,9 @@ const EXPIRES = /^\d{1,12}$/u;
 
 export type ArtifactUrlSigner = {
   // `/a/:id` with an expiry and a signature in its query. Until it expires,
-  // `lifetimeSeconds` from now (the signer's lifetime when omitted), that URL
-  // reads this one artifact without a session.
-  signedPath: (id: string, lifetimeSeconds?: number) => Promise<string>;
+  // at least `lifetimeSeconds` from now, that URL reads this one artifact
+  // without a session.
+  signedPath: (id: string, options?: SignedPathOptions) => Promise<string>;
   // Whether `query` carries an unexpired signature for reading artifact `id`,
   // made with this hour's key or the previous hour's.
   verify: (id: string, query: URLSearchParams) => Promise<boolean>;
@@ -41,6 +56,16 @@ type ArtifactUrlSignerOptions = {
 
 function decodeKey(key: string): Buffer {
   return Buffer.from(key, 'base64url');
+}
+
+// Unix seconds. Without a window, `lifetime` after `nowSeconds`. With one, the
+// first window boundary at least `lifetime` after the end of the current
+// window, so the whole window shares it.
+function expiryFor(nowSeconds: number, lifetime: number, window?: number): number {
+  if (window === undefined) {
+    return nowSeconds + lifetime;
+  }
+  return (Math.floor(nowSeconds / window) + 1 + Math.ceil(lifetime / window)) * window;
 }
 
 function signatureFor(key: Buffer, id: string, expires: string): string {
@@ -119,12 +144,16 @@ export function createArtifactUrlSigner({
     return hourIsOver ? remember(bucket, Promise.resolve(null)) : null;
   }
 
-  async function signedPath(id: string, lifetime = lifetimeSeconds): Promise<string> {
+  async function signedPath(
+    id: string,
+    { lifetimeSeconds: lifetime = lifetimeSeconds, expiryWindowSeconds }: SignedPathOptions = {},
+  ): Promise<string> {
     if (!isSafeId(id)) {
       throw new Error(`Cannot sign a URL for ${JSON.stringify(id)}: not an artifact id`);
     }
     const key = await signingKey(currentBucket());
-    const expires = String(Math.floor(now().getTime() / 1000) + lifetime);
+    const nowSeconds = Math.floor(now().getTime() / 1000);
+    const expires = String(expiryFor(nowSeconds, lifetime, expiryWindowSeconds));
     const query = new URLSearchParams({
       expires,
       signature: signatureFor(key, id, expires),

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 import { SqliteOwnerAuthStore } from '../data/sqlite-owner-auth-store.js';
 import {
   createArtifactUrlSigner,
+  EMBED_URL_EXPIRY,
   SIGNED_URL_LIFETIME_SECONDS,
   SIGNING_KEY_BUCKET_SECONDS,
 } from './signed-urls.js';
@@ -72,13 +73,43 @@ describe('createArtifactUrlSigner', () => {
 
   it('signs for a longer lifetime when asked to', async () => {
     const signer = signerOver();
-    const query = queryOf(await signer.signedPath('abc', 600));
+    const query = queryOf(await signer.signedPath('abc', { lifetimeSeconds: 600 }));
 
     advance(599 * 1000);
     await expect(signer.verify('abc', query)).resolves.toBe(true);
 
     advance(1000);
     await expect(signer.verify('abc', query)).resolves.toBe(false);
+  });
+
+  it('gives every embed signing in the same five minutes the same URL', async () => {
+    const signer = signerOver();
+    const atStart = await signer.signedPath('abc', EMBED_URL_EXPIRY);
+
+    advance(299 * 1000);
+    const atEnd = await signer.signedPath('abc', EMBED_URL_EXPIRY);
+    advance(1000);
+    const inNextWindow = await signer.signedPath('abc', EMBED_URL_EXPIRY);
+
+    expect(atEnd).toBe(atStart);
+    expect(inNextWindow).not.toBe(atStart);
+  });
+
+  it('keeps an embed URL working for 10 to 15 minutes, into the next hour', async () => {
+    // Whether a URL signed at `signedAt` still works 10 and 15 minutes on.
+    async function verdictsFor(signedAt: string): Promise<boolean[]> {
+      now = new Date(signedAt);
+      const signer = signerOver();
+      const query = queryOf(await signer.signedPath('abc', EMBED_URL_EXPIRY));
+      advance(10 * 60_000);
+      const afterTen = await signer.verify('abc', query);
+      advance(5 * 60_000);
+      return [afterTen, await signer.verify('abc', query)];
+    }
+
+    // The first and the last second of the clock hour's last five minutes.
+    await expect(verdictsFor('2026-09-29T12:55:00.000Z')).resolves.toEqual([true, false]);
+    await expect(verdictsFor('2026-09-29T12:59:59.000Z')).resolves.toEqual([true, false]);
   });
 
   it('grants nothing for another artifact', async () => {
@@ -188,7 +219,7 @@ describe('createArtifactUrlSigner', () => {
   it('keeps a URL signed just before the hour working into the next hour', async () => {
     now = new Date(Math.ceil(SIGNED_AT.getTime() / HOUR_MS) * HOUR_MS - 60_000);
     const signer = signerOver();
-    const query = queryOf(await signer.signedPath('abc', 600));
+    const query = queryOf(await signer.signedPath('abc', { lifetimeSeconds: 600 }));
 
     advance(5 * 60_000);
     await expect(signer.verify('abc', query)).resolves.toBe(true);
@@ -199,7 +230,11 @@ describe('createArtifactUrlSigner', () => {
 
   it('refuses a URL signed two hours back, whatever its expiry says', async () => {
     const signer = signerOver();
-    const query = queryOf(await signer.signedPath('abc', 3 * SIGNING_KEY_BUCKET_SECONDS));
+    const query = queryOf(
+      await signer.signedPath('abc', {
+        lifetimeSeconds: 3 * SIGNING_KEY_BUCKET_SECONDS,
+      }),
+    );
 
     advance(HOUR_MS);
     await expect(signer.verify('abc', query)).resolves.toBe(true);
