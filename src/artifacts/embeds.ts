@@ -258,34 +258,34 @@ export function extractEmbedReferences(html: string, publicBaseUrl: string): Emb
 // an attribute value, calling `signedPath` once per distinct id. A reference
 // that does not match the text at its position is left alone, so a stale
 // template can never corrupt the page.
-export function substituteEmbedReferences(
+export async function substituteEmbedReferences(
   html: string,
   references: readonly EmbedReference[],
-  signedPath: (id: string) => string,
-): string {
-  const signed = new Map<string, string>();
-  function escapedSignedPath(id: string): string {
-    let path = signed.get(id);
-    if (path === undefined) {
-      path = signedPath(id).replaceAll('&', '&amp;');
-      signed.set(id, path);
-    }
-    return path;
-  }
-  let result = '';
-  let copied = 0;
-  for (const { id, start } of references) {
-    const path = `/a/${id}`;
-    const after = html[start + path.length];
+  signedPath: (id: string) => Promise<string>,
+): Promise<string> {
+  const matching: EmbedReference[] = [];
+  let matchedUpTo = 0;
+  for (const reference of references) {
+    const path = `/a/${reference.id}`;
+    const after = html[reference.start + path.length];
     if (
-      start < copied ||
-      !html.startsWith(path, start) ||
+      reference.start < matchedUpTo ||
+      !html.startsWith(path, reference.start) ||
       (after !== undefined && /[A-Za-z0-9_-]/u.test(after))
     ) {
       continue;
     }
-    result += html.slice(copied, start) + escapedSignedPath(id);
-    copied = start + path.length;
+    matching.push(reference);
+    matchedUpTo = reference.start + path.length;
+  }
+  const ids = [...new Set(matching.map(({ id }) => id))];
+  const paths = await Promise.all(ids.map(async (id) => signedPath(id)));
+  const signed = new Map(ids.map((id, index) => [id, paths[index]!.replaceAll('&', '&amp;')]));
+  let result = '';
+  let copied = 0;
+  for (const { id, start } of matching) {
+    result += html.slice(copied, start) + signed.get(id)!;
+    copied = start + `/a/${id}`.length;
   }
   return result + html.slice(copied);
 }

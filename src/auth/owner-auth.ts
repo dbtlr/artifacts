@@ -23,8 +23,10 @@ export type CreatedApiKey = { id: string; key: string };
 
 export type OwnerAuth = {
   // Signed URLs that read one artifact without a session, for the thumbnail
-  // renderer and for the artifacts an HTML artifact embeds. The key is random per process, so a restart voids every
-  // outstanding URL, and no signature can reveal anything about the password.
+  // renderer and for the artifacts an HTML artifact embeds. Their keys are
+  // random, one per hour, and kept in the store, so every process that
+  // shares the database accepts them and no signature can reveal anything
+  // about the password.
   artifactUrls: ArtifactUrlSigner;
   createApiKey: (name: string) => Promise<CreatedApiKey>;
   hasApiKey: (key: string | undefined) => Promise<boolean>;
@@ -153,7 +155,7 @@ export function createOwnerAuth({
   }
 
   return {
-    artifactUrls: createArtifactUrlSigner({ key: randomBytes(32), now }),
+    artifactUrls: createArtifactUrlSigner({ keys: store, now }),
     createApiKey,
     hasApiKey,
     hasSession,

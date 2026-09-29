@@ -52,3 +52,6 @@ reuse it.
 
 - 2026-09-29: [ADR-0003](0003-signed-embed-urls.md) signs embedded URLs in HTML artifacts with this
   signer. They last 10 minutes; the caller now picks a lifetime, and thumbnails keep 60 seconds.
+- 2026-09-29: [ADR-0004](0004-hourly-url-signing-keys.md) replaces the per-process key with one
+  random key per clock hour, stored in the database. A restart no longer voids outstanding URLs,
+  and the consequence above about a shared key no longer holds.

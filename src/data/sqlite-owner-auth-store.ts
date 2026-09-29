@@ -5,9 +5,10 @@ import { runSqliteMigrations } from './sqlite-migrations.js';
 
 const SQLITE_BUSY_TIMEOUT_MS = 1_000;
 
-// Owner sessions, login attempts, and API keys, in the same database file as
-// the artifact metadata. It opens its own connection; the migration runner's
-// write lock makes opening both connections safe in either order.
+// Owner sessions, login attempts, API keys, and URL signing keys, in the
+// same database file as the artifact metadata. It opens its own connection;
+// the migration runner's write lock makes opening both connections safe in
+// either order.
 export class SqliteOwnerAuthStore implements OwnerAuthStore {
   private readonly database: DatabaseSync;
 
@@ -91,5 +92,26 @@ export class SqliteOwnerAuthStore implements OwnerAuthStore {
 
   async removeApiKey(id: string): Promise<void> {
     this.database.prepare('DELETE FROM api_keys WHERE id = ?').run(id);
+  }
+
+  async createUrlSigningKey(bucket: number, key: string): Promise<string> {
+    this.database.prepare('DELETE FROM url_signing_keys WHERE bucket < ?').run(bucket - 1);
+    this.database
+      .prepare(
+        'INSERT INTO url_signing_keys (bucket, signing_key) VALUES (?, ?) ON CONFLICT DO NOTHING',
+      )
+      .run(bucket, key);
+    const stored = await this.findUrlSigningKey(bucket);
+    if (stored === null) {
+      throw new Error(`The URL signing key for bucket ${String(bucket)} was not stored`);
+    }
+    return stored;
+  }
+
+  async findUrlSigningKey(bucket: number): Promise<string | null> {
+    const record = this.database
+      .prepare('SELECT signing_key FROM url_signing_keys WHERE bucket = ?')
+      .get(bucket);
+    return record === undefined ? null : String(record.signing_key);
   }
 }

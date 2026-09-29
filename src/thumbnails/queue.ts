@@ -21,7 +21,7 @@ type ThumbnailQueueDeps = {
   // The path the renderer opens for an artifact, called at render time. With
   // owner auth on it is a signed path, so it is made just before each render
   // and cannot expire while waiting in the queue.
-  artifactPath?: (id: string) => string;
+  artifactPath?: (id: string) => Promise<string>;
   // Fresh metadata at render time: an artifact removed while it was waiting
   // is skipped.
   lookup: (id: string) => Promise<Artifact | null>;
@@ -43,7 +43,7 @@ function describe(error: unknown): string {
 // Every failure (lookup, renderer, store) is reported and the queue moves on:
 // nothing here may reject into the caller or become an unhandled rejection.
 export function createThumbnailQueue({
-  artifactPath = (id) => `/a/${id}`,
+  artifactPath = async (id) => `/a/${id}`,
   lookup,
   report = defaultReport,
   store,
@@ -65,7 +65,7 @@ export function createThumbnailQueue({
       const bytes = await renderer.render({
         id,
         mediaType: artifact.mediaType,
-        url: `${baseUrl}${artifactPath(id)}`,
+        url: `${baseUrl}${await artifactPath(id)}`,
       });
       // Removed while rendering: the remove hook already dropped the old
       // file, so writing now would leave an orphan behind.
