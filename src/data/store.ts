@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+import { createKeyedLane } from '../artifacts/keyed-lane.js';
 import { legacyTypeFromMediaType, mediaTypeFromLegacyType } from '../artifacts/media.js';
 import { createArtifactService } from '../artifacts/service.js';
 import type {
@@ -8,7 +9,9 @@ import type {
   ArtifactService,
   ArtifactStore,
   ArtifactWithContent,
+  FromCurrent,
   LegacyArtifact,
+  UpdateArtifactInput,
 } from '../artifacts/types.js';
 import { resolveStoragePaths } from '../data-dir.js';
 import type { StoragePaths } from '../data-dir.js';
@@ -37,6 +40,10 @@ function toLegacyArtifact(artifact: Artifact) {
   return { ...metadataFields, type };
 }
 
+function isLegacyText(artifact: Artifact): boolean {
+  return legacyTypeFromMediaType(artifact.mediaType) !== undefined;
+}
+
 function fromLegacyArtifact(artifact: LegacyArtifact): Artifact {
   const { type, ...metadata } = artifact;
   return { ...metadata, mediaType: mediaTypeFromLegacyType(type) };
@@ -45,18 +52,65 @@ function fromLegacyArtifact(artifact: LegacyArtifact): Artifact {
 // Preserve createApp(store)'s established one-argument embedding API. Its MCP
 // surface remains text-only, as the supplied legacy store is, but both the UI
 // and MCP operate on the same caller-owned data rather than silently splitting
-// across that store and the process default.
+// across that store and the process default. The supplied store has no
+// per-artifact ordering of its own, so this adapter runs each update and
+// remove in a per-artifact lane: a FromCurrent decision reads and writes
+// without another adapter operation in between. The lane orders operations
+// through this adapter within this process only; writes that reach the
+// supplied store another way can still interleave.
 export function adaptLegacyArtifactStore(store: ArtifactStore): ArtifactService {
-  const get = (id: string): ArtifactWithContent | null => {
-    const artifact = store.getArtifact(id);
+  const lane = createKeyedLane();
+  const findArtifact = async (id: string): Promise<Artifact | null> => {
+    const artifact = (await store.listArtifacts()).find((candidate) => candidate.id === id);
+    return artifact === undefined ? null : fromLegacyArtifact(artifact);
+  };
+  const resolvePatch = async (
+    id: string,
+    patchOrPlan: UpdateArtifactInput | FromCurrent<UpdateArtifactInput | null>,
+  ): Promise<UpdateArtifactInput | null> => {
+    if (typeof patchOrPlan !== 'function') {
+      return patchOrPlan;
+    }
+    const current = await findArtifact(id);
+    return current === null ? null : patchOrPlan(current);
+  };
+  const get = async (id: string): Promise<ArtifactWithContent | null> => {
+    const artifact = await store.getArtifact(id);
     if (artifact === null) {
       return null;
     }
     const { content, ...metadata } = artifact;
     return { ...fromLegacyArtifact(metadata), content: new TextEncoder().encode(content) };
   };
+  const update = async (
+    id: string,
+    patchOrPlan: UpdateArtifactInput | FromCurrent<UpdateArtifactInput | null>,
+  ): Promise<Artifact | null> => {
+    const patch = await resolvePatch(id, patchOrPlan);
+    if (patch === null) {
+      return null;
+    }
+    const type =
+      patch.mediaType === undefined ? undefined : legacyTypeFromMediaType(patch.mediaType);
+    if (patch.mediaType !== undefined && type === undefined) {
+      throw new Error('This configured artifact store only supports text media types');
+    }
+    if (patch.collection !== undefined || patch.filename !== undefined) {
+      throw new Error('This configured artifact store does not support collection or filename');
+    }
+    const updated = await store.updateArtifact(id, {
+      ...(patch.content === undefined
+        ? {}
+        : { content: new TextDecoder('utf-8', { fatal: true }).decode(patch.content) }),
+      ...(patch.description === undefined ? {} : { description: patch.description }),
+      ...(patch.project === undefined ? {} : { project: patch.project }),
+      ...(patch.title === undefined ? {} : { title: patch.title }),
+      ...(type === undefined ? {} : { type }),
+    });
+    return updated === null ? null : fromLegacyArtifact(updated);
+  };
   return {
-    createArtifact: (input) => {
+    createArtifact: async (input) => {
       const type = legacyTypeFromMediaType(input.mediaType);
       if (type === undefined) {
         throw new Error('This configured artifact store only supports text media types');
@@ -65,7 +119,7 @@ export function adaptLegacyArtifactStore(store: ArtifactStore): ArtifactService 
         throw new Error('This configured artifact store does not support collection or filename');
       }
       return fromLegacyArtifact(
-        store.createArtifact({
+        await store.createArtifact({
           content: new TextDecoder('utf-8', { fatal: true }).decode(input.content),
           description: input.description,
           project: input.project,
@@ -74,33 +128,20 @@ export function adaptLegacyArtifactStore(store: ArtifactStore): ArtifactService 
         }),
       );
     },
-    findArtifact: (id) => {
-      const artifact = store.listArtifacts().find((candidate) => candidate.id === id);
-      return artifact === undefined ? null : fromLegacyArtifact(artifact);
-    },
+    findArtifact,
     getArtifact: get,
-    listArtifacts: (query) => store.listArtifacts(query).map(fromLegacyArtifact),
-    removeArtifact: (id) => store.removeArtifact(id),
-    updateArtifact: (id, patch) => {
-      const type =
-        patch.mediaType === undefined ? undefined : legacyTypeFromMediaType(patch.mediaType);
-      if (patch.mediaType !== undefined && type === undefined) {
-        throw new Error('This configured artifact store only supports text media types');
-      }
-      if (patch.collection !== undefined || patch.filename !== undefined) {
-        throw new Error('This configured artifact store does not support collection or filename');
-      }
-      const updated = store.updateArtifact(id, {
-        ...(patch.content === undefined
-          ? {}
-          : { content: new TextDecoder('utf-8', { fatal: true }).decode(patch.content) }),
-        ...(patch.description === undefined ? {} : { description: patch.description }),
-        ...(patch.project === undefined ? {} : { project: patch.project }),
-        ...(patch.title === undefined ? {} : { title: patch.title }),
-        ...(type === undefined ? {} : { type }),
-      });
-      return updated === null ? null : fromLegacyArtifact(updated);
-    },
+    listArtifacts: async (query) => (await store.listArtifacts(query)).map(fromLegacyArtifact),
+    removeArtifact: (id, when) =>
+      lane.run(id, async () => {
+        if (when !== undefined) {
+          const current = await findArtifact(id);
+          if (current === null || !when(current)) {
+            return false;
+          }
+        }
+        return store.removeArtifact(id);
+      }),
+    updateArtifact: (id, patchOrPlan) => lane.run(id, () => update(id, patchOrPlan)),
   };
 }
 
@@ -126,19 +167,19 @@ export async function createArtifactStore({
 
 export function legacyArtifactStoreFromService(service: ArtifactService): ArtifactStore {
   return {
-    createArtifact: (input) => {
+    createArtifact: async (input) => {
       const { content: text, type, ...metadataFields } = input;
       assertLegacyType(type);
       return toLegacyArtifact(
-        service.createArtifact({
+        await service.createArtifact({
           ...metadataFields,
           content: new TextEncoder().encode(text),
           mediaType: mediaTypeFromLegacyType(type),
         }),
       )!;
     },
-    getArtifact: (id) => {
-      const artifact = service.getArtifact(id);
+    getArtifact: async (id) => {
+      const artifact = await service.getArtifact(id);
       if (artifact === null) {
         return null;
       }
@@ -152,32 +193,26 @@ export function legacyArtifactStoreFromService(service: ArtifactService): Artifa
         content: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
       };
     },
-    listArtifacts: (query) =>
-      service
-        .listArtifacts(query)
+    listArtifacts: async (query) =>
+      (await service.listArtifacts(query))
         .map(toLegacyArtifact)
         .filter((artifact) => artifact !== null),
-    removeArtifact: (id) => {
-      const artifact = service.findArtifact(id);
-      if (artifact === null || legacyTypeFromMediaType(artifact.mediaType) === undefined) {
-        return false;
-      }
-      return service.removeArtifact(id);
-    },
-    updateArtifact: (id, patch) => {
+    removeArtifact: (id) => service.removeArtifact(id, isLegacyText),
+    updateArtifact: async (id, patch) => {
       const { content: text, type, ...metadataFields } = patch;
       if (type !== undefined) {
         assertLegacyType(type);
       }
-      const existing = service.findArtifact(id);
-      if (existing === null || legacyTypeFromMediaType(existing.mediaType) === undefined) {
-        return null;
-      }
-      const updated = service.updateArtifact(id, {
-        ...metadataFields,
-        ...(text === undefined ? {} : { content: new TextEncoder().encode(text) }),
-        ...(type === undefined ? {} : { mediaType: mediaTypeFromLegacyType(type) }),
-      });
+      // Text-only view: a binary artifact is invisible here, as if missing.
+      const updated = await service.updateArtifact(id, (current) =>
+        isLegacyText(current)
+          ? {
+              ...metadataFields,
+              ...(text === undefined ? {} : { content: new TextEncoder().encode(text) }),
+              ...(type === undefined ? {} : { mediaType: mediaTypeFromLegacyType(type) }),
+            }
+          : null,
+      );
       return updated === null ? null : toLegacyArtifact(updated);
     },
   };

@@ -1,12 +1,15 @@
 import { nanoid } from 'nanoid';
 
+import { createKeyedLane } from './keyed-lane.js';
 import { hasValidSignature, isMediaType, MAX_ARTIFACT_BYTES, mediaDefinition } from './media.js';
 import type {
   Artifact,
   ArtifactContentStore,
   ArtifactMetadataStore,
   ArtifactService,
+  ArtifactWithContent,
   CreateArtifactInput,
+  FromCurrent,
   MediaType,
   UpdateArtifactInput,
 } from './types.js';
@@ -95,45 +98,40 @@ function reportCleanupFailure(action: string, error: unknown): void {
   }
 }
 
-function runRollback(action: string, rollback: (() => void) | undefined): void {
+async function runRollback(
+  action: string,
+  rollback: (() => Promise<void>) | undefined,
+): Promise<void> {
   if (rollback === undefined) {
     return;
   }
   try {
-    rollback();
+    await rollback();
   } catch (error) {
     reportCleanupFailure(`${action} rollback`, error);
   }
 }
 
+// Every operation that reads and then writes, or touches both stores, runs
+// in its artifact's lane: create, update, and remove change content and
+// metadata in a fixed order with compensating rollback, awaiting each step,
+// and get reads metadata then content. The lane keeps another operation on
+// the same artifact from running between those steps. It orders operations
+// within this service instance only; it cannot coordinate other processes
+// sharing the same stores, which need their own consistency design.
+// Single metadata reads (find, list) stay outside it.
 export function createArtifactService(
   metadata: ArtifactMetadataStore,
   content: ArtifactContentStore,
 ): ArtifactService {
-  function generateId(): string {
-    for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt += 1) {
-      const id = nanoid(ID_LENGTH);
-      if (!metadata.find(id)) {
-        return id;
-      }
-    }
-    throw new Error(
-      `Failed to generate a unique artifact id after ${String(MAX_ID_ATTEMPTS)} attempts`,
-    );
-  }
+  const lane = createKeyedLane();
 
-  function createArtifact(input: CreateArtifactInput): Artifact {
-    assertValidMediaType(input.mediaType);
-    assertNonBlank('title', input.title);
-    assertNonBlank('project', input.project);
-    assertNonBlank('description', input.description);
-    if (input.collection !== undefined) {
-      assertNonBlank('collection', input.collection);
+  // Stores the artifact under a fresh id. Checking that the id is unused and
+  // writing it happen in that id's lane; a taken id resolves null.
+  async function storeUnderId(id: string, input: CreateArtifactInput): Promise<Artifact | null> {
+    if (await metadata.find(id)) {
+      return null;
     }
-    assertValidFilename(input.mediaType, input.filename);
-    assertValidContent(input.mediaType, input.content);
-
-    const id = generateId();
     const now = new Date().toISOString();
     const artifact: Artifact = {
       ...(input.collection === undefined ? {} : { collection: input.collection }),
@@ -147,12 +145,12 @@ export function createArtifactService(
       updatedAt: now,
     };
 
-    content.write(id, input.mediaType, input.content);
+    await content.write(id, input.mediaType, input.content);
     try {
-      metadata.create(artifact);
+      await metadata.create(artifact);
     } catch (error) {
       try {
-        content.remove(id, input.mediaType);
+        await content.remove(id, input.mediaType);
       } catch (cleanupError) {
         reportCleanupFailure('create', cleanupError);
       }
@@ -161,16 +159,48 @@ export function createArtifactService(
     return artifact;
   }
 
-  function getArtifact(id: string) {
-    const artifact = metadata.find(id);
-    return artifact === null
-      ? null
-      : { ...artifact, content: content.read(id, artifact.mediaType) };
+  // Tries up to MAX_ID_ATTEMPTS fresh ids, one at a time.
+  async function storeNew(input: CreateArtifactInput, attempt = 0): Promise<Artifact> {
+    if (attempt >= MAX_ID_ATTEMPTS) {
+      throw new Error(
+        `Failed to generate a unique artifact id after ${String(MAX_ID_ATTEMPTS)} attempts`,
+      );
+    }
+    const id = nanoid(ID_LENGTH);
+    const created = await lane.run(id, () => storeUnderId(id, input));
+    return created ?? storeNew(input, attempt + 1);
   }
 
-  function updateArtifact(id: string, patch: UpdateArtifactInput): Artifact | null {
-    const previous = metadata.find(id);
+  async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
+    assertValidMediaType(input.mediaType);
+    assertNonBlank('title', input.title);
+    assertNonBlank('project', input.project);
+    assertNonBlank('description', input.description);
+    if (input.collection !== undefined) {
+      assertNonBlank('collection', input.collection);
+    }
+    assertValidFilename(input.mediaType, input.filename);
+    assertValidContent(input.mediaType, input.content);
+    return storeNew(input);
+  }
+
+  async function getArtifact(id: string): Promise<ArtifactWithContent | null> {
+    const artifact = await metadata.find(id);
+    return artifact === null
+      ? null
+      : { ...artifact, content: await content.read(id, artifact.mediaType) };
+  }
+
+  async function updateArtifact(
+    id: string,
+    patchOrPlan: UpdateArtifactInput | FromCurrent<UpdateArtifactInput | null>,
+  ): Promise<Artifact | null> {
+    const previous = await metadata.find(id);
     if (!previous) {
+      return null;
+    }
+    const patch = typeof patchOrPlan === 'function' ? patchOrPlan(previous) : patchOrPlan;
+    if (patch === null) {
       return null;
     }
     const nextMediaType = patch.mediaType ?? previous.mediaType;
@@ -214,45 +244,47 @@ export function createArtifactService(
       updatedAt: new Date().toISOString(),
     };
 
-    let rollbackContent: (() => void) | undefined;
+    let rollbackContent: (() => Promise<void>) | undefined;
     if (patch.content !== undefined) {
-      const previousBytes = content.read(id, previous.mediaType);
-      content.write(id, next.mediaType, patch.content);
-      rollbackContent = () => {
-        content.write(id, previous.mediaType, previousBytes);
+      const previousBytes = await content.read(id, previous.mediaType);
+      await content.write(id, next.mediaType, patch.content);
+      rollbackContent = async () => {
+        await content.write(id, previous.mediaType, previousBytes);
         if (next.mediaType !== previous.mediaType) {
-          content.remove(id, next.mediaType);
+          await content.remove(id, next.mediaType);
         }
       };
       if (next.mediaType !== previous.mediaType) {
         try {
-          content.remove(id, previous.mediaType);
+          await content.remove(id, previous.mediaType);
         } catch (error) {
-          runRollback('update', () => content.remove(id, next.mediaType));
+          await runRollback('update', async () => {
+            await content.remove(id, next.mediaType);
+          });
           throw error;
         }
       }
     }
 
     try {
-      if (!metadata.update(next)) {
-        runRollback('update', rollbackContent);
+      if (!(await metadata.update(next))) {
+        await runRollback('update', rollbackContent);
         return null;
       }
     } catch (error) {
-      runRollback('update', rollbackContent);
+      await runRollback('update', rollbackContent);
       throw error;
     }
     return next;
   }
 
-  function removeArtifact(id: string): boolean {
-    const artifact = metadata.find(id);
-    if (!artifact || !metadata.remove(id)) {
+  async function removeArtifact(id: string, when?: FromCurrent<boolean>): Promise<boolean> {
+    const artifact = await metadata.find(id);
+    if (!artifact || (when !== undefined && !when(artifact)) || !(await metadata.remove(id))) {
       return false;
     }
     try {
-      content.remove(id, artifact.mediaType);
+      await content.remove(id, artifact.mediaType);
     } catch (error) {
       reportCleanupFailure('remove', error);
     }
@@ -262,9 +294,9 @@ export function createArtifactService(
   return {
     createArtifact,
     findArtifact: (id) => metadata.find(id),
-    getArtifact,
+    getArtifact: (id) => lane.run(id, () => getArtifact(id)),
     listArtifacts: (query) => metadata.list(query),
-    removeArtifact,
-    updateArtifact,
+    removeArtifact: (id, when) => lane.run(id, () => removeArtifact(id, when)),
+    updateArtifact: (id, patch) => lane.run(id, () => updateArtifact(id, patch)),
   };
 }

@@ -71,12 +71,12 @@ describe('SQLite migrations', () => {
 
     const store = await SqliteArtifactMetadataStore.open(databasePath);
 
-    expect(store.find('legacy')).toMatchObject({
+    await expect(store.find('legacy')).resolves.toMatchObject({
       id: 'legacy',
       mediaType: 'text/plain',
       title: 'Legacy',
     });
-    expect(store.list().map(({ id }) => id)).toEqual(['legacy-second', 'legacy']);
+    expect((await store.list()).map(({ id }) => id)).toEqual(['legacy-second', 'legacy']);
     const database = new DatabaseSync(databasePath);
     expect(database.prepare('SELECT COUNT(*) AS count FROM artifact_migrations').get()).toEqual({
       count: 2,

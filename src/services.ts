@@ -29,9 +29,7 @@ async function createDefaultAppServices(): Promise<DefaultAppServices> {
     const thumbnailQueue = createThumbnailQueue({ lookup: base.findArtifact, store: thumbnails });
     const artifacts = withThumbnails(base, {
       enqueue: thumbnailQueue.enqueue,
-      remove: (id) => {
-        thumbnails.remove(id);
-      },
+      remove: (id) => thumbnails.remove(id),
     });
     return { artifacts, mcp: artifacts, thumbnailQueue, thumbnails };
   } catch (error) {

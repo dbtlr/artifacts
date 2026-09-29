@@ -1,6 +1,9 @@
 import type { ArtifactService } from '../artifacts/types.js';
 
-export type ThumbnailHooks = { enqueue: (id: string) => void; remove: (id: string) => void };
+export type ThumbnailHooks = {
+  enqueue: (id: string) => void;
+  remove: (id: string) => Promise<void>;
+};
 
 // Decorates the artifact service so previews follow the artifact lifecycle:
 // a successful create or update queues a render, a successful remove drops
@@ -9,20 +12,20 @@ export type ThumbnailHooks = { enqueue: (id: string) => void; remove: (id: strin
 export function withThumbnails(service: ArtifactService, hooks: ThumbnailHooks): ArtifactService {
   return {
     ...service,
-    createArtifact: (input) => {
-      const created = service.createArtifact(input);
+    createArtifact: async (input) => {
+      const created = await service.createArtifact(input);
       hooks.enqueue(created.id);
       return created;
     },
-    removeArtifact: (id) => {
-      const removed = service.removeArtifact(id);
+    removeArtifact: async (id, when) => {
+      const removed = await service.removeArtifact(id, when);
       if (removed) {
-        hooks.remove(id);
+        await hooks.remove(id);
       }
       return removed;
     },
-    updateArtifact: (id, patch) => {
-      const updated = service.updateArtifact(id, patch);
+    updateArtifact: async (id, patch) => {
+      const updated = await service.updateArtifact(id, patch);
       if (updated !== null) {
         hooks.enqueue(updated.id);
       }

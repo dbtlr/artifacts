@@ -17,13 +17,24 @@ const chromiumPath = await resolveChromiumPath(process.env);
 const renderer = createPlaywrightRenderer({ executablePath: chromiumPath });
 const app = createApp(services);
 
+// Previews are screenshots of this server's own pages, so rendering can
+// only start once the port is bound. Backfill covers artifacts uploaded
+// before previews existed (or whose preview files were lost). Any failure
+// here is fatal, so this reports and exits rather than rejecting.
+async function startThumbnails(boundPort: number): Promise<void> {
+  try {
+    services.thumbnailQueue.start(renderer, `http://127.0.0.1:${String(boundPort)}`);
+    await services.thumbnailQueue.backfill(await services.artifacts.listArtifacts());
+  } catch (error) {
+    const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+    process.stderr.write(`Artifacts failed to start thumbnails: ${detail}\n`);
+    process.exit(1);
+  }
+}
+
 const server = serve({ fetch: app.fetch, port }, (info) => {
   process.stdout.write(`Artifacts listening on http://localhost:${String(info.port)}\n`);
-  // Previews are screenshots of this server's own pages, so rendering can
-  // only start once the port is bound. Backfill covers artifacts uploaded
-  // before previews existed (or whose preview files were lost).
-  services.thumbnailQueue.start(renderer, `http://127.0.0.1:${String(info.port)}`);
-  services.thumbnailQueue.backfill(services.artifacts.listArtifacts());
+  void startThumbnails(info.port);
 });
 
 // The renderer opts out of Playwright's own signal handling (which would

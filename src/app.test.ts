@@ -70,14 +70,14 @@ describe('homepage and project list', () => {
     });
 
     it('lists all artifacts newest-first with links to /a/:id and /p/:project', async () => {
-      const first = store.createArtifact({
+      const first = await store.createArtifact({
         content: 'a',
         description: 'First one',
         project: 'artifacts',
         title: 'First',
         type: 'txt',
       });
-      const second = store.createArtifact({
+      const second = await store.createArtifact({
         content: 'b',
         description: 'Second one',
         project: 'side project',
@@ -105,7 +105,7 @@ describe('homepage and project list', () => {
     });
 
     it('escapes HTML-ish title, project, and description text', async () => {
-      store.createArtifact({
+      await store.createArtifact({
         content: 'x',
         description: '<img src=x onerror=alert(1)>',
         project: '<b>bold project</b>',
@@ -127,14 +127,14 @@ describe('homepage and project list', () => {
 
   describe('get /p/:project', () => {
     it('filters to the given project and decodes a url-encoded project name', async () => {
-      const inProject = store.createArtifact({
+      const inProject = await store.createArtifact({
         content: 'a',
         description: 'In the target project',
         project: 'side project',
         title: 'In Project',
         type: 'txt',
       });
-      const otherProject = store.createArtifact({
+      const otherProject = await store.createArtifact({
         content: 'b',
         description: 'In a different project',
         project: 'other',
@@ -153,7 +153,7 @@ describe('homepage and project list', () => {
     });
 
     it('filters to a project name containing a slash', async () => {
-      const nested = store.createArtifact({
+      const nested = await store.createArtifact({
         content: 'a',
         description: 'Nested project',
         project: 'team/sub-project',
@@ -169,7 +169,7 @@ describe('homepage and project list', () => {
     });
 
     it('links back to all artifacts and shows the project name in the header', async () => {
-      store.createArtifact({
+      await store.createArtifact({
         content: 'a',
         description: 'd',
         project: 'artifacts',
@@ -217,7 +217,7 @@ describe('get /a/:id', () => {
 
   it('serves an html artifact verbatim, with no layout wrapper', async () => {
     const htmlContent = '<!doctype html><html><body><h1>Hi</h1></body></html>';
-    const artifact = store.createArtifact({
+    const artifact = await store.createArtifact({
       content: htmlContent,
       description: 'A raw html doc',
       project: 'display-route',
@@ -234,7 +234,7 @@ describe('get /a/:id', () => {
   });
 
   it('renders an md artifact inside the layout, with content escaped', async () => {
-    const artifact = store.createArtifact({
+    const artifact = await store.createArtifact({
       content: '# Heading\n\n<script>alert("xss")</script>\n\n```ts\nconst x = 1;\n```\n',
       description: 'Has a script tag',
       project: 'display-route',
@@ -266,7 +266,7 @@ describe('get /a/:id', () => {
   });
 
   it('renders a mermaid fence as a client-rendered diagram and links the mermaid script', async () => {
-    const artifact = store.createArtifact({
+    const artifact = await store.createArtifact({
       content: '# Diagram\n\n```mermaid\nflowchart TD\n  A --> B\n```\n',
       description: 'Has a mermaid diagram',
       project: 'display-route',
@@ -283,7 +283,7 @@ describe('get /a/:id', () => {
   });
 
   it('does not link the mermaid script on an md page with no mermaid fence', async () => {
-    const artifact = store.createArtifact({
+    const artifact = await store.createArtifact({
       content: '# No Diagram\n\nJust text and a ```ts\nconst x = 1;\n``` fence.\n',
       description: 'No mermaid here',
       project: 'display-route',
@@ -298,7 +298,7 @@ describe('get /a/:id', () => {
   });
 
   it('renders a table of contents between the metadata header and the content for 2+ headings', async () => {
-    const artifact = store.createArtifact({
+    const artifact = await store.createArtifact({
       content: '# Title\n\n## Section One\n\ntext\n\n## Section Two\n\nmore text\n',
       description: 'Has multiple headings',
       project: 'display-route',
@@ -322,7 +322,7 @@ describe('get /a/:id', () => {
   });
 
   it('omits the table of contents for an md page with fewer than 2 headings', async () => {
-    const artifact = store.createArtifact({
+    const artifact = await store.createArtifact({
       content: '# Only Heading\n\nJust one heading and some text.\n',
       description: 'Single heading',
       project: 'display-route',
@@ -337,7 +337,7 @@ describe('get /a/:id', () => {
   });
 
   it('renders a txt artifact inside the layout, with content escaped', async () => {
-    const artifact = store.createArtifact({
+    const artifact = await store.createArtifact({
       content: 'plain text with a <tag> in it',
       description: 'Has an angle-bracket tag',
       project: 'display-route',
@@ -365,11 +365,11 @@ describe('get /a/:id', () => {
     expect(body).toContain('does-not-exist');
   });
 
-  // store.getArtifact deliberately throws when a row's content file is
-  // missing (see store.ts) — a corrupt-store signal, not an ordinary "not
+  // getArtifact deliberately rejects when a row's content file is missing
+  // (see artifacts/service.ts) — a corrupt-store signal, not an ordinary "not
   // found". The route must let that propagate as a 500, not mask it as a 404.
   it('surfaces a corrupt store (row present, content file missing) as a 500', async () => {
-    const artifact = store.createArtifact({
+    const artifact = await store.createArtifact({
       content: 'will be deleted out from under the row',
       description: 'Simulates a corrupt store',
       project: 'display-route',
@@ -419,7 +419,7 @@ describe('binary artifacts in browser routes', () => {
   }
 
   it('lists binary artifacts with their minimal metadata and stable URL', async () => {
-    const artifact = createBinary(
+    const artifact = await createBinary(
       Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
       'image/png',
       'preview.png',
@@ -441,7 +441,7 @@ describe('binary artifacts in browser routes', () => {
 
   it('serves allowlisted image bytes with inline, sniffing, and revalidation headers', async () => {
     const bytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
-    const artifact = createBinary(bytes, 'image/png', 'preview image.png');
+    const artifact = await createBinary(bytes, 'image/png', 'preview image.png');
 
     const res = await testApp.request(`/a/${artifact.id}`);
 
@@ -469,7 +469,7 @@ describe('binary artifacts in browser routes', () => {
   ] as const)(
     'serves allowlisted %s bytes with canonical response headers',
     async (_name, bytes, mediaType, filename) => {
-      const artifact = service.createArtifact({
+      const artifact = await service.createArtifact({
         content: bytes,
         description: 'Browser binary fixture',
         filename,
@@ -490,7 +490,7 @@ describe('binary artifacts in browser routes', () => {
   );
 
   it('uses an ASCII fallback and RFC 5987 encoding for non-ASCII filenames', async () => {
-    const artifact = createBinary(
+    const artifact = await createBinary(
       Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
       'image/png',
       "雪!draft(1)*'.png",
@@ -505,7 +505,7 @@ describe('binary artifacts in browser routes', () => {
   });
 
   it('returns 304 without a body when If-None-Match contains the current ETag', async () => {
-    const artifact = createBinary(
+    const artifact = await createBinary(
       new TextEncoder().encode('%PDF-1.7\nfixture'),
       'application/pdf',
       'report.pdf',
@@ -525,7 +525,7 @@ describe('binary artifacts in browser routes', () => {
 
   it('answers HEAD with GET-equivalent headers and no body', async () => {
     const bytes = new TextEncoder().encode('%PDF-1.7\nfixture');
-    const artifact = createBinary(bytes, 'application/pdf', 'report.pdf');
+    const artifact = await createBinary(bytes, 'application/pdf', 'report.pdf');
 
     const get = await testApp.request(`/a/${artifact.id}`);
     const head = await testApp.request(`/a/${artifact.id}`, { method: 'HEAD' });
@@ -541,11 +541,11 @@ describe('binary artifacts in browser routes', () => {
   it('preserves the URL while an update changes the bytes and ETag', async () => {
     const initial = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 1]);
     const replacement = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 2]);
-    const artifact = createBinary(initial, 'image/png', 'preview.png');
+    const artifact = await createBinary(initial, 'image/png', 'preview.png');
     const first = await testApp.request(`/a/${artifact.id}`);
     const firstEtag = first.headers.get('etag');
 
-    const updated = service.updateArtifact(artifact.id, { content: replacement });
+    const updated = await service.updateArtifact(artifact.id, { content: replacement });
     const second = await testApp.request(`/a/${artifact.id}`);
 
     expect(updated?.id).toBe(artifact.id);
@@ -554,7 +554,7 @@ describe('binary artifacts in browser routes', () => {
   });
 
   it('applies a restrictive CSP to SVG responses', async () => {
-    const artifact = createBinary(
+    const artifact = await createBinary(
       new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>'),
       'image/svg+xml',
       'diagram.svg',
@@ -581,21 +581,21 @@ describe('gallery index', () => {
       filesDir: join(dataDir, 'artifacts'),
     });
     testApp = createApp({ artifacts: service, mcp: service });
-    service.createArtifact({
+    await service.createArtifact({
       content: new TextEncoder().encode('<h1>a</h1>'),
       description: 'An html one',
       mediaType: 'text/html',
       project: 'scanner',
       title: 'Html in scanner',
     });
-    service.createArtifact({
+    await service.createArtifact({
       content: new TextEncoder().encode('# b'),
       description: 'A markdown one',
       mediaType: 'text/markdown',
       project: 'scanner',
       title: 'Markdown in scanner',
     });
-    service.createArtifact({
+    await service.createArtifact({
       content: new TextEncoder().encode('c'),
       description: 'A text one',
       mediaType: 'text/plain',
@@ -689,7 +689,7 @@ describe('gallery index', () => {
   });
 
   it('serves a kind-specific SVG placeholder at /a/:id/thumb', async () => {
-    const artifact = service.listArtifacts({ project: 'side project' })[0]!;
+    const artifact = (await service.listArtifacts({ project: 'side project' }))[0]!;
 
     const res = await testApp.request(`/a/${artifact.id}/thumb`);
 
@@ -716,8 +716,8 @@ describe('gallery index', () => {
     });
 
     it('serves the stored JPEG with an ETag, and 304 when it matches', async () => {
-      const artifact = service.listArtifacts({ project: 'scanner' })[0]!;
-      thumbnails.write(artifact.id, jpeg);
+      const artifact = (await service.listArtifacts({ project: 'scanner' }))[0]!;
+      await thumbnails.write(artifact.id, jpeg);
 
       const res = await testApp.request(`/a/${artifact.id}/thumb`);
 
@@ -735,7 +735,7 @@ describe('gallery index', () => {
     });
 
     it('falls back to the placeholder for an artifact without a stored preview', async () => {
-      const artifact = service.listArtifacts({ project: 'scanner' })[0]!;
+      const artifact = (await service.listArtifacts({ project: 'scanner' }))[0]!;
 
       const res = await testApp.request(`/a/${artifact.id}/thumb`);
 

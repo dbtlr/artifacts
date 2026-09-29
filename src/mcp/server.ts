@@ -156,11 +156,11 @@ export function createMcpServer(service: ArtifactService): McpServer {
         type: ARTIFACT_TYPE.optional().describe('Legacy text type: html, md, or txt'),
       },
     },
-    (args) => {
+    async (args) => {
       try {
         const mediaType = resolveMediaType(args.mediaType, args.type);
         const content = decodeContent(mediaType, args.content, args.contentBase64, true)!;
-        const artifact = service.createArtifact({
+        const artifact = await service.createArtifact({
           ...(args.collection === undefined ? {} : { collection: args.collection }),
           content,
           description: args.description,
@@ -198,25 +198,25 @@ export function createMcpServer(service: ArtifactService): McpServer {
         type: ARTIFACT_TYPE.optional().describe('Legacy new text type: html, md, or txt'),
       },
     },
-    ({ id, ...args }) => {
+    async ({ id, ...args }) => {
       try {
-        const existing = service.findArtifact(id);
-        if (!existing) {
-          return toolError(`No artifact found with id ${JSON.stringify(id)}`);
-        }
-        const mediaType =
-          args.mediaType === undefined && args.type === undefined
-            ? existing.mediaType
-            : resolveMediaType(args.mediaType, args.type);
-        const content = decodeContent(mediaType, args.content, args.contentBase64, false);
-        const updated = service.updateArtifact(id, {
-          ...(args.collection === undefined ? {} : { collection: args.collection }),
-          ...(content === undefined ? {} : { content }),
-          ...(args.description === undefined ? {} : { description: args.description }),
-          ...(args.filename === undefined ? {} : { filename: args.filename }),
-          ...(args.mediaType === undefined && args.type === undefined ? {} : { mediaType }),
-          ...(args.project === undefined ? {} : { project: args.project }),
-          ...(args.title === undefined ? {} : { title: args.title }),
+        // Decoding depends on the stored media type, so the patch is built
+        // from the artifact as the service holds it when the update runs.
+        const updated = await service.updateArtifact(id, (existing) => {
+          const mediaType =
+            args.mediaType === undefined && args.type === undefined
+              ? existing.mediaType
+              : resolveMediaType(args.mediaType, args.type);
+          const content = decodeContent(mediaType, args.content, args.contentBase64, false);
+          return {
+            ...(args.collection === undefined ? {} : { collection: args.collection }),
+            ...(content === undefined ? {} : { content }),
+            ...(args.description === undefined ? {} : { description: args.description }),
+            ...(args.filename === undefined ? {} : { filename: args.filename }),
+            ...(args.mediaType === undefined && args.type === undefined ? {} : { mediaType }),
+            ...(args.project === undefined ? {} : { project: args.project }),
+            ...(args.title === undefined ? {} : { title: args.title }),
+          };
         });
         return updated === null
           ? toolError(`No artifact found with id ${JSON.stringify(id)}`)
@@ -233,9 +233,9 @@ export function createMcpServer(service: ArtifactService): McpServer {
       description: 'Delete an artifact (both its metadata and content) by id.',
       inputSchema: { id: z.string().describe('Artifact id to remove') },
     },
-    ({ id }) => {
+    async ({ id }) => {
       try {
-        return jsonResult({ existed: service.removeArtifact(id), id });
+        return jsonResult({ existed: await service.removeArtifact(id), id });
       } catch (error) {
         return toolError(errorMessage(error));
       }
@@ -251,9 +251,9 @@ export function createMcpServer(service: ArtifactService): McpServer {
         project: z.string().optional().describe('Filter by project'),
       },
     },
-    (query) => {
+    async (query) => {
       try {
-        return jsonResult(service.listArtifacts(query).map(artifactResult));
+        return jsonResult((await service.listArtifacts(query)).map(artifactResult));
       } catch (error) {
         return toolError(errorMessage(error));
       }
@@ -266,10 +266,10 @@ export function createMcpServer(service: ArtifactService): McpServer {
       description: 'List distinct non-empty collection names, preserving their stored casing.',
       inputSchema: {},
     },
-    () => {
+    async () => {
       try {
         const collections = new Map<string, string>();
-        for (const artifact of service.listArtifacts()) {
+        for (const artifact of await service.listArtifacts()) {
           if (artifact.collection !== undefined) {
             collections.set(foldCollectionName(artifact.collection), artifact.collection);
           }
@@ -294,15 +294,15 @@ export function createMcpServer(service: ArtifactService): McpServer {
           .describe('Include text or base64 content; defaults false'),
       },
     },
-    ({ id, includeContent = false }) => {
+    async ({ id, includeContent = false }) => {
       try {
         if (includeContent) {
-          const artifact = service.getArtifact(id);
+          const artifact = await service.getArtifact(id);
           return artifact === null
             ? toolError(`No artifact found with id ${JSON.stringify(id)}`)
             : jsonResult(artifactWithContentResult(artifact, true));
         }
-        const artifact = service.findArtifact(id);
+        const artifact = await service.findArtifact(id);
         return artifact === null
           ? toolError(`No artifact found with id ${JSON.stringify(id)}`)
           : jsonResult(artifactResult(artifact));
