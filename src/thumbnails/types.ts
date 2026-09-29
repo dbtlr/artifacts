@@ -13,8 +13,8 @@ export type ThumbnailRenderer = {
 };
 
 export type ThumbnailStore = {
-  has: (id: string) => boolean;
-  read: (id: string) => Uint8Array | null;
-  remove: (id: string) => void;
-  write: (id: string, bytes: Uint8Array) => void;
+  has: (id: string) => Promise<boolean>;
+  read: (id: string) => Promise<Uint8Array | null>;
+  remove: (id: string) => Promise<void>;
+  write: (id: string, bytes: Uint8Array) => Promise<void>;
 };

@@ -31,35 +31,35 @@ export function metadataStoreContract(
   describe(`${name} metadata contract`, () => {
     it('creates, finds, updates, lists, filters, and removes metadata', async () => {
       const store = await createStore();
-      store.create(first);
-      store.create(second);
+      await store.create(first);
+      await store.create(second);
 
-      expect(store.find(first.id)).toEqual(first);
-      expect(store.find('missing')).toBeNull();
-      expect(store.list().map(({ id }) => id)).toEqual([second.id, first.id]);
-      expect(store.list({ project: 'alpha' })).toEqual([first]);
-      expect(store.list({ collection: 'reports' })).toEqual([second]);
-      expect(store.list({ collection: 'missing' })).toEqual([]);
+      await expect(store.find(first.id)).resolves.toEqual(first);
+      await expect(store.find('missing')).resolves.toBeNull();
+      expect((await store.list()).map(({ id }) => id)).toEqual([second.id, first.id]);
+      await expect(store.list({ project: 'alpha' })).resolves.toEqual([first]);
+      await expect(store.list({ collection: 'reports' })).resolves.toEqual([second]);
+      await expect(store.list({ collection: 'missing' })).resolves.toEqual([]);
 
       const updated = { ...first, title: 'Updated', updatedAt: '2026-01-03T00:00:00.000Z' };
-      expect(store.update(updated)).toBe(true);
-      expect(store.find(first.id)).toEqual(updated);
-      expect(store.remove(first.id)).toBe(true);
-      expect(store.remove(first.id)).toBe(false);
+      await expect(store.update(updated)).resolves.toBe(true);
+      await expect(store.find(first.id)).resolves.toEqual(updated);
+      await expect(store.remove(first.id)).resolves.toBe(true);
+      await expect(store.remove(first.id)).resolves.toBe(false);
     });
   });
 }
 
 export function contentStoreContract(name: string, createStore: () => ArtifactContentStore): void {
   describe(`${name} content contract`, () => {
-    it('round-trips arbitrary bytes and supports idempotent removal', () => {
+    it('round-trips arbitrary bytes and supports idempotent removal', async () => {
       const store = createStore();
       const bytes = Uint8Array.from([0, 255, 1, 128, 10]);
 
-      store.write('asset', 'text/plain', bytes);
-      expect([...store.read('asset', 'text/plain')]).toEqual([...bytes]);
-      expect(store.remove('asset', 'text/plain')).toBe(true);
-      expect(store.remove('asset', 'text/plain')).toBe(false);
+      await store.write('asset', 'text/plain', bytes);
+      expect([...(await store.read('asset', 'text/plain'))]).toEqual([...bytes]);
+      await expect(store.remove('asset', 'text/plain')).resolves.toBe(true);
+      await expect(store.remove('asset', 'text/plain')).resolves.toBe(false);
     });
   });
 }

@@ -129,7 +129,7 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
   // `?kind=html` narrows either gallery to one file kind; an unknown kind is
   // ignored rather than 404ed, for the same reason an unknown project is.
   app.get('/', async (c) => {
-    const artifacts = (await resolveServices()).artifacts.listArtifacts();
+    const artifacts = await (await resolveServices()).artifacts.listArtifacts();
     const view = buildIndexView(artifacts, { kind: c.req.query('kind') });
     return c.html(
       <Layout title="Artifacts" wide>
@@ -149,7 +149,7 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
     // One read serves both the project-scoped view and the header's project
     // selector, which offers every project. The store's own project filter
     // is exact equality, so filtering here matches it.
-    const all = (await resolveServices()).artifacts.listArtifacts();
+    const all = await (await resolveServices()).artifacts.listArtifacts();
     const { projects } = buildIndexView(all, {});
     const view = buildIndexView(
       all.filter((artifact) => artifact.project === project),
@@ -169,11 +169,11 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
   app.get('/a/:id/thumb', async (c) => {
     const services = await resolveServices();
     const id = c.req.param('id');
-    const artifact = services.artifacts.findArtifact(id);
+    const artifact = await services.artifacts.findArtifact(id);
     if (!artifact) {
       return c.body(null, 404);
     }
-    const bytes = services.thumbnails?.read(id) ?? null;
+    const bytes = services.thumbnails === undefined ? null : await services.thumbnails.read(id);
     if (bytes === null) {
       return c.body(placeholderSvg(kindOf(artifact.mediaType)), 200, {
         'Cache-Control': 'no-cache',
@@ -192,12 +192,12 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
   // displayed as is" (same-origin script execution is an accepted risk,
   // since content is self-authored on a private network). md/txt render
   // inside the standard Layout instead. A row whose content file is missing
-  // makes store.getArtifact throw (see store.ts) — that's deliberately left
-  // unguarded here too, so it surfaces as a 500 rather than masquerading as
-  // an ordinary 404.
+  // makes getArtifact reject (see artifacts/service.ts) — that's deliberately
+  // left unguarded here too, so it surfaces as a 500 rather than masquerading
+  // as an ordinary 404.
   app.on(['GET', 'HEAD'], '/a/:id', async (c) => {
     const id = c.req.param('id');
-    const artifact = (await resolveServices()).artifacts.getArtifact(id);
+    const artifact = await (await resolveServices()).artifacts.getArtifact(id);
     if (!artifact) {
       return c.html(
         <Layout title="Artifact not found">

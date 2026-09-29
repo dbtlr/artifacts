@@ -40,15 +40,15 @@ export class FilesystemArtifactContentStore implements ArtifactContentStore {
     }
   }
 
-  read(id: string, mediaType: MediaType): Uint8Array {
+  async read(id: string, mediaType: MediaType): Promise<Uint8Array> {
     return readFileSync(this.path(id, mediaType));
   }
 
-  remove(id: string, mediaType: MediaType): boolean {
+  async remove(id: string, mediaType: MediaType): Promise<boolean> {
     return this.removePath(this.path(id, mediaType));
   }
 
-  write(id: string, mediaType: MediaType, content: Uint8Array): void {
+  async write(id: string, mediaType: MediaType, content: Uint8Array): Promise<void> {
     const target = this.path(id, mediaType);
     const temporary = `${target}.${process.pid.toString()}.${randomUUID()}.tmp`;
     try {

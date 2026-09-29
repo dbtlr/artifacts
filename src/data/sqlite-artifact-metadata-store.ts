@@ -78,7 +78,7 @@ export class SqliteArtifactMetadataStore implements ArtifactMetadataStore {
     }
   }
 
-  create(artifact: Artifact): void {
+  async create(artifact: Artifact): Promise<void> {
     this.database
       .prepare(
         `INSERT INTO artifacts
@@ -98,12 +98,12 @@ export class SqliteArtifactMetadataStore implements ArtifactMetadataStore {
       );
   }
 
-  find(id: string): Artifact | null {
+  async find(id: string): Promise<Artifact | null> {
     const record = this.database.prepare('SELECT * FROM artifacts WHERE id = ?').get(id);
     return record === undefined ? null : toArtifact(toArtifactRow(record));
   }
 
-  list(query: ListArtifactsQuery = {}): Artifact[] {
+  async list(query: ListArtifactsQuery = {}): Promise<Artifact[]> {
     const clauses: string[] = [];
     const values: string[] = [];
     if (query.project !== undefined) {
@@ -121,11 +121,11 @@ export class SqliteArtifactMetadataStore implements ArtifactMetadataStore {
     return records.map((record) => toArtifact(toArtifactRow(record)));
   }
 
-  remove(id: string): boolean {
+  async remove(id: string): Promise<boolean> {
     return this.database.prepare('DELETE FROM artifacts WHERE id = ?').run(id).changes > 0;
   }
 
-  update(artifact: Artifact): boolean {
+  async update(artifact: Artifact): Promise<boolean> {
     return (
       this.database
         .prepare(

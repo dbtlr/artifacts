@@ -47,8 +47,8 @@ function fromLegacyArtifact(artifact: LegacyArtifact): Artifact {
 // and MCP operate on the same caller-owned data rather than silently splitting
 // across that store and the process default.
 export function adaptLegacyArtifactStore(store: ArtifactStore): ArtifactService {
-  const get = (id: string): ArtifactWithContent | null => {
-    const artifact = store.getArtifact(id);
+  const get = async (id: string): Promise<ArtifactWithContent | null> => {
+    const artifact = await store.getArtifact(id);
     if (artifact === null) {
       return null;
     }
@@ -56,7 +56,7 @@ export function adaptLegacyArtifactStore(store: ArtifactStore): ArtifactService 
     return { ...fromLegacyArtifact(metadata), content: new TextEncoder().encode(content) };
   };
   return {
-    createArtifact: (input) => {
+    createArtifact: async (input) => {
       const type = legacyTypeFromMediaType(input.mediaType);
       if (type === undefined) {
         throw new Error('This configured artifact store only supports text media types');
@@ -65,7 +65,7 @@ export function adaptLegacyArtifactStore(store: ArtifactStore): ArtifactService 
         throw new Error('This configured artifact store does not support collection or filename');
       }
       return fromLegacyArtifact(
-        store.createArtifact({
+        await store.createArtifact({
           content: new TextDecoder('utf-8', { fatal: true }).decode(input.content),
           description: input.description,
           project: input.project,
@@ -74,14 +74,14 @@ export function adaptLegacyArtifactStore(store: ArtifactStore): ArtifactService 
         }),
       );
     },
-    findArtifact: (id) => {
-      const artifact = store.listArtifacts().find((candidate) => candidate.id === id);
+    findArtifact: async (id) => {
+      const artifact = (await store.listArtifacts()).find((candidate) => candidate.id === id);
       return artifact === undefined ? null : fromLegacyArtifact(artifact);
     },
     getArtifact: get,
-    listArtifacts: (query) => store.listArtifacts(query).map(fromLegacyArtifact),
+    listArtifacts: async (query) => (await store.listArtifacts(query)).map(fromLegacyArtifact),
     removeArtifact: (id) => store.removeArtifact(id),
-    updateArtifact: (id, patch) => {
+    updateArtifact: async (id, patch) => {
       const type =
         patch.mediaType === undefined ? undefined : legacyTypeFromMediaType(patch.mediaType);
       if (patch.mediaType !== undefined && type === undefined) {
@@ -90,7 +90,7 @@ export function adaptLegacyArtifactStore(store: ArtifactStore): ArtifactService 
       if (patch.collection !== undefined || patch.filename !== undefined) {
         throw new Error('This configured artifact store does not support collection or filename');
       }
-      const updated = store.updateArtifact(id, {
+      const updated = await store.updateArtifact(id, {
         ...(patch.content === undefined
           ? {}
           : { content: new TextDecoder('utf-8', { fatal: true }).decode(patch.content) }),
@@ -126,19 +126,19 @@ export async function createArtifactStore({
 
 export function legacyArtifactStoreFromService(service: ArtifactService): ArtifactStore {
   return {
-    createArtifact: (input) => {
+    createArtifact: async (input) => {
       const { content: text, type, ...metadataFields } = input;
       assertLegacyType(type);
       return toLegacyArtifact(
-        service.createArtifact({
+        await service.createArtifact({
           ...metadataFields,
           content: new TextEncoder().encode(text),
           mediaType: mediaTypeFromLegacyType(type),
         }),
       )!;
     },
-    getArtifact: (id) => {
-      const artifact = service.getArtifact(id);
+    getArtifact: async (id) => {
+      const artifact = await service.getArtifact(id);
       if (artifact === null) {
         return null;
       }
@@ -152,28 +152,27 @@ export function legacyArtifactStoreFromService(service: ArtifactService): Artifa
         content: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
       };
     },
-    listArtifacts: (query) =>
-      service
-        .listArtifacts(query)
+    listArtifacts: async (query) =>
+      (await service.listArtifacts(query))
         .map(toLegacyArtifact)
         .filter((artifact) => artifact !== null),
-    removeArtifact: (id) => {
-      const artifact = service.findArtifact(id);
+    removeArtifact: async (id) => {
+      const artifact = await service.findArtifact(id);
       if (artifact === null || legacyTypeFromMediaType(artifact.mediaType) === undefined) {
         return false;
       }
       return service.removeArtifact(id);
     },
-    updateArtifact: (id, patch) => {
+    updateArtifact: async (id, patch) => {
       const { content: text, type, ...metadataFields } = patch;
       if (type !== undefined) {
         assertLegacyType(type);
       }
-      const existing = service.findArtifact(id);
+      const existing = await service.findArtifact(id);
       if (existing === null || legacyTypeFromMediaType(existing.mediaType) === undefined) {
         return null;
       }
-      const updated = service.updateArtifact(id, {
+      const updated = await service.updateArtifact(id, {
         ...metadataFields,
         ...(text === undefined ? {} : { content: new TextEncoder().encode(text) }),
         ...(type === undefined ? {} : { mediaType: mediaTypeFromLegacyType(type) }),

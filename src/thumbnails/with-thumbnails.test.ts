@@ -15,12 +15,12 @@ const sample: Artifact = {
 
 function stubService(overrides: Partial<ArtifactService> = {}): ArtifactService {
   return {
-    createArtifact: () => sample,
-    findArtifact: () => sample,
-    getArtifact: () => ({ ...sample, content: new Uint8Array() }),
-    listArtifacts: () => [sample],
-    removeArtifact: () => true,
-    updateArtifact: () => sample,
+    createArtifact: async () => sample,
+    findArtifact: async () => sample,
+    getArtifact: async () => ({ ...sample, content: new Uint8Array() }),
+    listArtifacts: async () => [sample],
+    removeArtifact: async () => true,
+    updateArtifact: async () => sample,
     ...overrides,
   };
 }
@@ -32,7 +32,7 @@ function harness(service: ArtifactService) {
     enqueue: (id) => {
       enqueued.push(id);
     },
-    remove: (id) => {
+    remove: async (id) => {
       removed.push(id);
     },
   });
@@ -48,51 +48,51 @@ const input = {
 };
 
 describe('withThumbnails', () => {
-  it('queues a render after a successful create', () => {
+  it('queues a render after a successful create', async () => {
     const { enqueued, wrapped } = harness(stubService());
 
-    expect(wrapped.createArtifact(input)).toEqual(sample);
+    await expect(wrapped.createArtifact(input)).resolves.toEqual(sample);
     expect(enqueued).toEqual(['abc']);
   });
 
-  it('does not queue when create throws', () => {
+  it('does not queue when create throws', async () => {
     const { enqueued, wrapped } = harness(
       stubService({
-        createArtifact: () => {
+        createArtifact: async () => {
           throw new Error('invalid');
         },
       }),
     );
 
-    expect(() => wrapped.createArtifact(input)).toThrow('invalid');
+    await expect(wrapped.createArtifact(input)).rejects.toThrow('invalid');
     expect(enqueued).toEqual([]);
   });
 
-  it('queues a render after a successful update, but not for an unknown id', () => {
+  it('queues a render after a successful update, but not for an unknown id', async () => {
     const { enqueued, wrapped } = harness(stubService());
-    expect(wrapped.updateArtifact('abc', { title: 'new' })).toEqual(sample);
+    await expect(wrapped.updateArtifact('abc', { title: 'new' })).resolves.toEqual(sample);
     expect(enqueued).toEqual(['abc']);
 
-    const missing = harness(stubService({ updateArtifact: () => null }));
-    expect(missing.wrapped.updateArtifact('nope', { title: 'new' })).toBeNull();
+    const missing = harness(stubService({ updateArtifact: async () => null }));
+    await expect(missing.wrapped.updateArtifact('nope', { title: 'new' })).resolves.toBeNull();
     expect(missing.enqueued).toEqual([]);
   });
 
-  it('drops the stored thumbnail after a successful remove only', () => {
+  it('drops the stored thumbnail after a successful remove only', async () => {
     const { removed, wrapped } = harness(stubService());
-    expect(wrapped.removeArtifact('abc')).toBe(true);
+    await expect(wrapped.removeArtifact('abc')).resolves.toBe(true);
     expect(removed).toEqual(['abc']);
 
-    const missing = harness(stubService({ removeArtifact: () => false }));
-    expect(missing.wrapped.removeArtifact('nope')).toBe(false);
+    const missing = harness(stubService({ removeArtifact: async () => false }));
+    await expect(missing.wrapped.removeArtifact('nope')).resolves.toBe(false);
     expect(missing.removed).toEqual([]);
   });
 
-  it('passes reads straight through', () => {
+  it('passes reads straight through', async () => {
     const { wrapped } = harness(stubService());
 
-    expect(wrapped.findArtifact('abc')).toEqual(sample);
-    expect(wrapped.listArtifacts()).toEqual([sample]);
-    expect(wrapped.getArtifact('abc')?.id).toBe('abc');
+    await expect(wrapped.findArtifact('abc')).resolves.toEqual(sample);
+    await expect(wrapped.listArtifacts()).resolves.toEqual([sample]);
+    expect((await wrapped.getArtifact('abc'))?.id).toBe('abc');
   });
 });

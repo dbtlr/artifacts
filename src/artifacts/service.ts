@@ -6,6 +6,7 @@ import type {
   ArtifactContentStore,
   ArtifactMetadataStore,
   ArtifactService,
+  ArtifactWithContent,
   CreateArtifactInput,
   MediaType,
   UpdateArtifactInput,
@@ -95,12 +96,15 @@ function reportCleanupFailure(action: string, error: unknown): void {
   }
 }
 
-function runRollback(action: string, rollback: (() => void) | undefined): void {
+async function runRollback(
+  action: string,
+  rollback: (() => Promise<void>) | undefined,
+): Promise<void> {
   if (rollback === undefined) {
     return;
   }
   try {
-    rollback();
+    await rollback();
   } catch (error) {
     reportCleanupFailure(`${action} rollback`, error);
   }
@@ -110,19 +114,21 @@ export function createArtifactService(
   metadata: ArtifactMetadataStore,
   content: ArtifactContentStore,
 ): ArtifactService {
-  function generateId(): string {
-    for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt += 1) {
-      const id = nanoid(ID_LENGTH);
-      if (!metadata.find(id)) {
-        return id;
-      }
+  // Tries up to MAX_ID_ATTEMPTS fresh ids, one lookup at a time.
+  async function generateId(attempt = 0): Promise<string> {
+    if (attempt >= MAX_ID_ATTEMPTS) {
+      throw new Error(
+        `Failed to generate a unique artifact id after ${String(MAX_ID_ATTEMPTS)} attempts`,
+      );
     }
-    throw new Error(
-      `Failed to generate a unique artifact id after ${String(MAX_ID_ATTEMPTS)} attempts`,
-    );
+    const id = nanoid(ID_LENGTH);
+    if (!(await metadata.find(id))) {
+      return id;
+    }
+    return generateId(attempt + 1);
   }
 
-  function createArtifact(input: CreateArtifactInput): Artifact {
+  async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
     assertValidMediaType(input.mediaType);
     assertNonBlank('title', input.title);
     assertNonBlank('project', input.project);
@@ -133,7 +139,7 @@ export function createArtifactService(
     assertValidFilename(input.mediaType, input.filename);
     assertValidContent(input.mediaType, input.content);
 
-    const id = generateId();
+    const id = await generateId();
     const now = new Date().toISOString();
     const artifact: Artifact = {
       ...(input.collection === undefined ? {} : { collection: input.collection }),
@@ -147,12 +153,12 @@ export function createArtifactService(
       updatedAt: now,
     };
 
-    content.write(id, input.mediaType, input.content);
+    await content.write(id, input.mediaType, input.content);
     try {
-      metadata.create(artifact);
+      await metadata.create(artifact);
     } catch (error) {
       try {
-        content.remove(id, input.mediaType);
+        await content.remove(id, input.mediaType);
       } catch (cleanupError) {
         reportCleanupFailure('create', cleanupError);
       }
@@ -161,15 +167,15 @@ export function createArtifactService(
     return artifact;
   }
 
-  function getArtifact(id: string) {
-    const artifact = metadata.find(id);
+  async function getArtifact(id: string): Promise<ArtifactWithContent | null> {
+    const artifact = await metadata.find(id);
     return artifact === null
       ? null
-      : { ...artifact, content: content.read(id, artifact.mediaType) };
+      : { ...artifact, content: await content.read(id, artifact.mediaType) };
   }
 
-  function updateArtifact(id: string, patch: UpdateArtifactInput): Artifact | null {
-    const previous = metadata.find(id);
+  async function updateArtifact(id: string, patch: UpdateArtifactInput): Promise<Artifact | null> {
+    const previous = await metadata.find(id);
     if (!previous) {
       return null;
     }
@@ -214,45 +220,47 @@ export function createArtifactService(
       updatedAt: new Date().toISOString(),
     };
 
-    let rollbackContent: (() => void) | undefined;
+    let rollbackContent: (() => Promise<void>) | undefined;
     if (patch.content !== undefined) {
-      const previousBytes = content.read(id, previous.mediaType);
-      content.write(id, next.mediaType, patch.content);
-      rollbackContent = () => {
-        content.write(id, previous.mediaType, previousBytes);
+      const previousBytes = await content.read(id, previous.mediaType);
+      await content.write(id, next.mediaType, patch.content);
+      rollbackContent = async () => {
+        await content.write(id, previous.mediaType, previousBytes);
         if (next.mediaType !== previous.mediaType) {
-          content.remove(id, next.mediaType);
+          await content.remove(id, next.mediaType);
         }
       };
       if (next.mediaType !== previous.mediaType) {
         try {
-          content.remove(id, previous.mediaType);
+          await content.remove(id, previous.mediaType);
         } catch (error) {
-          runRollback('update', () => content.remove(id, next.mediaType));
+          await runRollback('update', async () => {
+            await content.remove(id, next.mediaType);
+          });
           throw error;
         }
       }
     }
 
     try {
-      if (!metadata.update(next)) {
-        runRollback('update', rollbackContent);
+      if (!(await metadata.update(next))) {
+        await runRollback('update', rollbackContent);
         return null;
       }
     } catch (error) {
-      runRollback('update', rollbackContent);
+      await runRollback('update', rollbackContent);
       throw error;
     }
     return next;
   }
 
-  function removeArtifact(id: string): boolean {
-    const artifact = metadata.find(id);
-    if (!artifact || !metadata.remove(id)) {
+  async function removeArtifact(id: string): Promise<boolean> {
+    const artifact = await metadata.find(id);
+    if (!artifact || !(await metadata.remove(id))) {
       return false;
     }
     try {
-      content.remove(id, artifact.mediaType);
+      await content.remove(id, artifact.mediaType);
     } catch (error) {
       reportCleanupFailure('remove', error);
     }

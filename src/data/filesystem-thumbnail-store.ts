@@ -23,13 +23,13 @@ export class FilesystemThumbnailStore implements ThumbnailStore {
     this.dir = dir;
   }
 
-  has(id: string): boolean {
+  async has(id: string): Promise<boolean> {
     return existsSync(pathFor(this.dir, id));
   }
 
   // Read-then-check rather than check-then-read, so a remove landing between
   // the two cannot turn a missing file into a thrown error.
-  read(id: string): Uint8Array | null {
+  async read(id: string): Promise<Uint8Array | null> {
     try {
       return new Uint8Array(readFileSync(pathFor(this.dir, id)));
     } catch (error) {
@@ -40,11 +40,11 @@ export class FilesystemThumbnailStore implements ThumbnailStore {
     }
   }
 
-  remove(id: string): void {
+  async remove(id: string): Promise<void> {
     rmSync(pathFor(this.dir, id), { force: true });
   }
 
-  write(id: string, bytes: Uint8Array): void {
+  async write(id: string, bytes: Uint8Array): Promise<void> {
     const path = pathFor(this.dir, id);
     mkdirSync(this.dir, { recursive: true });
     const temp = `${path}.${String(process.pid)}.tmp`;

@@ -23,34 +23,34 @@ describe('FilesystemThumbnailStore', () => {
   it('round-trips bytes and reports presence', async () => {
     const bytes = Uint8Array.from([255, 216, 255, 1, 2, 3]);
 
-    expect(store.has('abc123')).toBe(false);
-    expect(store.read('abc123')).toBeNull();
+    await expect(store.has('abc123')).resolves.toBe(false);
+    await expect(store.read('abc123')).resolves.toBeNull();
 
-    store.write('abc123', bytes);
+    await store.write('abc123', bytes);
 
-    expect(store.has('abc123')).toBe(true);
-    expect(store.read('abc123')).toEqual(bytes);
+    await expect(store.has('abc123')).resolves.toBe(true);
+    await expect(store.read('abc123')).resolves.toEqual(bytes);
     await expect(readdir(join(dir, 'thumbs'))).resolves.toEqual(['abc123.jpg']);
   });
 
-  it('replaces an existing thumbnail in place', () => {
-    store.write('abc123', Uint8Array.from([1]));
-    store.write('abc123', Uint8Array.from([2, 3]));
+  it('replaces an existing thumbnail in place', async () => {
+    await store.write('abc123', Uint8Array.from([1]));
+    await store.write('abc123', Uint8Array.from([2, 3]));
 
-    expect(store.read('abc123')).toEqual(Uint8Array.from([2, 3]));
+    await expect(store.read('abc123')).resolves.toEqual(Uint8Array.from([2, 3]));
   });
 
-  it('removes a thumbnail and tolerates removing a missing one', () => {
-    store.write('abc123', Uint8Array.from([1]));
+  it('removes a thumbnail and tolerates removing a missing one', async () => {
+    await store.write('abc123', Uint8Array.from([1]));
 
-    store.remove('abc123');
-    store.remove('abc123');
+    await store.remove('abc123');
+    await store.remove('abc123');
 
-    expect(store.has('abc123')).toBe(false);
+    await expect(store.has('abc123')).resolves.toBe(false);
   });
 
-  it.each(['../x', 'a/b', '', 'a.b', 'a b'])('rejects the unsafe id %j', (id) => {
-    expect(() => store.read(id)).toThrow('Invalid thumbnail id');
-    expect(() => store.write(id, Uint8Array.from([1]))).toThrow('Invalid thumbnail id');
+  it.each(['../x', 'a/b', '', 'a.b', 'a b'])('rejects the unsafe id %j', async (id) => {
+    await expect(store.read(id)).rejects.toThrow('Invalid thumbnail id');
+    await expect(store.write(id, Uint8Array.from([1]))).rejects.toThrow('Invalid thumbnail id');
   });
 });

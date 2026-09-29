@@ -3,7 +3,9 @@ import type { ThumbnailRenderer, ThumbnailStore } from './types.js';
 
 export type ThumbnailQueue = {
   // Queue every artifact that has no stored preview yet (boot-time catch-up).
-  backfill: (artifacts: Artifact[]) => void;
+  // Resolves once they are queued, not rendered; rejects if the store
+  // cannot say which previews exist.
+  backfill: (artifacts: Artifact[]) => Promise<void>;
   // Queue one artifact for (re-)rendering. Never throws and never blocks the
   // caller: a create/update returns as soon as the metadata is written.
   enqueue: (id: string) => void;
@@ -18,7 +20,7 @@ export type ThumbnailQueue = {
 type ThumbnailQueueDeps = {
   // Fresh metadata at render time: an artifact removed while it was waiting
   // is skipped, and an updated one renders its latest media type.
-  lookup: (id: string) => Artifact | null;
+  lookup: (id: string) => Promise<Artifact | null>;
   report?: (message: string) => void;
   store: ThumbnailStore;
 };
@@ -51,7 +53,7 @@ export function createThumbnailQueue({
       return;
     }
     try {
-      const artifact = lookup(id);
+      const artifact = await lookup(id);
       if (artifact === null) {
         return;
       }
@@ -62,15 +64,15 @@ export function createThumbnailQueue({
       });
       // Removed while rendering: the remove hook already dropped the old
       // file, so writing now would leave an orphan behind.
-      if (lookup(id) === null) {
+      if ((await lookup(id)) === null) {
         return;
       }
       if (bytes === null) {
         // Declined (say, an update turned an html artifact into a PDF): a
         // preview of the old content must not outlive it.
-        store.remove(id);
+        await store.remove(id);
       } else {
-        store.write(id, bytes);
+        await store.write(id, bytes);
       }
     } catch (error) {
       report(`Thumbnail render failed for ${id}: ${describe(error)}`);
@@ -119,9 +121,10 @@ export function createThumbnailQueue({
   }
 
   return {
-    backfill: (artifacts) => {
-      for (const artifact of artifacts) {
-        if (!store.has(artifact.id)) {
+    backfill: async (artifacts) => {
+      const stored = await Promise.all(artifacts.map(async ({ id }) => store.has(id)));
+      for (const [index, artifact] of artifacts.entries()) {
+        if (!stored[index]) {
           pending.add(artifact.id);
         }
       }
