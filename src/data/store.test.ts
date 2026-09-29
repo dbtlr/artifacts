@@ -566,6 +566,47 @@ describe('legacy store over a shared service', () => {
   });
 });
 
+const appendOne = (current: { title: string }) => ({ title: `${current.title}1` });
+
+describe('service adapted from a legacy store', () => {
+  it('decides each concurrent update against the result of the one before it', async () => {
+    const created = await store.createArtifact({
+      content: '# md',
+      description: 'd',
+      project: 'p',
+      title: 'T',
+      type: 'md',
+    });
+    const service = adaptLegacyArtifactStore(store);
+
+    await Promise.all([
+      service.updateArtifact(created.id, appendOne),
+      service.updateArtifact(created.id, appendOne),
+    ]);
+
+    expect((await service.findArtifact(created.id))?.title).toBe('T11');
+  });
+
+  it('checks a remove precondition against the result of an earlier update', async () => {
+    const created = await store.createArtifact({
+      content: '# md',
+      description: 'd',
+      project: 'p',
+      title: 'Keep',
+      type: 'md',
+    });
+    const service = adaptLegacyArtifactStore(store);
+
+    const [, removed] = await Promise.all([
+      service.updateArtifact(created.id, { title: 'Remove me' }),
+      service.removeArtifact(created.id, (current) => current.title === 'Keep'),
+    ]);
+
+    expect(removed).toBe(false);
+    expect((await service.findArtifact(created.id))?.title).toBe('Remove me');
+  });
+});
+
 describe('getDefaultArtifactStore', () => {
   const originalDatabasePath = process.env.ARTIFACTS_DATABASE_PATH;
   const originalFilesDir = process.env.ARTIFACTS_FILES_DIR;
