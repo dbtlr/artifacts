@@ -1,3 +1,4 @@
+import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
 import { defineConfig, toolingPlugin } from '@dbtlr/tooling';
 import tailwindcss from '@tailwindcss/vite';
 
@@ -75,5 +76,29 @@ export default defineConfig({
   publicDir: 'src/public',
   staged: {
     '*': 'vp check --fix',
+  },
+  // Two test projects under one `vp test run`. `node` is every ordinary
+  // test. `workers` runs `*.workers.test.ts` inside workerd, the local
+  // Workers runtime, through @cloudflare/vitest-pool-workers, with Miniflare
+  // providing the bindings locally; no Cloudflare account is involved. It
+  // does not extend the root config, so the app's Vite plugins stay out of
+  // the Worker. Bindings added here also need a type in
+  // src/workers-test-env.d.ts.
+  test: {
+    projects: [
+      { extends: true, test: { exclude: ['src/**/*.workers.test.ts'], name: 'node' } },
+      {
+        plugins: [
+          cloudflareTest({
+            miniflare: {
+              compatibilityDate: '2026-08-15',
+              compatibilityFlags: ['nodejs_compat'],
+              r2Buckets: ['ARTIFACTS_BUCKET'],
+            },
+          }),
+        ],
+        test: { include: ['src/**/*.workers.test.ts'], name: 'workers' },
+      },
+    ],
   },
 });

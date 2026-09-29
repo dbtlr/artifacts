@@ -2,13 +2,10 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { join } from 'node:path';
 
 import type { ThumbnailStore } from '../thumbnails/types.js';
-
-// Artifact ids are nanoid output; anything else is refused before it can
-// become a path segment, since the id reaches here from a URL parameter.
-const SAFE_ID = /^[A-Za-z0-9_-]+$/u;
+import { isSafeId } from './safe-id.js';
 
 function pathFor(dir: string, id: string): string {
-  if (!SAFE_ID.test(id)) {
+  if (!isSafeId(id)) {
     throw new Error(`Invalid thumbnail id ${JSON.stringify(id)}`);
   }
   return join(dir, `${id}.jpg`);

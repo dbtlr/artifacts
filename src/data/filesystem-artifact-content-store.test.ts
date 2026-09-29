@@ -23,17 +23,6 @@ contentStoreContract(
 );
 
 describe('FilesystemArtifactContentStore hardening', () => {
-  it.each(['../escape', 'nested/escape', String.raw`nested\escape`, '.', ''])(
-    'rejects unsafe id %j',
-    async (id) => {
-      const store = new FilesystemArtifactContentStore(join(directory, 'artifacts'));
-
-      await expect(store.write(id, 'text/plain', new Uint8Array())).rejects.toThrow(
-        'Invalid artifact id',
-      );
-    },
-  );
-
   it('atomically replaces the target without leaving temporary files', async () => {
     const filesDir = join(directory, 'artifacts');
     const store = new FilesystemArtifactContentStore(filesDir);
