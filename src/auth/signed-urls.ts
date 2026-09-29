@@ -55,22 +55,26 @@ function signatureFor(key: Buffer, id: string, expires: string): string {
 // auth/routes.tsx decides which requests may use one.
 //
 // Keys live in the database, so every process that shares it signs and
-// verifies alike. A stored key never changes, so the signer keeps the keys
+// verifies alike. A stored key never changes, and no key is made for an
+// hour that has passed, so the signer keeps what it learns about the hours
 // it can still use in memory and reads the database about once an hour.
+// Until a process signs in a new hour, a check also looks for that hour's
+// key in the database.
 export function createArtifactUrlSigner({
   keys,
   lifetimeSeconds = SIGNED_URL_LIFETIME_SECONDS,
   now = () => new Date(),
 }: ArtifactUrlSignerOptions): ArtifactUrlSigner {
   // Kept as promises, so signers in this process that need a new key at
-  // once share one trip to the database. A failed trip is not kept.
-  const known = new Map<number, Promise<Buffer>>();
+  // once share one trip to the database. A failed trip is not kept. Null
+  // means a past hour that has no key.
+  const known = new Map<number, Promise<Buffer | null>>();
 
   function currentBucket(): number {
     return Math.floor(now().getTime() / 1000 / SIGNING_KEY_BUCKET_SECONDS);
   }
 
-  function remember(bucket: number, key: Promise<Buffer>): Promise<Buffer> {
+  function remember<Key extends Buffer | null>(bucket: number, key: Promise<Key>): Promise<Key> {
     for (const old of known.keys()) {
       if (old < bucket - 1) {
         known.delete(old);
@@ -92,8 +96,10 @@ export function createArtifactUrlSigner({
   }
 
   // The bucket's key, made now when no process has made it yet.
-  function signingKey(bucket: number): Promise<Buffer> {
-    return known.get(bucket) ?? remember(bucket, createKey(bucket));
+  async function signingKey(bucket: number): Promise<Buffer> {
+    const key = await (known.get(bucket) ?? remember(bucket, createKey(bucket)));
+    // A cached miss for this bucket means the clock went back an hour.
+    return key ?? remember(bucket, createKey(bucket));
   }
 
   // The bucket's key, or null when nothing was signed in that hour.
@@ -103,7 +109,11 @@ export function createArtifactUrlSigner({
       return hit;
     }
     const stored = await keys.findUrlSigningKey(bucket);
-    return stored === null ? null : remember(bucket, Promise.resolve(decodeKey(stored)));
+    if (stored !== null) {
+      return remember(bucket, Promise.resolve(decodeKey(stored)));
+    }
+    // The current hour can still get a key; a past hour cannot.
+    return bucket < currentBucket() ? remember(bucket, Promise.resolve(null)) : null;
   }
 
   async function signedPath(id: string, lifetime = lifetimeSeconds): Promise<string> {

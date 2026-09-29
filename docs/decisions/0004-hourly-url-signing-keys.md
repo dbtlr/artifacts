@@ -32,8 +32,10 @@ already read every artifact.
   is two or more hours old fails, whatever its expiry says. This bounds every signed URL to about
   two hours even if the expiry check were wrong or a caller asked for a long lifetime.
 - **Old keys are deleted.** Making a bucket's key deletes every key older than the previous bucket.
-- **Processes keep keys in memory.** A stored key never changes, so each process caches the keys it
-  can still use. It reads the database about once an hour, not once per signed URL.
+- **Processes keep keys in memory.** A stored key never changes, and no key is made for an hour
+  that has passed, so each process caches the keys it can still use and the past hours that have
+  none. It reads the database about once an hour, not once per signed URL. Until some process
+  signs in a new hour, a check also looks for that hour's key in the database.
 
 ## Considered options
 
