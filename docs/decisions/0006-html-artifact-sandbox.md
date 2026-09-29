@@ -59,6 +59,9 @@ an error the author could see.
   handle and can navigate the artifact's tab to another URL, such as a phishing page. It cannot
   read the artifact, because the two have different origins. Browsers open `target="_blank"` links
   with `noopener` by default.
+- `allow-popups` also lets the page follow links with other schemes, such as `mailto:`, which the
+  browser hands to an app registered for that scheme. The browser can ask the reader before it
+  opens the app.
 - HTML artifacts still cannot use `localStorage`, `sessionStorage`, IndexedDB, or cookies, submit
   forms, or read responses from this server. CORS loads from this server, such as
   `<script type="module">`, fail. An embedded PDF does not display.
