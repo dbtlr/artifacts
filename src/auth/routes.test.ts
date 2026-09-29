@@ -1,8 +1,9 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import { createApp } from '../app.js';
 import { SqliteOwnerAuthStore } from '../data/sqlite-owner-auth-store.js';
@@ -683,6 +684,34 @@ describe('with an owner password', () => {
     expect(loaded.map((embed) => embed.status)).toEqual([200, 200]);
     const bodies = await Promise.all(loaded.map(async (embed) => embed.arrayBuffer()));
     expect(bodies.map((body) => new Uint8Array(body))).toEqual([PNG, PNG]);
+  });
+
+  it('extracts and stores again an embed template whose stored row cannot be read', async () => {
+    const image = await createImage();
+    const html = await createHtml(`<img src="/a/${image.id}">`);
+    const database = new DatabaseSync(join(dataDir, 'artifacts.db'));
+    const storedEmbeds = () =>
+      database
+        .prepare('SELECT embeds FROM artifact_embed_templates WHERE artifact_id = ?')
+        .get(html.id)?.embeds;
+    const intact = storedEmbeds();
+    database
+      .prepare('UPDATE artifact_embed_templates SET embeds = ? WHERE artifact_id = ?')
+      .run('not json', html.id);
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const cookie = await logIn();
+
+    const res = await testApp.request(`/a/${html.id}`, { headers: { Cookie: cookie } });
+
+    expect(res.status).toBe(200);
+    expect(sources(await res.text())[0]).toMatch(
+      new RegExp(`^/a/${image.id}${SIGNED_EMBED}$`, 'u'),
+    );
+    expect(intact).toContain(image.id);
+    expect(storedEmbeds()).toBe(intact);
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('embed template read failed'));
+    stderr.mockRestore();
+    database.close();
   });
 
   it('keeps an embed URL working past the renderer’s lifetime, then refuses it', async () => {

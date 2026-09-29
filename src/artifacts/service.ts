@@ -129,9 +129,10 @@ function reportFailure(step: string, error: unknown): void {
 //
 // An HTML artifact's embed template is extracted once, when it is created,
 // and stored beside its metadata, so a view signs its embedded URLs without
-// parsing HTML. The template is derived data: a failure to store it never
-// fails the create, and a view extracts and stores it again when it is
-// missing or was made by another extractor version.
+// parsing HTML. The template is derived data: a failure to store or read it
+// never fails the create or the view, and a view extracts and stores it
+// again when it is missing, unreadable, or was made by another extractor
+// version.
 //
 // A Markdown artifact is rendered once, when it is created, and the
 // rendering is stored beside its metadata, so viewing it parses nothing.
@@ -143,6 +144,16 @@ export function createArtifactService(
   content: ArtifactContentStore,
   renderer: MarkdownRenderer = markdownRenderer,
 ): ArtifactService {
+  // A stored template that cannot be read is treated as missing.
+  async function findTemplate(id: string): Promise<EmbedTemplate | null> {
+    try {
+      return await metadata.findEmbedTemplate(id);
+    } catch (error) {
+      reportFailure('embed template read', error);
+      return null;
+    }
+  }
+
   async function saveTemplate(id: string, template: EmbedTemplate): Promise<void> {
     try {
       await metadata.saveEmbedTemplate(id, template);
@@ -265,7 +276,7 @@ export function createArtifactService(
     if (artifact?.mediaType !== HTML) {
       return null;
     }
-    const stored = await metadata.findEmbedTemplate(id);
+    const stored = await findTemplate(id);
     if (stored?.extractorVersion === EMBED_EXTRACTOR_VERSION) {
       return stored.references;
     }
