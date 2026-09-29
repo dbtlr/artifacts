@@ -214,8 +214,9 @@ With a password set:
   each `/a/:id` URL in the `src`, `srcset`, `poster`, or `href` of an `img`, `source`, `iframe`,
   `video`, `audio`, or `link` element. The URL must be root-relative or start with
   `ARTIFACTS_PUBLIC_BASE_URL`, and it may have a fragment but no query. Each view replaces those
-  URLs with signed URLs that work for 10 minutes. URLs that scripts build, and CSS `url()`, are not
-  signed and do not load.
+  URLs with signed URLs that work for 10 to 15 minutes. Views in the same clock five minutes get the
+  same URLs, so the browser can reuse cached embeds. URLs that scripts build, and CSS `url()`, are
+  not signed and do not load.
 - Gallery previews still render. The renderer reads each artifact through a signed URL that works
   for 60 seconds and for that one artifact only. An expired or altered signature gets `403`.
 - Set `ARTIFACTS_PUBLIC_BASE_URL` to the URL the browser uses. Login and logout forms are accepted

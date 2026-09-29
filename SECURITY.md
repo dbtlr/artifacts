@@ -46,7 +46,8 @@ only for the owner.
   only with the current or previous hour's key, so no signed URL works for more than about two
   hours. A request with an expired, altered, or misapplied signature and no session gets `403`.
 - An HTML artifact's embedded `/a/:id` URLs get the same kind of signature on each view, valid for
-  10 minutes. A page read through a signature also gets its embeds signed. The artifact's own
+  10 to 15 minutes. Views in the same clock five minutes get the same URLs, so the browser can reuse
+  cached embeds. A page read through a signature also gets its embeds signed. The artifact's own
   scripts can read these URLs. The references are fixed when the artifact is created, so they name
   only artifacts that its creator could already read.
 
