@@ -899,6 +899,28 @@ describe('post /mcp from a web page', () => {
     await expect(store.getArtifact(victim.id)).resolves.not.toBeNull();
   });
 
+  // The default base URL names wherever a local dev server may run, not this
+  // instance, so only a configured base URL is trusted.
+  it('rejects the default base URL origin when none is configured', async () => {
+    const victim = await createVictim();
+    const configured = process.env.ARTIFACTS_PUBLIC_BASE_URL;
+    delete process.env.ARTIFACTS_PUBLIC_BASE_URL;
+
+    try {
+      const res = await testApp.request(
+        '/mcp',
+        removeRequest(victim.id, { Origin: 'http://localhost:3000' }),
+      );
+
+      expect(res.status).toBe(403);
+    } finally {
+      if (configured !== undefined) {
+        process.env.ARTIFACTS_PUBLIC_BASE_URL = configured;
+      }
+    }
+    await expect(store.getArtifact(victim.id)).resolves.not.toBeNull();
+  });
+
   it('serves the request from this server’s own origin', async () => {
     const victim = await createVictim();
 

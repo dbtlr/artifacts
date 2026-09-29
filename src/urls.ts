@@ -33,10 +33,16 @@ export function resolvePublicBaseUrl(): string {
 }
 
 // Whether an Origin header names this server, as the request reached it
-// (`requestUrl`) or as its public base URL names it (they differ behind a
-// proxy). `null`, from sandboxed artifacts, never does.
+// (`requestUrl`) or as a configured public base URL names it (they differ
+// behind a proxy). The default base URL is not trusted: it names wherever a
+// local dev server may run, not this instance. `null`, from sandboxed
+// artifacts, never matches.
 export function isOwnOrigin(origin: string, requestUrl: string): boolean {
-  return origin === new URL(requestUrl).origin || origin === new URL(resolvePublicBaseUrl()).origin;
+  return (
+    origin === new URL(requestUrl).origin ||
+    (process.env.ARTIFACTS_PUBLIC_BASE_URL !== undefined &&
+      origin === new URL(resolvePublicBaseUrl()).origin)
+  );
 }
 
 // The display route (/a/<id>) lands in a later task; this stays importable
