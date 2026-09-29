@@ -53,6 +53,8 @@ ENV ARTIFACTS_CHROMIUM_PATH=/usr/bin/chromium
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 COPY --from=builder /app/dist ./dist
+# The SQL migrations are read at startup from <app root>/migrations.
+COPY migrations ./migrations
 RUN mkdir -p /app/data/database /app/data/files /app/data/thumbs && chown -R node:node /app/data
 
 # Run as the non-root `node` user baked into the base image (uid/gid 1000)
