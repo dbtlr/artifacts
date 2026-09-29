@@ -493,12 +493,14 @@ export async function executeDockerAction(
     return;
   }
 
-  const config = resolveDockerConfig(env);
   if (action === 'build') {
     await runRequired(run, ['build', '--tag', IMAGE_NAME, '.']);
     return;
   }
   if (action === 'start') {
+    // Only start reads the configuration, so a setting that start refuses
+    // never stops an operator from stopping or inspecting a running container.
+    const config = resolveDockerConfig(env);
     await validateBindMounts(config);
     await runRequired(run, ['build', '--tag', IMAGE_NAME, '.']);
     await validateBindMountWritability(config, run);

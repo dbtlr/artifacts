@@ -639,4 +639,21 @@ describe('Docker operator actions', () => {
       ['logs', '--follow', 'artifacts'],
     ]);
   });
+
+  it('stops, builds, and follows logs even when the start configuration is invalid', async () => {
+    const calls: string[][] = [];
+    const env = { ARTIFACTS_OWNER_PASSWORD: 'hunter2' };
+    const run: DockerRun = async (args) => {
+      calls.push(args);
+      return { exitCode: 0, output: args[0] === 'container' ? 'true' : '' };
+    };
+
+    await executeDockerAction('stop', { composeFileExists: false, env, run });
+    await executeDockerAction('build', { composeFileExists: false, env, run });
+    await executeDockerAction('logs', { composeFileExists: false, env, run });
+
+    expect(calls).toContainEqual(['stop', 'artifacts']);
+    expect(calls).toContainEqual(['build', '--tag', 'artifacts:local', '.']);
+    expect(calls).toContainEqual(['logs', '--follow', 'artifacts']);
+  });
 });
