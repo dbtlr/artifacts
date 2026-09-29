@@ -255,9 +255,10 @@ pnpm build
 
 `pnpm test` runs two Vitest projects. `node` runs the ordinary tests. `workers` runs
 `*.workers.test.ts` files inside workerd, the local Workers runtime, through
-`@cloudflare/vitest-pool-workers`, with Miniflare providing R2 bindings locally. It needs no
-Cloudflare account. The R2 adapters run the same store contract suites there that the filesystem
-adapters run under Node.
+`@cloudflare/vitest-pool-workers`, with Miniflare providing D1 and R2 bindings locally. It needs
+no Cloudflare account. The D1 and R2 adapters run the same store contract suites there that the
+SQLite and filesystem adapters run under Node, and the D1 tests apply the shared `migrations/`
+files first.
 
 `pnpm start` runs an existing build with development storage defaults. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow.

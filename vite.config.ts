@@ -1,6 +1,8 @@
-import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
+import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
 import { defineConfig, toolingPlugin } from '@dbtlr/tooling';
 import tailwindcss from '@tailwindcss/vite';
+
+import { MIGRATIONS_DIR } from './src/migrations-dir.js';
 
 // Composition path: toolingPlugin batteries (node: true, pack) — `dev` runs the
 // server straight off src/ via tsx watch, but `build` needs a real production
@@ -83,19 +85,22 @@ export default defineConfig({
   // providing the bindings locally; no Cloudflare account is involved. It
   // does not extend the root config, so the app's Vite plugins stay out of
   // the Worker. Bindings added here also need a type in
-  // src/workers-test-env.d.ts.
+  // src/workers-test-env.d.ts. TEST_MIGRATIONS carries the shared SQL
+  // migrations into the Worker, where tests apply them to the D1 database.
   test: {
     projects: [
       { extends: true, test: { exclude: ['src/**/*.workers.test.ts'], name: 'node' } },
       {
         plugins: [
-          cloudflareTest({
+          cloudflareTest(async () => ({
             miniflare: {
+              bindings: { TEST_MIGRATIONS: await readD1Migrations(MIGRATIONS_DIR) },
               compatibilityDate: '2026-08-15',
               compatibilityFlags: ['nodejs_compat'],
+              d1Databases: ['ARTIFACTS_DB'],
               r2Buckets: ['ARTIFACTS_BUCKET'],
             },
-          }),
+          })),
         ],
         test: { include: ['src/**/*.workers.test.ts'], name: 'workers' },
       },
