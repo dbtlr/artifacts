@@ -4,7 +4,7 @@
 // compiles against.
 export type D1PreparedStatementBinding = {
   all: () => Promise<{ results: Record<string, unknown>[] }>;
-  bind: (...values: (string | null)[]) => D1PreparedStatementBinding;
+  bind: (...values: (number | string | null)[]) => D1PreparedStatementBinding;
   first: () => Promise<Record<string, unknown> | null>;
   run: () => Promise<{ meta: { changes: number } }>;
 };

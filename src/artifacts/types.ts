@@ -1,3 +1,4 @@
+import type { EmbedReference } from './embeds.js';
 import type { LegacyArtifactType as ArtifactType, MediaType } from './media.js';
 
 export type { LegacyArtifactType as ArtifactType, MediaType } from './media.js';
@@ -25,6 +26,12 @@ export type CreateArtifactInput = {
   title: string;
 };
 
+// An HTML artifact's embed template: where its text loads other artifacts of
+// this instance, found once when it is stored, so a view can sign those URLs
+// without parsing HTML. It is derived data: a template from another
+// `extractorVersion` is outdated and is extracted again.
+export type EmbedTemplate = { extractorVersion: number; references: EmbedReference[] };
+
 export type ListArtifactsQuery = { collection?: string; project?: string };
 
 // Storage ports are async so that adapters over async-only backends fit
@@ -38,8 +45,14 @@ export type ArtifactMetadataStore = {
   // at missing content.
   create: (artifact: Artifact) => Promise<void>;
   find: (id: string) => Promise<Artifact | null>;
+  // Resolves null when no embed template is stored for the id.
+  findEmbedTemplate: (id: string) => Promise<EmbedTemplate | null>;
   list: (query?: ListArtifactsQuery) => Promise<Artifact[]>;
+  // Also drops the artifact's embed template.
   remove: (id: string) => Promise<boolean>;
+  // Replaces any stored template. Stores nothing when no artifact has the
+  // id, so a save that loses a race with a remove leaves no orphan.
+  saveEmbedTemplate: (id: string, template: EmbedTemplate) => Promise<void>;
 };
 
 export type ArtifactContentStore = {
@@ -55,6 +68,9 @@ export type ArtifactService = {
   createArtifact: (input: CreateArtifactInput) => Promise<Artifact>;
   findArtifact: (id: string) => Promise<Artifact | null>;
   getArtifact: (id: string) => Promise<ArtifactWithContent | null>;
+  // Where an HTML artifact loads other artifacts of this instance, in text
+  // order. Resolves null when no HTML artifact has the id.
+  getEmbedReferences: (id: string) => Promise<EmbedReference[] | null>;
   listArtifacts: (query?: ListArtifactsQuery) => Promise<Artifact[]>;
   removeArtifact: (id: string) => Promise<boolean>;
 };

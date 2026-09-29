@@ -1,6 +1,7 @@
 import type { nanoid } from 'nanoid';
 import { describe, expect, it, vi } from 'vite-plus/test';
 
+import { EMBED_EXTRACTOR_VERSION } from './embeds.js';
 import { createMemoryStores } from './memory-stores.test-support.js';
 import { createArtifactService } from './service.js';
 import type {
@@ -32,8 +33,10 @@ function createRaceFixture() {
   const metadata: ArtifactMetadataStore = {
     create: async () => undefined,
     find: async () => artifact,
+    findEmbedTemplate: async () => null,
     list: async () => [artifact],
     remove: async () => false,
+    saveEmbedTemplate: async () => undefined,
   };
   const content: ArtifactContentStore = {
     read: async () => new TextEncoder().encode('original'),
@@ -212,5 +215,92 @@ describe('ArtifactService ids', () => {
 
     expect(created.id).not.toBe(artifact.id);
     await expect(service.getArtifact(artifact.id)).resolves.toMatchObject({ content: bytes });
+  });
+});
+
+const htmlPage = '<p>Chart</p><img src="/a/chart-id" alt="chart">';
+const chartStart = htmlPage.indexOf('/a/chart-id');
+
+const htmlInput: CreateArtifactInput = {
+  content: new TextEncoder().encode(htmlPage),
+  description: 'description',
+  mediaType: 'text/html',
+  project: 'artifacts',
+  title: 'Page',
+};
+
+describe('ArtifactService embed templates', () => {
+  it('extracts an HTML artifact’s embed template when it is created', async () => {
+    const stores = createMemoryStores();
+    const service = createArtifactService(stores.metadata, stores.content);
+
+    const created = await service.createArtifact(htmlInput);
+
+    expect(stores.templates.get(created.id)).toEqual({
+      extractorVersion: EMBED_EXTRACTOR_VERSION,
+      references: [{ id: 'chart-id', start: chartStart }],
+    });
+  });
+
+  it('answers from the stored template without reading the content', async () => {
+    const stores = createMemoryStores();
+    const service = createArtifactService(stores.metadata, stores.content);
+    const created = await service.createArtifact(htmlInput);
+    stores.files.clear();
+
+    await expect(service.getEmbedReferences(created.id)).resolves.toEqual([
+      { id: 'chart-id', start: chartStart },
+    ]);
+  });
+
+  it.each([
+    ['a missing', undefined],
+    ['an outdated', { extractorVersion: EMBED_EXTRACTOR_VERSION + 1, references: [] }],
+  ])('extracts and stores %s template on its first view', async (_state, stored) => {
+    const page = { ...artifact, mediaType: 'text/html' as const };
+    const stores = createMemoryStores([{ artifact: page, bytes: htmlInput.content }]);
+    if (stored !== undefined) {
+      stores.templates.set(page.id, stored);
+    }
+    const service = createArtifactService(stores.metadata, stores.content);
+
+    await expect(service.getEmbedReferences(page.id)).resolves.toEqual([
+      { id: 'chart-id', start: chartStart },
+    ]);
+    expect(stores.templates.get(page.id)?.extractorVersion).toBe(EMBED_EXTRACTOR_VERSION);
+  });
+
+  it('has no template for other media types or a missing id', async () => {
+    const stores = createMemoryStores();
+    const service = createArtifactService(stores.metadata, stores.content);
+
+    const created = await service.createArtifact({ ...input, content: htmlInput.content });
+
+    expect(stores.templates.size).toBe(0);
+    await expect(service.getEmbedReferences(created.id)).resolves.toBeNull();
+    await expect(service.getEmbedReferences('missing')).resolves.toBeNull();
+  });
+
+  it('keeps a created artifact when storing its template fails', async () => {
+    const stores = createMemoryStores();
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const service = createArtifactService(
+      {
+        ...stores.metadata,
+        saveEmbedTemplate: async () => {
+          throw new Error('template write failed');
+        },
+      },
+      stores.content,
+    );
+
+    const created = await service.createArtifact(htmlInput);
+
+    await expect(service.findArtifact(created.id)).resolves.toEqual(created);
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('template write failed'));
+    await expect(service.getEmbedReferences(created.id)).resolves.toEqual([
+      { id: 'chart-id', start: chartStart },
+    ]);
+    stderr.mockRestore();
   });
 });

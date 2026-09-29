@@ -7,8 +7,10 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 
+import { substituteEmbedReferences } from './artifacts/embeds.js';
 import { legacyTypeFromMediaType } from './artifacts/media.js';
 import { installOwnerAuth } from './auth/routes.js';
+import { EMBED_URL_LIFETIME_SECONDS } from './auth/signed-urls.js';
 import { ArtifactPage } from './components/artifact-page.js';
 import { HomePage } from './components/home-page.js';
 import { Layout } from './components/layout.js';
@@ -211,13 +213,17 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
   });
 
   // html artifacts are served as-is, inside the HTML_ARTIFACT_CSP sandbox.
-  // md/txt render inside the standard Layout instead. A row whose content
-  // file is missing makes getArtifact reject (see artifacts/service.ts) — that's deliberately
-  // left unguarded here too, so it surfaces as a 500 rather than masquerading
-  // as an ordinary 404.
+  // With owner auth on, the sandbox's own requests carry no session, so each
+  // embedded /a/:id URL its template records is signed for this view; a
+  // request that got here was already allowed to read the page, by session
+  // or by signature. md/txt render inside the standard Layout instead. A
+  // row whose content file is missing makes getArtifact reject (see
+  // artifacts/service.ts) — that's deliberately left unguarded here too, so
+  // it surfaces as a 500 rather than masquerading as an ordinary 404.
   app.on(['GET', 'HEAD'], '/a/:id', async (c) => {
     const id = c.req.param('id');
-    const artifact = await (await resolveServices()).artifacts.getArtifact(id);
+    const { artifacts, auth } = await resolveServices();
+    const artifact = await artifacts.getArtifact(id);
     if (!artifact) {
       return c.html(
         <Layout title="Artifact not found">
@@ -254,7 +260,15 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
     }
     const legacy = legacyArtifact(artifact);
     if (legacy.type === 'html') {
-      return c.html(legacy.content, 200, { 'Content-Security-Policy': HTML_ARTIFACT_CSP });
+      const html =
+        auth === undefined
+          ? legacy.content
+          : substituteEmbedReferences(
+              legacy.content,
+              (await artifacts.getEmbedReferences(id)) ?? [],
+              (embedded) => auth.artifactUrls.signedPath(embedded, EMBED_URL_LIFETIME_SECONDS),
+            );
+      return c.html(html, 200, { 'Content-Security-Policy': HTML_ARTIFACT_CSP });
     }
     // Only `md` renders through the markdown pipeline; `txt` is passed
     // through untouched (ArtifactPage falls back to a plain <pre> whenever

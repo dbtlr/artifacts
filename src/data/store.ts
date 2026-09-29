@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+import { extractEmbedReferences } from '../artifacts/embeds.js';
 import { legacyTypeFromMediaType, mediaTypeFromLegacyType } from '../artifacts/media.js';
 import { createArtifactService } from '../artifacts/service.js';
 import type {
@@ -12,6 +13,7 @@ import type {
 } from '../artifacts/types.js';
 import { resolveStoragePaths } from '../data-dir.js';
 import type { StoragePaths } from '../data-dir.js';
+import { resolvePublicBaseUrl } from '../urls.js';
 import { FilesystemArtifactContentStore } from './filesystem-artifact-content-store.js';
 import { SqliteArtifactMetadataStore } from './sqlite-artifact-metadata-store.js';
 
@@ -89,6 +91,14 @@ export function adaptLegacyArtifactStore(store: ArtifactStore): ArtifactService 
       }
       const { content, ...metadata } = artifact;
       return { ...fromLegacyArtifact(metadata), content: new TextEncoder().encode(content) };
+    },
+    // A caller-supplied store has nowhere to keep derived data, so an HTML
+    // artifact's references are extracted on every view.
+    getEmbedReferences: async (id) => {
+      const artifact = await store.getArtifact(id);
+      return artifact?.type === 'html'
+        ? extractEmbedReferences(artifact.content, resolvePublicBaseUrl())
+        : null;
     },
     listArtifacts: async (query) => (await store.listArtifacts(query)).map(fromLegacyArtifact),
     removeArtifact: (id) => store.removeArtifact(id),

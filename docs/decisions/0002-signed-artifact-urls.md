@@ -47,3 +47,8 @@ reuse it.
 
 - A deployment that runs more than one process, or serves embed URLs across restarts, needs a
   shared key. That key must come from its own secret, not the password.
+
+## Changelog
+
+- 2026-09-29: [ADR-0003](0003-signed-embed-urls.md) signs embedded URLs in HTML artifacts with this
+  signer. They last 10 minutes; the caller now picks a lifetime, and thumbnails keep 60 seconds.

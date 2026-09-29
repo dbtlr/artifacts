@@ -9,9 +9,10 @@ import { SqliteOwnerAuthStore } from '../data/sqlite-owner-auth-store.js';
 import type { ArtifactService } from '../data/store.js';
 import { createByteNativeArtifactService } from '../data/store.js';
 import { createThumbnailQueue } from '../thumbnails/queue.js';
+import { buildArtifactUrl } from '../urls.js';
 import { createOwnerAuth, LOGIN_ATTEMPT_LIMIT, SESSION_LIFETIME_SECONDS } from './owner-auth.js';
 import type { OwnerAuth } from './owner-auth.js';
-import { SIGNED_URL_LIFETIME_SECONDS } from './signed-urls.js';
+import { EMBED_URL_LIFETIME_SECONDS, SIGNED_URL_LIFETIME_SECONDS } from './signed-urls.js';
 
 const PASSWORD = 'correct horse battery staple';
 // app.request() resolves paths against http://localhost.
@@ -83,6 +84,43 @@ function listArtifactsCall(headers: Record<string, string> = {}): RequestInit {
   };
 }
 
+// PNG signature bytes, which is all the service checks for an image.
+const PNG = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2]);
+
+function createImage() {
+  return service.createArtifact({
+    content: PNG,
+    description: 'Embedded image',
+    filename: 'chart.png',
+    mediaType: 'image/png',
+    project: 'auth',
+    title: 'Chart',
+  });
+}
+
+function createHtml(content: string) {
+  return service.createArtifact({
+    content: new TextEncoder().encode(content),
+    description: 'Page with embeds',
+    mediaType: 'text/html',
+    project: 'auth',
+    title: 'Page',
+  });
+}
+
+// The src attribute values of a page, as the browser reads them.
+function sources(html: string): string[] {
+  return [...html.matchAll(/src="([^"]*)"/gu)].map(([, value]) => value!.replaceAll('&amp;', '&'));
+}
+
+// The path and query of a URL, which is what app.request() routes on.
+function pathOf(url: string): string {
+  const parsed = new URL(url, ORIGIN);
+  return `${parsed.pathname}${parsed.search}`;
+}
+
+const SIGNED_EMBED = String.raw`\?expires=\d+&signature=[\w-]+`;
+
 const SHOWN_KEY = /art_[\w-]{43}/u;
 
 // The `name=value` pair a browser would send back from a Set-Cookie header.
@@ -125,6 +163,16 @@ describe('with no owner password', () => {
     expect((await testApp.request('/keys')).status).toBe(404);
     expect((await testApp.request('/keys', formPost({ name: 'agent' }, {}))).status).toBe(404);
     expect((await testApp.request('/keys/any/revoke', formPost({}, {}))).status).toBe(404);
+  });
+
+  it('serves an HTML artifact’s embedded URLs unchanged', async () => {
+    const image = await createImage();
+    const page = `<img src="${buildArtifactUrl(image.id)}"><img src="/a/${image.id}">`;
+    const html = await createHtml(page);
+
+    const res = await testApp.request(`/a/${html.id}`);
+
+    await expect(res.text()).resolves.toBe(page);
   });
 
   it('serves /mcp without a key', async () => {
@@ -582,6 +630,88 @@ describe('with an owner password', () => {
     });
 
     expect(res.status).toBe(200);
+  });
+
+  it('signs an HTML artifact’s embedded URLs so they load without a session', async () => {
+    const image = await createImage();
+    const html = await createHtml(
+      `<img src="${buildArtifactUrl(image.id)}" alt="absolute"><img src="/a/${image.id}#x">`,
+    );
+    const cookie = await logIn();
+
+    const res = await testApp.request(`/a/${html.id}`, { headers: { Cookie: cookie } });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-security-policy')).toBe('sandbox allow-scripts');
+    const [absolute, relative] = sources(await res.text());
+    expect(absolute).toMatch(new RegExp(`^${buildArtifactUrl(image.id)}${SIGNED_EMBED}$`, 'u'));
+    expect(relative).toMatch(new RegExp(`^/a/${image.id}${SIGNED_EMBED}#x$`, 'u'));
+    const loaded = await Promise.all(
+      [absolute!, relative!].map(async (url) => testApp.request(pathOf(url))),
+    );
+    expect(loaded.map((embed) => embed.status)).toEqual([200, 200]);
+    const bodies = await Promise.all(loaded.map(async (embed) => embed.arrayBuffer()));
+    expect(bodies.map((body) => new Uint8Array(body))).toEqual([PNG, PNG]);
+  });
+
+  it('keeps an embed URL working past the renderer’s lifetime, then refuses it', async () => {
+    let now = new Date();
+    const timedAuth = createOwnerAuth({
+      now: () => now,
+      password: PASSWORD,
+      store: await SqliteOwnerAuthStore.open(join(dataDir, 'artifacts.db')),
+    });
+    const timedApp = createApp({ artifacts: service, auth: timedAuth, mcp: service });
+    const image = await createImage();
+    const html = await createHtml(`<img src="/a/${image.id}">`);
+    const page = await timedApp.request(timedAuth.artifactUrls.signedPath(html.id));
+    const [embedUrl] = sources(await page.text());
+    const viewedAt = now.getTime();
+
+    now = new Date(viewedAt + SIGNED_URL_LIFETIME_SECONDS * 1000);
+    expect((await timedApp.request(embedUrl!)).status).toBe(200);
+
+    now = new Date(viewedAt + EMBED_URL_LIFETIME_SECONDS * 1000);
+    expect((await timedApp.request(embedUrl!)).status).toBe(403);
+  });
+
+  it('refuses an embed signature used for another artifact or altered', async () => {
+    const image = await createImage();
+    const secret = await createText('not embedded anywhere');
+    const html = await createHtml(`<img src="/a/${image.id}">`);
+    const cookie = await logIn();
+    const page = await testApp.request(`/a/${html.id}`, { headers: { Cookie: cookie } });
+    const embed = new URL(sources(await page.text())[0]!, ORIGIN);
+    const signature = embed.searchParams.get('signature')!;
+    const altered = new URLSearchParams({
+      expires: embed.searchParams.get('expires')!,
+      signature: `${signature.slice(0, -1)}${signature.endsWith('A') ? 'B' : 'A'}`,
+    });
+
+    const responses = await Promise.all(
+      [`/a/${secret.id}${embed.search}`, `/a/${image.id}?${altered.toString()}`].map(async (path) =>
+        testApp.request(path),
+      ),
+    );
+
+    expect(responses.map((res) => res.status)).toEqual([403, 403]);
+    await expect(responses[0]!.text()).resolves.not.toContain('not embedded anywhere');
+  });
+
+  it('signs the embeds of an HTML artifact that is itself read through a signed URL', async () => {
+    const image = await createImage();
+    const inner = await createHtml(`<img src="/a/${image.id}">`);
+    const outer = await createHtml(`<iframe src="/a/${inner.id}"></iframe>`);
+    const cookie = await logIn();
+
+    const page = await testApp.request(`/a/${outer.id}`, { headers: { Cookie: cookie } });
+    const [frameUrl] = sources(await page.text());
+    const frame = await testApp.request(frameUrl!);
+    const [imageUrl] = sources(await frame.text());
+    const loaded = await testApp.request(imageUrl!);
+
+    expect([frame.status, loaded.status]).toEqual([200, 200]);
+    expect(new Uint8Array(await loaded.arrayBuffer())).toEqual(PNG);
   });
 
   it('lets the thumbnail queue render an artifact through a signed URL', async () => {

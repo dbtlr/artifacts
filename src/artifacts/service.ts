@@ -1,5 +1,8 @@
 import { nanoid } from 'nanoid';
 
+import { resolvePublicBaseUrl } from '../urls.js';
+import { EMBED_EXTRACTOR_VERSION, extractEmbedReferences } from './embeds.js';
+import type { EmbedReference } from './embeds.js';
 import { hasValidSignature, isMediaType, MAX_ARTIFACT_BYTES, mediaDefinition } from './media.js';
 import type {
   Artifact,
@@ -8,12 +11,14 @@ import type {
   ArtifactService,
   ArtifactWithContent,
   CreateArtifactInput,
+  EmbedTemplate,
   MediaType,
 } from './types.js';
 
 const ID_LENGTH = 10;
 const MAX_ID_ATTEMPTS = 5;
 const SAFE_FILENAME = /^[^/\\]+$/u;
+const HTML: MediaType = 'text/html';
 
 function hasControlCharacter(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
@@ -86,10 +91,19 @@ function assertValidContent(mediaType: MediaType, bytes: Uint8Array): void {
   }
 }
 
-function reportCleanupFailure(action: string, error: unknown): void {
+function extractTemplate(bytes: Uint8Array): EmbedTemplate {
+  const html = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  return {
+    extractorVersion: EMBED_EXTRACTOR_VERSION,
+    references: extractEmbedReferences(html, resolvePublicBaseUrl()),
+  };
+}
+
+// Reports a failed side step that must not change the operation's result.
+function reportFailure(step: string, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   try {
-    process.stderr.write(`Artifact ${action} cleanup failed: ${message}\n`);
+    process.stderr.write(`Artifact ${step} failed: ${message}\n`);
   } catch {
     // Reporting must not replace the operation result being preserved.
   }
@@ -102,10 +116,24 @@ function reportCleanupFailure(action: string, error: unknown): void {
 // content already gone once the row is gone too, and resolves null either
 // way. Nothing here holds state between calls, so the same rules hold for
 // several processes sharing the stores.
+//
+// An HTML artifact's embed template is extracted once, when it is created,
+// and stored beside its metadata, so a view signs its embedded URLs without
+// parsing HTML. The template is derived data: a failure to store it never
+// fails the create, and a view extracts and stores it again when it is
+// missing or was made by another extractor version.
 export function createArtifactService(
   metadata: ArtifactMetadataStore,
   content: ArtifactContentStore,
 ): ArtifactService {
+  async function saveTemplate(id: string, template: EmbedTemplate): Promise<void> {
+    try {
+      await metadata.saveEmbedTemplate(id, template);
+    } catch (error) {
+      reportFailure('embed template save', error);
+    }
+  }
+
   // Stores the artifact under a fresh id; a taken id resolves null. Two
   // creates that draw the same fresh id at once are not guarded against:
   // with ten-character nanoids that is not a practical risk.
@@ -131,7 +159,7 @@ export function createArtifactService(
       try {
         await content.remove(id, input.mediaType);
       } catch (cleanupError) {
-        reportCleanupFailure('create', cleanupError);
+        reportFailure('create cleanup', cleanupError);
       }
       throw error;
     }
@@ -160,7 +188,12 @@ export function createArtifactService(
     }
     assertValidFilename(input.mediaType, input.filename);
     assertValidContent(input.mediaType, input.content);
-    return storeNew(input);
+    const template = input.mediaType === HTML ? extractTemplate(input.content) : undefined;
+    const created = await storeNew(input);
+    if (template !== undefined) {
+      await saveTemplate(created.id, template);
+    }
+    return created;
   }
 
   // Missing content under a row that still exists is corruption, not a race.
@@ -179,6 +212,24 @@ export function createArtifactService(
     throw new Error(`Artifact ${JSON.stringify(id)} content is missing`);
   }
 
+  async function getEmbedReferences(id: string): Promise<EmbedReference[] | null> {
+    const artifact = await metadata.find(id);
+    if (artifact?.mediaType !== HTML) {
+      return null;
+    }
+    const stored = await metadata.findEmbedTemplate(id);
+    if (stored?.extractorVersion === EMBED_EXTRACTOR_VERSION) {
+      return stored.references;
+    }
+    const source = await getArtifact(id);
+    if (source === null) {
+      return null;
+    }
+    const template = extractTemplate(source.content);
+    await saveTemplate(id, template);
+    return template.references;
+  }
+
   async function removeArtifact(id: string): Promise<boolean> {
     const artifact = await metadata.find(id);
     if (!artifact || !(await metadata.remove(id))) {
@@ -187,7 +238,7 @@ export function createArtifactService(
     try {
       await content.remove(id, artifact.mediaType);
     } catch (error) {
-      reportCleanupFailure('remove', error);
+      reportFailure('remove cleanup', error);
     }
     return true;
   }
@@ -196,6 +247,7 @@ export function createArtifactService(
     createArtifact,
     findArtifact: (id) => metadata.find(id),
     getArtifact,
+    getEmbedReferences,
     listArtifacts: (query) => metadata.list(query),
     removeArtifact,
   };
