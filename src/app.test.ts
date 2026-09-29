@@ -233,6 +233,25 @@ describe('get /a/:id', () => {
     expect(body).toBe(htmlContent);
   });
 
+  it('serves an html artifact in an opaque-origin sandbox that allows scripts', async () => {
+    const artifact = await store.createArtifact({
+      content: '<!doctype html><script>document.title = "ran"</script>',
+      description: 'Scripted html',
+      project: 'display-route',
+      title: 'Sandboxed HTML',
+      type: 'html',
+    });
+
+    const get = await testApp.request(`/a/${artifact.id}`);
+    const head = await testApp.request(`/a/${artifact.id}`, { method: 'HEAD' });
+
+    // No allow-same-origin: the document gets an opaque origin, so its
+    // scripts cannot read cookies, storage, or app responses. No allow-forms:
+    // a form cannot submit to the app.
+    expect(get.headers.get('content-security-policy')).toBe('sandbox allow-scripts');
+    expect(head.headers.get('content-security-policy')).toBe('sandbox allow-scripts');
+  });
+
   it('renders an md artifact inside the layout, with content escaped', async () => {
     const artifact = await store.createArtifact({
       content: '# Heading\n\n<script>alert("xss")</script>\n\n```ts\nconst x = 1;\n```\n',

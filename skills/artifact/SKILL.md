@@ -32,7 +32,7 @@ Before creating anything, call `list_collections` and `list_artifacts` (pass `pr
 ### Step 3: Choose a media type and payload
 
 - **`text/markdown`** (document default) — plans, design docs, reports, diagrams, and notes. Send UTF-8 text as `content`.
-- **`text/html`** — bespoke layouts that Markdown cannot express. HTML is served as-is. Send it as `content`.
+- **`text/html`** — bespoke layouts that Markdown cannot express. HTML is served as-is in a CSP sandbox: scripts run, but `localStorage`, cookies, forms, and new windows do not work. Send it as `content`.
 - **`text/plain`** — logs and raw output. Send it as `content`.
 - **PNG, JPEG, GIF, WebP, SVG, or PDF** — use canonical `mediaType`, a safe `filename` whose extension agrees with it, and canonical base64 in `contentBase64`. The decoded limit is 10 MiB; binary files must not be empty and their signatures are validated.
 

@@ -85,6 +85,13 @@ To replace an embedded file, add the new file and then a new version of the docu
 it. Removing a file can break every document that embeds it; collections group artifacts for
 discovery but do not create ownership or cascading deletion.
 
+HTML artifacts are served with a `Content-Security-Policy: sandbox allow-scripts` header. Their
+scripts run, but in an opaque origin that is separate from the Artifacts server. As a result, an
+HTML artifact cannot use `localStorage`, `sessionStorage`, IndexedDB, or cookies, cannot read
+responses from other Artifacts routes, and cannot submit forms. Links that open a new window, such as
+`target="_blank"`, and `alert()` dialogs are also blocked. Images, stylesheets, and scripts that the
+page loads by URL still work, including embedded `/a/:id` files.
+
 ### Optional artifact skill
 
 The bundled skill teaches an agent how to publish documents, files, and their revisions, how to embed
@@ -225,8 +232,9 @@ SQLite while byte-native content lives in a separate files directory. The MCP ad
 base64 for binary transport; base64 is not part of the storage or service model. Markdown is rendered on the server
 with syntax highlighting; Mermaid diagrams are rendered in the browser. Allowlisted images and PDFs
 are served directly from `/a/:id`; SVG responses receive an additional restrictive content security
-policy. Gallery previews are screenshots taken by Alpine's Chromium package, driven by
-playwright-core from a serial in-process queue. The Docker image is a two-stage Alpine build that
+policy, and HTML artifacts are served in a script-enabled CSP sandbox with an opaque origin. Gallery
+previews are screenshots taken by Alpine's Chromium package, driven by playwright-core from a serial
+in-process queue. The Docker image is a two-stage Alpine build that
 runs as the non-root `node` user; the application writes only to its two persistence mounts and
 the derived thumbnails directory, and Chromium keeps its own scratch profile under the container's
 temporary directory.

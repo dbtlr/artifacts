@@ -38,6 +38,11 @@ const STATIC_ROOT = process.env.ARTIFACTS_STATIC_ROOT ?? join(moduleDir, '..', '
 
 const MAX_MCP_BODY_BYTES = 16 * 1024 * 1024;
 
+// HTML artifacts run their scripts in an opaque origin: without
+// allow-same-origin they cannot read the app's cookies, storage, or
+// responses, and without allow-forms they cannot submit forms to it.
+const HTML_ARTIFACT_CSP = 'sandbox allow-scripts';
+
 // server.ts passes the composed services in; `export const app` below (used
 // by embedding callers and tests) leaves `store` undefined and resolves the
 // same default services (see services.ts) lazily on the first request —
@@ -193,11 +198,9 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
     return new Response(new Uint8Array(bytes).buffer, { headers, status: 200 });
   });
 
-  // html artifacts are served as-is — CLAUDE.md: "HTML documents are
-  // displayed as is" (same-origin script execution is an accepted risk,
-  // since content is self-authored on a private network). md/txt render
-  // inside the standard Layout instead. A row whose content file is missing
-  // makes getArtifact reject (see artifacts/service.ts) — that's deliberately
+  // html artifacts are served as-is, inside the HTML_ARTIFACT_CSP sandbox.
+  // md/txt render inside the standard Layout instead. A row whose content
+  // file is missing makes getArtifact reject (see artifacts/service.ts) — that's deliberately
   // left unguarded here too, so it surfaces as a 500 rather than masquerading
   // as an ordinary 404.
   app.on(['GET', 'HEAD'], '/a/:id', async (c) => {
@@ -239,7 +242,7 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
     }
     const legacy = legacyArtifact(artifact);
     if (legacy.type === 'html') {
-      return c.html(legacy.content);
+      return c.html(legacy.content, 200, { 'Content-Security-Policy': HTML_ARTIFACT_CSP });
     }
     // Only `md` renders through the markdown pipeline; `txt` is passed
     // through untouched (ArtifactPage falls back to a plain <pre> whenever
