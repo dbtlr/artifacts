@@ -67,3 +67,9 @@ Passkeys can later use the same session model.
   session and would capture the login form.
 - With auth on, an HTML artifact cannot load other artifacts by URL. Its sandbox gives it an opaque
   origin, so the browser does not send the `SameSite=Lax` cookie on its subresource requests.
+
+## Changelog
+
+- 2026-09-29: [ADR-0002](0002-signed-artifact-urls.md) adds short-lived signed URLs as the one way
+  to read an artifact without a session. With auth on, gallery previews render through them, so
+  the consequence above about placeholders no longer holds.

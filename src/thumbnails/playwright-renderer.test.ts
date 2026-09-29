@@ -121,6 +121,8 @@ describe.skipIf(chromiumPath === undefined)(
       app.get('/a/pdf', (c) =>
         c.body('%PDF-1.4 not really a pdf', 200, { 'Content-Type': 'application/pdf' }),
       );
+      // What the server answers an expired or tampered signed URL.
+      app.get('/a/refused', (c) => c.text('Forbidden', 403));
       app.post('/mcp', (c) => {
         mcpPosts += 1;
         return c.json({});
@@ -194,6 +196,26 @@ describe.skipIf(chromiumPath === undefined)(
         id: 'pdf',
         mediaType: 'application/pdf',
         url: `${baseUrl}/a/pdf`,
+      });
+
+      expect(bytes).toBeNull();
+    });
+
+    it('declines a page the server refuses instead of capturing the error', async () => {
+      const bytes = await renderer.render({
+        id: 'refused',
+        mediaType: 'text/html',
+        url: `${baseUrl}/a/refused`,
+      });
+
+      expect(bytes).toBeNull();
+    });
+
+    it('declines an image the server refuses instead of capturing an empty frame', async () => {
+      const bytes = await renderer.render({
+        id: 'refused',
+        mediaType: 'image/png',
+        url: `${baseUrl}/a/refused`,
       });
 
       expect(bytes).toBeNull();

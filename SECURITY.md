@@ -33,6 +33,10 @@ only for the owner.
   on the `/keys` page. A new key is shown once and stored only as a SHA-256 hash. Keys do not
   expire, and a new password does not revoke them. After a password leak, change the password and
   revoke every key that you did not create.
+- The thumbnail renderer reads artifacts through signed URLs. Each one allows `GET` or `HEAD` of one
+  `/a/:id` for 60 seconds. It is an HMAC-SHA-256 over the artifact ID and the expiry, keyed by a
+  random secret that exists only in the server process. A restart voids every outstanding URL. A
+  request with an expired, altered, or misapplied signature and no session gets `403`.
 
 Serve the instance over HTTPS when it is reachable beyond loopback. Over plain HTTP, the password and
 the session cookie cross the network in clear text. Use a long, random password.

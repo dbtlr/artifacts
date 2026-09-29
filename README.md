@@ -210,7 +210,9 @@ With a password set:
   answers `429` with a `Retry-After` header.
 - `/mcp` answers `401` unless the request carries `Authorization: Bearer <key>` with a key from the
   **API keys** page. A session cookie does not open `/mcp`.
-- Gallery previews stay as placeholders, and HTML artifacts cannot embed other artifacts.
+- HTML artifacts cannot embed other artifacts.
+- Gallery previews still render. The renderer reads each artifact through a signed URL that works
+  for 60 seconds and for that one artifact only. An expired or altered signature gets `403`.
 - Set `ARTIFACTS_PUBLIC_BASE_URL` to the URL the browser uses. Login and logout forms are accepted
   only from that origin or the origin the request arrived on, and an `https:` base URL marks the
   session cookie `Secure`.
@@ -226,8 +228,7 @@ thumbnails directory. Until it exists the card shows a drawn placeholder for the
 PDF keeps its placeholder because headless Chromium downloads PDFs instead of drawing them. Previews
 are derived data: the server re-renders any that are missing at startup, so the thumbnails directory
 needs no backup and no mount. Without a Chromium the server logs one notice and keeps the
-placeholders. With an owner password set, previews are not rendered and every card keeps its
-placeholder.
+placeholders.
 
 A preview is a screenshot of the static document: the render context has JavaScript disabled, so
 an artifact's scripts never run on the server host, and a Mermaid fence shows as its source in the

@@ -83,6 +83,29 @@ describe('createThumbnailQueue', () => {
     await expect(store.read('b')).resolves.toEqual(bytesFor('b'));
   });
 
+  it('asks for each artifact path when its render starts, not when it is queued', async () => {
+    const store = memoryStore();
+    const renderer = fakeRenderer((target) => Promise.resolve(bytesFor(target.id)));
+    const asked: string[] = [];
+    const queue = createThumbnailQueue({
+      artifactPath: (id) => {
+        asked.push(id);
+        return `/a/${id}?signature=${String(asked.length)}`;
+      },
+      lookup: found,
+      store,
+    });
+
+    queue.enqueue('a');
+    await queue.idle();
+    expect(asked).toEqual([]);
+
+    queue.start(renderer, BASE);
+    await queue.idle();
+
+    expect(renderer.calls.map((call) => call.url)).toEqual([`${BASE}/a/a?signature=1`]);
+  });
+
   it('coalesces an id enqueued again while it is still pending', async () => {
     const store = memoryStore();
     const renderer = fakeRenderer((target) => Promise.resolve(bytesFor(target.id)));

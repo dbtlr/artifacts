@@ -38,7 +38,13 @@ async function createDefaultAppServices(): Promise<DefaultAppServices> {
         ? undefined
         : createOwnerAuth({ password, store: await SqliteOwnerAuthStore.open(paths.databasePath) });
     const thumbnails = new FilesystemThumbnailStore(paths.thumbsDir);
-    const thumbnailQueue = createThumbnailQueue({ lookup: base.findArtifact, store: thumbnails });
+    // With auth on, the renderer has no session, so it reads each artifact
+    // through a signed URL made for that render.
+    const thumbnailQueue = createThumbnailQueue({
+      ...(auth === undefined ? {} : { artifactPath: auth.artifactUrls.signedPath }),
+      lookup: base.findArtifact,
+      store: thumbnails,
+    });
     const artifacts = withThumbnails(base, {
       enqueue: thumbnailQueue.enqueue,
       remove: (id) => thumbnails.remove(id),

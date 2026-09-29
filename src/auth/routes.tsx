@@ -104,6 +104,20 @@ async function apiKeysPage(
   );
 }
 
+// Signed URLs read one artifact: GET or HEAD of `/a/:id` only.
+const SIGNED_READ_PATH = /^\/a\/([^/]+)$/u;
+
+// Whether the request carries a signature from `auth` for what it asks for.
+// A signature on any other method or path grants nothing.
+function hasValidSignature(c: Context, auth: OwnerAuth): boolean {
+  const id = SIGNED_READ_PATH.exec(c.req.path)?.[1];
+  return (
+    SAFE_METHODS.has(c.req.method) &&
+    id !== undefined &&
+    auth.artifactUrls.verify(id, new URL(c.req.url).searchParams)
+  );
+}
+
 // The response for a request that auth on does not let through, or
 // undefined when it may proceed.
 async function refuseWithoutSession(c: Context, auth: OwnerAuth): Promise<Response | undefined> {
@@ -125,6 +139,11 @@ async function refuseWithoutSession(c: Context, auth: OwnerAuth): Promise<Respon
   }
   if (isPublicPath(path) || (await auth.hasSession(getCookie(c, SESSION_COOKIE)))) {
     return undefined;
+  }
+  // A request that carries a signature is judged by it rather than sent to
+  // the login form: its reader is a renderer, not a person who can log in.
+  if (new URL(c.req.url).searchParams.has('signature')) {
+    return hasValidSignature(c, auth) ? undefined : c.text('Forbidden', 403);
   }
   if (SAFE_METHODS.has(c.req.method)) {
     const url = new URL(c.req.url);
