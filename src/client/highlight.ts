@@ -2,6 +2,7 @@ import type { HighlighterCore } from 'shiki/core';
 import { createHighlighterCore } from 'shiki/core';
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript';
 
+import type { CodeLanguage } from '../code-languages.js';
 import { loadLanguage, resolveLanguage } from './highlight-languages.js';
 
 // Highlights the page's fenced code blocks in the browser, loaded only on
@@ -20,7 +21,7 @@ import { loadLanguage, resolveLanguage } from './highlight-languages.js';
 // that matches `prefers-color-scheme`.
 const THEMES = { dark: 'github-dark', light: 'github-light' };
 
-type CodeBlock = { code: HTMLElement; language: string; pre: HTMLElement };
+type CodeBlock = { code: HTMLElement; language: CodeLanguage; pre: HTMLElement };
 
 function findCodeBlocks(): CodeBlock[] {
   const blocks: CodeBlock[] = [];
@@ -39,8 +40,8 @@ function findCodeBlocks(): CodeBlock[] {
 // leaves only its own blocks plain.
 async function loadLanguages(
   highlighter: HighlighterCore,
-  languages: Set<string>,
-): Promise<Set<string>> {
+  languages: Set<CodeLanguage>,
+): Promise<Set<CodeLanguage>> {
   const names = [...languages];
   const results = await Promise.allSettled(
     names.map((name) => highlighter.loadLanguage(loadLanguage(name))),

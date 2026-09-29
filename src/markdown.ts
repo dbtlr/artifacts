@@ -1,5 +1,7 @@
 import MarkdownIt from 'markdown-it';
 
+import { resolveCodeLanguage } from './code-languages.js';
+
 // @types/markdown-it exposes the parsed-token shape only via `MarkdownIt`'s
 // `export =` namespace merge, which trips over this project's
 // `verbatimModuleSyntax`; deriving it from `parse`'s own return type instead
@@ -48,15 +50,11 @@ function isMermaidFence(token: Token): boolean {
   return token.type === 'fence' && isMermaidLangName(fenceLangName(token.info));
 }
 
-// A fence the browser can highlight: it names a language, and that language
-// isn't mermaid. markdown-it tags such a fence `<code class="language-x">`,
-// which is what src/client/highlight.ts looks for.
+// A fence the browser can highlight: its language has a grammar in
+// code-languages.ts (mermaid never does). markdown-it tags such a fence
+// `<code class="language-x">`, which is what src/client/highlight.ts reads.
 function isHighlightableFence(token: Token): boolean {
-  if (token.type !== 'fence') {
-    return false;
-  }
-  const langName = fenceLangName(token.info);
-  return langName !== '' && !isMermaidLangName(langName);
+  return token.type === 'fence' && resolveCodeLanguage(fenceLangName(token.info)) !== undefined;
 }
 
 // --- Heading anchors + table of contents ---

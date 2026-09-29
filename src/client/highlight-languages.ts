@@ -1,12 +1,14 @@
 import type { LanguageRegistration } from 'shiki/core';
 
-type LanguageLoader = () => Promise<{ default: LanguageRegistration[] }>;
+import type { CodeLanguage } from '../code-languages.js';
+import { resolveCodeLanguage } from '../code-languages.js';
 
-// The languages the browser highlighter knows. A short explicit list, not
-// shiki's full bundle, so the build only emits these grammars; each is a
-// dynamic import, so a page downloads only the grammars its own fences use.
-// Keys are shiki's grammar names.
-const LANGUAGE_LOADERS: Record<string, LanguageLoader> = {
+type LanguageModule = { default: LanguageRegistration[] };
+
+// One dynamic import per supported language, so the build emits only these
+// grammars and a page downloads only the ones its own fences use. Keyed by
+// CodeLanguage, so the type checker keeps it in step with the shared list.
+const LANGUAGE_LOADERS: Record<CodeLanguage, () => Promise<LanguageModule>> = {
   c: () => import('@shikijs/langs/c'),
   cpp: () => import('@shikijs/langs/cpp'),
   css: () => import('@shikijs/langs/css'),
@@ -30,48 +32,19 @@ const LANGUAGE_LOADERS: Record<string, LanguageLoader> = {
   yaml: () => import('@shikijs/langs/yaml'),
 };
 
-// Shiki's own aliases for the grammars above (each grammar's `aliases`
-// field), needed before the grammar loads to know which one to fetch.
-const LANGUAGE_ALIASES: Record<string, string> = {
-  bash: 'shellscript',
-  'c++': 'cpp',
-  cjs: 'javascript',
-  cts: 'typescript',
-  js: 'javascript',
-  md: 'markdown',
-  mjs: 'javascript',
-  mts: 'typescript',
-  py: 'python',
-  rs: 'rust',
-  sh: 'shellscript',
-  shell: 'shellscript',
-  ts: 'typescript',
-  yml: 'yaml',
-  zsh: 'shellscript',
-};
-
 const LANGUAGE_CLASS_PREFIX = 'language-';
 
 // Maps a `<code>` element's class (markdown-it emits `language-<fence info>`)
-// to a supported grammar name, or undefined when there is nothing to load.
-// `Object.hasOwn` keeps names like `constructor` from matching inherited keys.
-export function resolveLanguage(className: string): string | undefined {
+// to a supported grammar, or undefined when there is nothing to load.
+export function resolveLanguage(className: string): CodeLanguage | undefined {
   const languageClass = className
     .split(/\s+/u)
     .find((name) => name.startsWith(LANGUAGE_CLASS_PREFIX));
-  if (languageClass === undefined) {
-    return undefined;
-  }
-  const requested = languageClass.slice(LANGUAGE_CLASS_PREFIX.length).toLowerCase();
-  const name = Object.hasOwn(LANGUAGE_ALIASES, requested) ? LANGUAGE_ALIASES[requested] : requested;
-  return name !== undefined && Object.hasOwn(LANGUAGE_LOADERS, name) ? name : undefined;
+  return languageClass === undefined
+    ? undefined
+    : resolveCodeLanguage(languageClass.slice(LANGUAGE_CLASS_PREFIX.length));
 }
 
-// Loads the grammar for a name `resolveLanguage` returned.
-export function loadLanguage(name: string): Promise<{ default: LanguageRegistration[] }> {
-  const loader = LANGUAGE_LOADERS[name];
-  if (loader === undefined) {
-    return Promise.reject(new Error(`Unsupported language: ${name}`));
-  }
-  return loader();
+export function loadLanguage(language: CodeLanguage): Promise<LanguageModule> {
+  return LANGUAGE_LOADERS[language]();
 }

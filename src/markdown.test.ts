@@ -39,6 +39,12 @@ describe('renderMarkdownToHtml', () => {
     expect(html).toContain('<pre><code>plain\n</code></pre>');
   });
 
+  it('reports no highlightable code for a fence in a language the browser has no grammar for', () => {
+    const { hasHighlightableCode } = renderMarkdownToHtml('```text\nplain\n```\n');
+
+    expect(hasHighlightableCode).toBe(false);
+  });
+
   it('reports no highlightable code for a document with only inline code', () => {
     const { hasHighlightableCode } = renderMarkdownToHtml('Some `inline` code.\n');
 
