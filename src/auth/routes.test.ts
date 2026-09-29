@@ -520,6 +520,37 @@ describe('with an owner password', () => {
     expect(body).toContain('href="/keys"');
   });
 
+  // A same-site page on another port gets the Lax session cookie, so it could
+  // frame these pages and steer the owner's clicks on their forms.
+  it('refuses to let the login, key, or gallery pages be framed', async () => {
+    const cookie = await logIn();
+
+    const responses = await Promise.all([
+      testApp.request('/login'),
+      testApp.request('/keys', { headers: { Cookie: cookie } }),
+      testApp.request('/', { headers: { Cookie: cookie } }),
+      testApp.request('/p/auth', { headers: { Cookie: cookie } }),
+    ]);
+
+    for (const res of responses) {
+      expect(res.status).toBe(200);
+      expect(res.headers.get('x-frame-options')).toBe('DENY');
+      expect(res.headers.get('content-security-policy')).toBe("frame-ancestors 'none'");
+    }
+  });
+
+  // Sandboxed HTML artifacts embed other artifacts, from an opaque origin.
+  it('lets artifacts be framed', async () => {
+    const artifact = await createText('embedded notes');
+    const cookie = await logIn();
+
+    const res = await testApp.request(`/a/${artifact.id}`, { headers: { Cookie: cookie } });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-frame-options')).toBeNull();
+    expect(res.headers.get('content-security-policy')).toBeNull();
+  });
+
   it('keeps an artifact response revalidatable while marking it private', async () => {
     const artifact = await service.createArtifact({
       content: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),

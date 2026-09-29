@@ -32,6 +32,13 @@ export function resolvePublicBaseUrl(): string {
   return url.toString().replace(/\/+$/u, '');
 }
 
+// Whether an Origin header names this server, as the request reached it
+// (`requestUrl`) or as its public base URL names it (they differ behind a
+// proxy). `null`, from sandboxed artifacts, never does.
+export function isOwnOrigin(origin: string, requestUrl: string): boolean {
+  return origin === new URL(requestUrl).origin || origin === new URL(resolvePublicBaseUrl()).origin;
+}
+
 // The display route (/a/<id>) lands in a later task; this stays importable
 // from there too so both the MCP layer and that route build identical URLs.
 export function buildArtifactUrl(id: string): string {

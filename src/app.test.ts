@@ -849,7 +849,7 @@ function removeRequest(id: string, headers: Record<string, string> = {}): Reques
   };
 }
 
-describe('post /mcp from a sandboxed html artifact', () => {
+describe('post /mcp from a web page', () => {
   let dataDir: string;
   let store: ArtifactStore;
   let testApp: ReturnType<typeof createApp>;
@@ -884,6 +884,32 @@ describe('post /mcp from a sandboxed html artifact', () => {
 
     expect(res.status).toBe(403);
     await expect(store.getArtifact(victim.id)).resolves.not.toBeNull();
+  });
+
+  // Any web page can send the same no-cors POST, with its own Origin.
+  it('rejects the request from another origin, so the artifact is not removed', async () => {
+    const victim = await createVictim();
+
+    const res = await testApp.request(
+      '/mcp',
+      removeRequest(victim.id, { Origin: 'https://evil.example' }),
+    );
+
+    expect(res.status).toBe(403);
+    await expect(store.getArtifact(victim.id)).resolves.not.toBeNull();
+  });
+
+  it('serves the request from this server’s own origin', async () => {
+    const victim = await createVictim();
+
+    // app.request() resolves paths against http://localhost.
+    const res = await testApp.request(
+      '/mcp',
+      removeRequest(victim.id, { Origin: 'http://localhost' }),
+    );
+
+    expect(res.status).toBe(200);
+    await expect(store.getArtifact(victim.id)).resolves.toBeNull();
   });
 
   it('still serves the same request from a client that sends no Origin', async () => {

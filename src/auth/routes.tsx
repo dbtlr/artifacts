@@ -6,7 +6,7 @@ import type { CookieOptions } from 'hono/utils/cookie';
 import { ApiKeysPage } from '../components/api-keys-page.js';
 import { Layout } from '../components/layout.js';
 import { LoginPage } from '../components/login-page.js';
-import { resolvePublicBaseUrl } from '../urls.js';
+import { isOwnOrigin, resolvePublicBaseUrl } from '../urls.js';
 import { SESSION_LIFETIME_SECONDS } from './owner-auth.js';
 import type { OwnerAuth } from './owner-auth.js';
 
@@ -46,10 +46,7 @@ export function safeNextPath(value: unknown): string {
 // means a sandboxed artifact or a privacy redirect; all are refused.
 function hasAllowedOrigin(c: Context): boolean {
   const origin = c.req.header('Origin');
-  return (
-    origin !== undefined &&
-    (origin === new URL(c.req.url).origin || origin === new URL(resolvePublicBaseUrl()).origin)
-  );
+  return origin !== undefined && isOwnOrigin(origin, c.req.url);
 }
 
 function cookieOptions(): CookieOptions {
@@ -69,6 +66,22 @@ function markPrivate(res: Response): void {
     'Cache-Control',
     cacheControl === null ? 'private, no-cache' : `private, ${cacheControl}`,
   );
+}
+
+// App pages refuse every frame. A same-site page on another port or a
+// sibling subdomain gets the SameSite=Lax cookie, so it could otherwise frame
+// the key or logout forms and steer the owner's clicks. Artifacts under /a/
+// stay frameable, because sandboxed HTML artifacts embed them.
+function denyFraming(path: string, res: Response): void {
+  if (!path.startsWith('/a/')) {
+    res.headers.set('Content-Security-Policy', "frame-ancestors 'none'");
+    res.headers.set('X-Frame-Options', 'DENY');
+  }
+}
+
+function markOwnerResponse(path: string, res: Response): void {
+  markPrivate(res);
+  denyFraming(path, res);
 }
 
 function loginPage(c: Context, next: string, status: 200 | 401 | 429, error?: string) {
@@ -170,7 +183,7 @@ export function installOwnerAuth(
       return refusal;
     }
     // Mark the response once the route has produced it.
-    return next().then(() => markPrivate(c.res));
+    return next().then(() => markOwnerResponse(c.req.path, c.res));
   });
 
   app.get('/login', async (c) => {

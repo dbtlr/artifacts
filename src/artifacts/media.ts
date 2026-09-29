@@ -142,7 +142,9 @@ export function hasValidSignature(mediaType: MediaType, bytes: Uint8Array): bool
           .decode(bytes)
           .replace(/^\uFEFF/u, '')
           .trimStart();
-        return /^(?:<\?xml\s+[^?]*\?>\s*|<!--(?:[\s\S]*?)-->\s*|<!DOCTYPE\s+svg(?:\s[^>]*)?>\s*)*<svg(?:\s|>)/iu.test(
+        // Each part matches its input in one way only, so a prologue that
+        // fails to reach <svg> fails in linear time, not by backtracking.
+        return /^(?:<\?xml\s[^?]*\?>\s*|<!--(?:(?!-->)[\s\S])*-->\s*|<!DOCTYPE\s+svg(?:\s[^>]*)?>\s*)*<svg(?:\s|>)/iu.test(
           source,
         );
       } catch {
