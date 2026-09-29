@@ -10,19 +10,20 @@ import tailwindcss from '@tailwindcss/vite';
 // `@hono/node-server` external (they're real "dependencies", present after a
 // prod install). `fixedExtension: false` picks the plain `.js` extension (this
 // package.json is `"type": "module"`) so `node dist/server.js` just works.
-// Vite itself builds two static assets: the Tailwind stylesheet, and the
-// mermaid entry (src/client/mermaid.ts) — the only client-side script in the
-// app, and one big enough (mermaid is a large dependency) that it must stay a
-// Vite-built static asset, never something `pack` pulls into the server
-// bundle: dist/server.js never imports src/client/mermaid.ts.
+// Vite itself builds the static assets: the Tailwind stylesheet and the two
+// client-side scripts, src/client/highlight.ts (shiki) and
+// src/client/mermaid.ts. Both are large dependencies, so they must stay
+// Vite-built static assets, never something `pack` pulls into the server
+// bundle: dist/server.js never imports src/client/.
 export default defineConfig({
   // Static assets are served under /assets (see serveStatic in app.tsx, which
   // strips that prefix and reads from dist/public). Vite's own default base
   // ("/") assumes the build output is served from the site root, so without
-  // this, mermaid.js's internally-code-split chunk imports (mermaid lazily
-  // imports a module per diagram type) resolve to bare root-relative paths
-  // like /mermaid-<hash>.js instead of /assets/mermaid-<hash>.js — a 404 in
-  // the browser even though the file exists right there in dist/public.
+  // this, the scripts' code-split chunk imports (mermaid lazily imports a
+  // module per diagram type, and highlight.js one per grammar) resolve to
+  // bare root-relative paths like /chunks/<name>-<hash>.js instead of
+  // /assets/chunks/<name>-<hash>.js — a 404 in the browser even though the
+  // file exists right there in dist/public.
   base: '/assets/',
   build: {
     // Mermaid's own largest lazily-loaded diagram-renderer chunk is ~663 kB
@@ -34,19 +35,22 @@ export default defineConfig({
     emptyOutDir: true,
     outDir: 'dist/public',
     rollupOptions: {
-      input: { mermaid: 'src/client/mermaid.ts', styles: 'src/client/styles.css' },
+      input: {
+        highlight: 'src/client/highlight.ts',
+        mermaid: 'src/client/mermaid.ts',
+        styles: 'src/client/styles.css',
+      },
       output: {
         // Fixed filenames (no content hash) so the server layout/artifact
-        // page can link stable /assets/app.css and /assets/mermaid.js paths
-        // without reading a Vite manifest. Mermaid's own internal
-        // code-split chunks (diagram-type-specific, lazily imported by the
-        // `mermaid` package itself) are unaffected by this — they still get
-        // hashed names via chunkFileNames below, so they cache-bust
-        // normally; only the two entry points the server actually links to
+        // page can link stable /assets/app.css, /assets/highlight.js, and
+        // /assets/mermaid.js paths without reading a Vite manifest. The
+        // lazily imported chunks behind them (diagram types, grammars,
+        // themes) still get hashed names via chunkFileNames below, so they
+        // cache-bust normally; only the entry points the server links to
         // need fixed names.
         assetFileNames: 'app.css',
-        chunkFileNames: 'mermaid-[hash].js',
-        entryFileNames: 'mermaid.js',
+        chunkFileNames: 'chunks/[name]-[hash].js',
+        entryFileNames: '[name].js',
       },
     },
   },

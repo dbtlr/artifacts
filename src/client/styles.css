@@ -21,14 +21,14 @@
 }
 
 /*
- * Shiki dual-theme code blocks (see src/markdown.ts): codeToHtml is called
+ * Shiki dual-theme code blocks (see src/client/highlight.ts): codeToHtml is called
  * with `themes: { light, dark }` and `defaultColor: false`, which makes each
  * token carry a `--shiki-light` and a `--shiki-dark` custom property instead
  * of an inline color of its own — neither theme is "baked in", so both
  * rules below are required: the first actually consumes the light set (the
  * assumed default scheme), the second swaps every `.shiki` block over to the
  * dark set under the same `prefers-color-scheme` media query Tailwind v4's
- * `dark:` variant already uses — no class toggle, no client JS.
+ * `dark:` variant already uses — no class toggle.
  */
 .shiki,
 .shiki span {

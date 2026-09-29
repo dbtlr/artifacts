@@ -244,7 +244,7 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
     // Only `md` renders through the markdown pipeline; `txt` is passed
     // through untouched (ArtifactPage falls back to a plain <pre> whenever
     // `rendered` is undefined).
-    const rendered = legacy.type === 'md' ? await renderMarkdownToHtml(legacy.content) : undefined;
+    const rendered = legacy.type === 'md' ? renderMarkdownToHtml(legacy.content) : undefined;
     return c.html(
       <Layout title={legacy.title}>
         <ArtifactPage artifact={legacy} rendered={rendered} />

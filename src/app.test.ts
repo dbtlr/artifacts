@@ -255,7 +255,9 @@ describe('get /a/:id', () => {
     // Markdown body is rendered, not dumped in a <pre>, and its one heading
     // got a slugged anchor id (see markdown.test.ts for the full behavior).
     expect(body).toContain('<h1 id="heading-heading">Heading</h1>');
-    expect(body).toContain('class="shiki');
+    // Code is highlighted in the browser, so the page links that script.
+    expect(body).toContain('<code class="language-ts">');
+    expect(body).toContain('<script src="/assets/highlight.js" type="module">');
     // The pipeline neutralizes inline HTML (markdown-it's html:false) — it
     // never reaches the response as a live tag, only as escaped text.
     expect(body).not.toContain('<script>alert("xss")</script>');
@@ -278,8 +280,8 @@ describe('get /a/:id', () => {
 
     const body = await res.text();
     expect(body).toContain('<pre class="mermaid">flowchart TD');
-    expect(body).not.toContain('class="shiki');
     expect(body).toContain('<script src="/assets/mermaid.js" type="module">');
+    expect(body).not.toContain('/assets/highlight.js');
   });
 
   it('does not link the mermaid script on an md page with no mermaid fence', async () => {
@@ -295,6 +297,21 @@ describe('get /a/:id', () => {
 
     const body = await res.text();
     expect(body).not.toContain('/assets/mermaid.js');
+  });
+
+  it('links no script at all on an md page with no fenced code', async () => {
+    const artifact = await store.createArtifact({
+      content: '# Prose\n\nJust text with `inline` code.\n',
+      description: 'No scripts here',
+      project: 'display-route',
+      title: 'Prose Only',
+      type: 'md',
+    });
+
+    const res = await testApp.request(`/a/${artifact.id}`);
+
+    const body = await res.text();
+    expect(body).not.toContain('<script');
   });
 
   it('renders a table of contents between the metadata header and the content for 2+ headings', async () => {
