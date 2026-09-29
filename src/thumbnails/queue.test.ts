@@ -172,6 +172,35 @@ describe('createThumbnailQueue', () => {
     await expect(store.has('a')).resolves.toBe(false);
   });
 
+  it('drops a preview whose artifact was removed while it was being written', async () => {
+    const store = memoryStore();
+    const artifacts = new Map([['a', artifact('a')]]);
+    const writeStarted = gate();
+    const writeLands = gate();
+    const write = store.write;
+    store.write = async (id, bytes) => {
+      writeStarted.open();
+      await writeLands.wait;
+      await write(id, bytes);
+    };
+    const renderer = fakeRenderer((target) => Promise.resolve(bytesFor(target.id)));
+    const queue = createThumbnailQueue({
+      lookup: async (id) => artifacts.get(id) ?? null,
+      store,
+    });
+    queue.start(renderer, BASE);
+
+    queue.enqueue('a');
+    await writeStarted.wait;
+    // The remove lands after the queue's existence check but before its write.
+    artifacts.delete('a');
+    await store.remove('a');
+    writeLands.open();
+    await queue.idle();
+
+    await expect(store.has('a')).resolves.toBe(false);
+  });
+
   it('keeps draining after a renderer failure and reports it', async () => {
     const store = memoryStore();
     const reported: string[] = [];

@@ -71,8 +71,14 @@ export function createThumbnailQueue({
         // Declined (say, an update turned an html artifact into a PDF): a
         // preview of the old content must not outlive it.
         await store.remove(id);
-      } else {
-        await store.write(id, bytes);
+        return;
+      }
+      await store.write(id, bytes);
+      // Removed while writing: a remove can land between the check
+      // above and the write. Metadata is always gone before the remove hook
+      // drops the file, so checking again after the write catches it.
+      if ((await lookup(id)) === null) {
+        await store.remove(id);
       }
     } catch (error) {
       report(`Thumbnail render failed for ${id}: ${describe(error)}`);
