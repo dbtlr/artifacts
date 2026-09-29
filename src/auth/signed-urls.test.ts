@@ -161,6 +161,30 @@ describe('createArtifactUrlSigner', () => {
     expect(lookedUp).toEqual([bucketOf(now) - 1]);
   });
 
+  it('looks up an hour again when it ended during the lookup', async () => {
+    const hour = bucketOf(now);
+    const lookedUp: number[] = [];
+    const signer = signerOver({
+      createUrlSigningKey: async (bucket, key) => keys.createUrlSigningKey(bucket, key),
+      findUrlSigningKey: async (bucket) => {
+        lookedUp.push(bucket);
+        if (lookedUp.length === 1) {
+          advance(HOUR_MS);
+        }
+        return keys.findUrlSigningKey(bucket);
+      },
+    });
+    const query = new URLSearchParams({
+      expires: String(Math.floor(now.getTime() / 1000) + 3 * SIGNING_KEY_BUCKET_SECONDS),
+      signature: 'unsigned',
+    });
+
+    await expect(signer.verify('abc', query)).resolves.toBe(false);
+    await expect(signer.verify('abc', query)).resolves.toBe(false);
+
+    expect(lookedUp).toEqual([hour, hour - 1, hour + 1, hour]);
+  });
+
   it('keeps a URL signed just before the hour working into the next hour', async () => {
     now = new Date(Math.ceil(SIGNED_AT.getTime() / HOUR_MS) * HOUR_MS - 60_000);
     const signer = signerOver();

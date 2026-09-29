@@ -108,12 +108,15 @@ export function createArtifactUrlSigner({
     if (hit !== undefined) {
       return hit;
     }
+    // Judged before the read: an hour that ends during it can still gain a
+    // key that the read missed.
+    const hourIsOver = bucket < currentBucket();
     const stored = await keys.findUrlSigningKey(bucket);
     if (stored !== null) {
       return remember(bucket, Promise.resolve(decodeKey(stored)));
     }
-    // The current hour can still get a key; a past hour cannot.
-    return bucket < currentBucket() ? remember(bucket, Promise.resolve(null)) : null;
+    // A current hour can still get a key; a past hour cannot.
+    return hourIsOver ? remember(bucket, Promise.resolve(null)) : null;
   }
 
   async function signedPath(id: string, lifetime = lifetimeSeconds): Promise<string> {
