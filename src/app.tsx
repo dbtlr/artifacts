@@ -89,18 +89,24 @@ function legacyArtifact(artifact: ArtifactWithContent): LegacyArtifactWithConten
   };
 }
 
+function suppliedServices(
+  store: ArtifactStore | AppServices,
+  mcpService: ArtifactService | undefined,
+): AppServices {
+  if ('artifacts' in store) {
+    return store;
+  }
+  const artifacts = adaptLegacyArtifactStore(store);
+  return { artifacts, mcp: mcpService ?? artifacts };
+}
+
 export function createApp(store?: ArtifactStore | AppServices, mcpService?: ArtifactService): Hono {
   const app = new Hono();
-  const resolveServices = (): Promise<AppServices> => {
-    if (store === undefined) {
-      return defaultServices(mcpService);
-    }
-    if ('artifacts' in store) {
-      return Promise.resolve(store);
-    }
-    const artifacts = adaptLegacyArtifactStore(store);
-    return Promise.resolve({ artifacts, mcp: mcpService ?? artifacts });
-  };
+  // A supplied legacy store is adapted once, so every request shares the
+  // adapter's per-artifact ordering instead of each request getting its own.
+  const supplied = store === undefined ? undefined : suppliedServices(store, mcpService);
+  const resolveServices = (): Promise<AppServices> =>
+    supplied === undefined ? defaultServices(mcpService) : Promise.resolve(supplied);
 
   // Namespaced under /assets so dynamic routes (/mcp, /a/:id) can never be
   // shadowed by an asset filename or race a filesystem stat. serveStatic
