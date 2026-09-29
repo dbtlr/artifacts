@@ -129,9 +129,9 @@ function reportFailure(step: string, error: unknown): void {
 //
 // A Markdown artifact is rendered once, when it is created, and the
 // rendering is stored beside its metadata, so viewing it parses nothing.
-// The rendering is derived data: a failure to store it never fails the
-// create, and a view renders and stores it again when it is missing or was
-// made by another renderer version.
+// The rendering is derived data: a failure to store or read it never fails
+// the create or the view, and a view renders and stores it again when it is
+// missing, unreadable, or was made by another renderer version.
 export function createArtifactService(
   metadata: ArtifactMetadataStore,
   content: ArtifactContentStore,
@@ -148,6 +148,16 @@ export function createArtifactService(
   function render(bytes: Uint8Array): StoredMarkdownRendering {
     const markdown = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     return { ...renderer.render(markdown), rendererVersion: renderer.version };
+  }
+
+  // A stored rendering that cannot be read is treated as missing.
+  async function findRendering(id: string): Promise<StoredMarkdownRendering | null> {
+    try {
+      return await metadata.findRendering(id);
+    } catch (error) {
+      reportFailure('rendering read', error);
+      return null;
+    }
   }
 
   async function saveRendering(id: string, rendering: StoredMarkdownRendering): Promise<void> {
@@ -263,7 +273,7 @@ export function createArtifactService(
     if (artifact?.mediaType !== MARKDOWN) {
       return null;
     }
-    const stored = await metadata.findRendering(id);
+    const stored = await findRendering(id);
     if (stored?.rendererVersion === renderer.version) {
       return stored;
     }

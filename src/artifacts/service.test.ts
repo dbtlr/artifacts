@@ -423,4 +423,27 @@ describe('ArtifactService Markdown renderings', () => {
     expect(parsed).toEqual(['# Notes', '# Notes']);
     stderr.mockRestore();
   });
+
+  it('renders the content again when reading the stored rendering fails', async () => {
+    const stores = createMemoryStores([
+      { artifact: { ...artifact, mediaType: 'text/markdown' }, bytes: markdownInput.content },
+    ]);
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const service = createArtifactService(
+      {
+        ...stores.metadata,
+        findRendering: async () => {
+          throw new Error('rendering read failed');
+        },
+      },
+      stores.content,
+      countingRenderer(1).renderer,
+    );
+
+    await expect(service.getRenderedMarkdown(artifact.id)).resolves.toMatchObject({
+      html: '<p>v1: # Notes</p>',
+    });
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('rendering read failed'));
+    stderr.mockRestore();
+  });
 });
