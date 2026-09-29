@@ -1,62 +1,97 @@
-import { describe, expect, it } from 'vite-plus/test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { createArtifactUrlSigner, SIGNED_URL_LIFETIME_SECONDS } from './signed-urls.js';
+import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 
-const KEY = new Uint8Array(32).fill(7);
-const SIGNED_AT = new Date('2026-09-29T12:00:00.000Z');
+import { SqliteOwnerAuthStore } from '../data/sqlite-owner-auth-store.js';
+import {
+  createArtifactUrlSigner,
+  SIGNED_URL_LIFETIME_SECONDS,
+  SIGNING_KEY_BUCKET_SECONDS,
+} from './signed-urls.js';
+import type { UrlSigningKeyStore } from './types.js';
 
-function signerAt(at: () => Date, key: Uint8Array = KEY) {
-  return createArtifactUrlSigner({ key, now: at });
-}
+// Five minutes into a clock hour, so a whole lifetime fits inside it.
+const SIGNED_AT = new Date('2026-09-29T12:05:00.000Z');
+const HOUR_MS = SIGNING_KEY_BUCKET_SECONDS * 1000;
 
 // The query of a signed path, as a request handler would see it.
 function queryOf(path: string): URLSearchParams {
   return new URL(path, 'http://artifacts.invalid').searchParams;
 }
 
-describe('createArtifactUrlSigner', () => {
-  it('signs a path to one artifact that verifies for that artifact', () => {
-    const signer = signerAt(() => SIGNED_AT);
+function bucketOf(at: Date): number {
+  return Math.floor(at.getTime() / HOUR_MS);
+}
 
-    const path = signer.signedPath('abc_123-XYZ');
+describe('createArtifactUrlSigner', () => {
+  let dataDir: string;
+  let databasePath: string;
+  let keys: UrlSigningKeyStore;
+  let now: Date;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), 'artifacts-signed-urls-'));
+    databasePath = join(dataDir, 'artifacts.db');
+    keys = await SqliteOwnerAuthStore.open(databasePath);
+    now = SIGNED_AT;
+  });
+
+  afterEach(async () => {
+    await rm(dataDir, { force: true, recursive: true });
+  });
+
+  function signerOver(store: UrlSigningKeyStore = keys) {
+    return createArtifactUrlSigner({ keys: store, now: () => now });
+  }
+
+  function advance(ms: number): void {
+    now = new Date(now.getTime() + ms);
+  }
+
+  it('signs a path to one artifact that verifies for that artifact', async () => {
+    const signer = signerOver();
+
+    const path = await signer.signedPath('abc_123-XYZ');
 
     expect(path).toMatch(/^\/a\/abc_123-XYZ\?expires=\d+&signature=[\w-]+$/u);
-    expect(signer.verify('abc_123-XYZ', queryOf(path))).toBe(true);
+    await expect(signer.verify('abc_123-XYZ', queryOf(path))).resolves.toBe(true);
   });
 
-  it('expires the signature after its lifetime', () => {
-    let now = SIGNED_AT;
-    const signer = signerAt(() => now);
-    const query = queryOf(signer.signedPath('abc'));
+  it('expires the signature after its lifetime', async () => {
+    const signer = signerOver();
+    const query = queryOf(await signer.signedPath('abc'));
 
-    now = new Date(SIGNED_AT.getTime() + (SIGNED_URL_LIFETIME_SECONDS - 1) * 1000);
-    expect(signer.verify('abc', query)).toBe(true);
+    advance((SIGNED_URL_LIFETIME_SECONDS - 1) * 1000);
+    await expect(signer.verify('abc', query)).resolves.toBe(true);
 
-    now = new Date(SIGNED_AT.getTime() + SIGNED_URL_LIFETIME_SECONDS * 1000);
-    expect(signer.verify('abc', query)).toBe(false);
+    advance(1000);
+    await expect(signer.verify('abc', query)).resolves.toBe(false);
   });
 
-  it('signs for a longer lifetime when asked to', () => {
-    let now = SIGNED_AT;
-    const signer = signerAt(() => now);
-    const query = queryOf(signer.signedPath('abc', 600));
+  it('signs for a longer lifetime when asked to', async () => {
+    const signer = signerOver();
+    const query = queryOf(await signer.signedPath('abc', 600));
 
-    now = new Date(SIGNED_AT.getTime() + 599 * 1000);
-    expect(signer.verify('abc', query)).toBe(true);
+    advance(599 * 1000);
+    await expect(signer.verify('abc', query)).resolves.toBe(true);
 
-    now = new Date(SIGNED_AT.getTime() + 600 * 1000);
-    expect(signer.verify('abc', query)).toBe(false);
+    advance(1000);
+    await expect(signer.verify('abc', query)).resolves.toBe(false);
   });
 
-  it('grants nothing for another artifact', () => {
-    const signer = signerAt(() => SIGNED_AT);
+  it('grants nothing for another artifact', async () => {
+    const signer = signerOver();
 
-    expect(signer.verify('other', queryOf(signer.signedPath('abc')))).toBe(false);
+    await expect(signer.verify('other', queryOf(await signer.signedPath('abc')))).resolves.toBe(
+      false,
+    );
   });
 
-  it('refuses a signature with a moved expiry, an altered signature, or a missing part', () => {
-    const signer = signerAt(() => SIGNED_AT);
-    const query = queryOf(signer.signedPath('abc'));
+  it('refuses a signature with a moved expiry, an altered signature, or a missing part', async () => {
+    const signer = signerOver();
+    const query = queryOf(await signer.signedPath('abc'));
     const expires = query.get('expires')!;
     const signature = query.get('signature')!;
     const flipped = `${signature.slice(0, -1)}${signature.endsWith('A') ? 'B' : 'A'}`;
@@ -70,20 +105,121 @@ describe('createArtifactUrlSigner', () => {
       { signature },
     ];
 
-    for (const params of tampered) {
-      expect(signer.verify('abc', new URLSearchParams(params))).toBe(false);
+    const verdicts = await Promise.all(
+      tampered.map(async (params) => signer.verify('abc', new URLSearchParams(params))),
+    );
+
+    expect(verdicts).toEqual(tampered.map(() => false));
+  });
+
+  it('refuses a signature made with another database’s key', async () => {
+    const otherDir = await mkdtemp(join(tmpdir(), 'artifacts-signed-urls-other-'));
+    try {
+      const other = signerOver(await SqliteOwnerAuthStore.open(join(otherDir, 'artifacts.db')));
+
+      await expect(
+        signerOver().verify('abc', queryOf(await other.signedPath('abc'))),
+      ).resolves.toBe(false);
+    } finally {
+      await rm(otherDir, { force: true, recursive: true });
     }
   });
 
-  it('refuses a signature made with another key', () => {
-    const other = signerAt(() => SIGNED_AT, new Uint8Array(32).fill(8));
-
-    expect(signerAt(() => SIGNED_AT).verify('abc', queryOf(other.signedPath('abc')))).toBe(false);
+  it('refuses to sign an id that is not an artifact id', async () => {
+    await expect(signerOver().signedPath('../etc')).rejects.toThrow(/not an artifact id/u);
   });
 
-  it('refuses to sign an id that is not an artifact id', () => {
-    const signer = signerAt(() => SIGNED_AT);
+  it('converges on one key when instances sharing a database sign at once', async () => {
+    const first = signerOver();
+    const second = signerOver(await SqliteOwnerAuthStore.open(databasePath));
 
-    expect(() => signer.signedPath('../etc')).toThrow(/not an artifact id/u);
+    const [fromFirst, fromSecond] = await Promise.all([
+      first.signedPath('abc'),
+      second.signedPath('abc'),
+    ]);
+
+    expect(fromFirst).toBe(fromSecond);
+    await expect(first.verify('abc', queryOf(fromSecond))).resolves.toBe(true);
+    await expect(second.verify('abc', queryOf(fromFirst))).resolves.toBe(true);
+  });
+
+  it('looks up a previous hour that has no key only once', async () => {
+    const lookedUp: number[] = [];
+    const signer = signerOver({
+      createUrlSigningKey: async (bucket, key) => keys.createUrlSigningKey(bucket, key),
+      findUrlSigningKey: async (bucket) => {
+        lookedUp.push(bucket);
+        return keys.findUrlSigningKey(bucket);
+      },
+    });
+    const query = queryOf(await signer.signedPath('abc'));
+
+    await expect(signer.verify('abc', query)).resolves.toBe(true);
+    await expect(signer.verify('abc', query)).resolves.toBe(true);
+    await expect(signer.verify('abc', query)).resolves.toBe(true);
+
+    expect(lookedUp).toEqual([bucketOf(now) - 1]);
+  });
+
+  it('looks up an hour again when it ended during the lookup', async () => {
+    const hour = bucketOf(now);
+    const lookedUp: number[] = [];
+    const signer = signerOver({
+      createUrlSigningKey: async (bucket, key) => keys.createUrlSigningKey(bucket, key),
+      findUrlSigningKey: async (bucket) => {
+        lookedUp.push(bucket);
+        if (lookedUp.length === 1) {
+          advance(HOUR_MS);
+        }
+        return keys.findUrlSigningKey(bucket);
+      },
+    });
+    const query = new URLSearchParams({
+      expires: String(Math.floor(now.getTime() / 1000) + 3 * SIGNING_KEY_BUCKET_SECONDS),
+      signature: 'unsigned',
+    });
+
+    await expect(signer.verify('abc', query)).resolves.toBe(false);
+    await expect(signer.verify('abc', query)).resolves.toBe(false);
+
+    expect(lookedUp).toEqual([hour, hour - 1, hour + 1, hour]);
+  });
+
+  it('keeps a URL signed just before the hour working into the next hour', async () => {
+    now = new Date(Math.ceil(SIGNED_AT.getTime() / HOUR_MS) * HOUR_MS - 60_000);
+    const signer = signerOver();
+    const query = queryOf(await signer.signedPath('abc', 600));
+
+    advance(5 * 60_000);
+    await expect(signer.verify('abc', query)).resolves.toBe(true);
+    // Another instance, which never signed in the previous hour, agrees.
+    const fresh = signerOver(await SqliteOwnerAuthStore.open(databasePath));
+    await expect(fresh.verify('abc', query)).resolves.toBe(true);
+  });
+
+  it('refuses a URL signed two hours back, whatever its expiry says', async () => {
+    const signer = signerOver();
+    const query = queryOf(await signer.signedPath('abc', 3 * SIGNING_KEY_BUCKET_SECONDS));
+
+    advance(HOUR_MS);
+    await expect(signer.verify('abc', query)).resolves.toBe(true);
+
+    advance(HOUR_MS);
+    await expect(signer.verify('abc', query)).resolves.toBe(false);
+  });
+
+  it('prunes keys older than the previous hour when the next key is made', async () => {
+    const signer = signerOver();
+    const firstBucket = bucketOf(now);
+    await signer.signedPath('abc');
+
+    advance(HOUR_MS);
+    await signer.signedPath('abc');
+    await expect(keys.findUrlSigningKey(firstBucket)).resolves.not.toBeNull();
+
+    advance(HOUR_MS);
+    await signer.signedPath('abc');
+    await expect(keys.findUrlSigningKey(firstBucket)).resolves.toBeNull();
+    await expect(keys.findUrlSigningKey(firstBucket + 1)).resolves.not.toBeNull();
   });
 });

@@ -603,7 +603,7 @@ describe('with an owner password', () => {
   it('reads one artifact through a signed URL without a session', async () => {
     const artifact = await createText('rendered for a preview');
 
-    const res = await testApp.request(auth.artifactUrls.signedPath(artifact.id));
+    const res = await testApp.request(await auth.artifactUrls.signedPath(artifact.id));
 
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toMatch(/^private\b/u);
@@ -619,7 +619,7 @@ describe('with an owner password', () => {
     });
     const timedApp = createApp({ artifacts: service, auth: timedAuth, mcp: service });
     const artifact = await createText('expired preview');
-    const path = timedAuth.artifactUrls.signedPath(artifact.id);
+    const path = await timedAuth.artifactUrls.signedPath(artifact.id);
 
     now = new Date(now.getTime() + SIGNED_URL_LIFETIME_SECONDS * 1000);
     const res = await timedApp.request(path);
@@ -631,7 +631,7 @@ describe('with an owner password', () => {
   it('refuses a tampered signed URL, and one used for anything but its artifact', async () => {
     const artifact = await createText('owner eyes only');
     const other = await createText('another secret');
-    const signed = new URL(auth.artifactUrls.signedPath(artifact.id), ORIGIN);
+    const signed = new URL(await auth.artifactUrls.signedPath(artifact.id), ORIGIN);
     const query = signed.searchParams;
     const later = new URLSearchParams({
       expires: String(Number(query.get('expires')) + 3600),
@@ -695,7 +695,7 @@ describe('with an owner password', () => {
     const timedApp = createApp({ artifacts: service, auth: timedAuth, mcp: service });
     const image = await createImage();
     const html = await createHtml(`<img src="/a/${image.id}">`);
-    const page = await timedApp.request(timedAuth.artifactUrls.signedPath(html.id));
+    const page = await timedApp.request(await timedAuth.artifactUrls.signedPath(html.id));
     const [embedUrl] = sources(await page.text());
     const viewedAt = now.getTime();
 

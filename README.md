@@ -222,8 +222,10 @@ With a password set:
   only from that origin or the origin the request arrived on, and an `https:` base URL marks the
   session cookie `Secure`.
 
-Sessions and API keys are stored in the SQLite database, keys only as SHA-256 hashes. Changing the
-password and restarting ends every session but keeps API keys; revoke them on the **API keys** page. The design is recorded in [ADR-0001](docs/decisions/0001-opt-in-owner-auth.md).
+Sessions, API keys, and the hourly keys that sign URLs are stored in the SQLite database, API keys
+only as SHA-256 hashes. Changing the password and restarting ends every session but keeps API keys;
+revoke them on the **API keys** page. The design is recorded in
+[ADR-0001](docs/decisions/0001-opt-in-owner-auth.md).
 
 ### Gallery previews
 

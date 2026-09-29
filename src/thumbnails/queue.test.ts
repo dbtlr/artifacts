@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vite-plus/test';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 import type { Artifact } from '../artifacts/types.js';
 import { createThumbnailQueue } from './queue.js';
@@ -88,7 +88,7 @@ describe('createThumbnailQueue', () => {
     const renderer = fakeRenderer((target) => Promise.resolve(bytesFor(target.id)));
     const asked: string[] = [];
     const queue = createThumbnailQueue({
-      artifactPath: (id) => {
+      artifactPath: async (id) => {
         asked.push(id);
         return `/a/${id}?signature=${String(asked.length)}`;
       },
@@ -146,8 +146,9 @@ describe('createThumbnailQueue', () => {
     queue.start(renderer, BASE);
 
     queue.enqueue('a');
-    await Promise.resolve();
-    expect(renderer.calls.map((call) => call.id)).toEqual(['a']);
+    await vi.waitFor(() => {
+      expect(renderer.calls.map((call) => call.id)).toEqual(['a']);
+    });
     queue.enqueue('b');
     first.open();
     await queue.idle();

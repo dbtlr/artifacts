@@ -1,7 +1,7 @@
 // Persistence for owner auth. Async for the same reason as the artifact
 // ports (see artifacts/types.ts): an adapter over an async-only database
 // fits behind it. Times are ISO 8601 UTC strings, which sort as text.
-export type OwnerAuthStore = {
+export type OwnerAuthStore = UrlSigningKeyStore & {
   // Records an attempt at `at` unless `limit` attempts are already recorded
   // after `since`, and resolves whether it was recorded. The check and the
   // insert are one step, so parallel attempts cannot all slip under the limit.
@@ -28,3 +28,16 @@ export type StoredSession = { createdAt: string; expiresAt: string; tokenHash: s
 export type ApiKeySummary = { createdAt: string; id: string; name: string };
 
 export type StoredApiKey = ApiKeySummary & { keyHash: string };
+
+// The keys that sign artifact URLs, one per clock-hour bucket: the Unix time
+// in seconds divided by 3600, rounded down. Keys are base64url text. Every
+// process that shares the database shares the keys.
+export type UrlSigningKeyStore = {
+  // Stores `key` for `bucket` unless the bucket already has one, removes
+  // every key older than the bucket before it, and resolves the key the
+  // bucket holds. An existing key is never replaced, so processes that make
+  // a bucket's key at once all get the first one stored.
+  createUrlSigningKey: (bucket: number, key: string) => Promise<string>;
+  // The bucket's key, or null when it has none.
+  findUrlSigningKey: (bucket: number) => Promise<string | null>;
+};

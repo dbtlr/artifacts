@@ -284,7 +284,7 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
       const html =
         auth === undefined
           ? legacy.content
-          : substituteEmbedReferences(
+          : await substituteEmbedReferences(
               legacy.content,
               (await artifacts.getEmbedReferences(id)) ?? [],
               (embedded) => auth.artifactUrls.signedPath(embedded, EMBED_URL_LIFETIME_SECONDS),

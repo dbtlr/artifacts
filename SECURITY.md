@@ -41,9 +41,10 @@ only for the owner.
   expire, and a new password does not revoke them. After a password leak, change the password and
   revoke every key that you did not create.
 - The thumbnail renderer reads artifacts through signed URLs. Each one allows `GET` or `HEAD` of one
-  `/a/:id` for 60 seconds. It is an HMAC-SHA-256 over the artifact ID and the expiry, keyed by a
-  random secret that exists only in the server process. A restart voids every outstanding URL. A
-  request with an expired, altered, or misapplied signature and no session gets `403`.
+  `/a/:id` for 60 seconds. It is an HMAC-SHA-256 over the artifact ID and the expiry. The key is
+  random, there is a new one for each clock hour, and it is stored in the database. A URL verifies
+  only with the current or previous hour's key, so no signed URL works for more than about two
+  hours. A request with an expired, altered, or misapplied signature and no session gets `403`.
 - An HTML artifact's embedded `/a/:id` URLs get the same kind of signature on each view, valid for
   10 minutes. A page read through a signature also gets its embeds signed. The artifact's own
   scripts can read these URLs. The references are fixed when the artifact is created, so they name

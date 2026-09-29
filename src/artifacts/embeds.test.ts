@@ -14,7 +14,7 @@ function idsIn(html: string, base = BASE): string[] {
 }
 
 // Stands in for the signer: the path it returns names the id it signed.
-const fakeSign = (id: string) => `/a/${id}?expires=9&signature=sig-${id}`;
+const fakeSign = async (id: string) => `/a/${id}?expires=9&signature=sig-${id}`;
 
 describe('extractEmbedReferences', () => {
   it('finds root-relative and public-base references in the loading attributes', () => {
@@ -125,10 +125,14 @@ describe('extractEmbedReferences', () => {
 });
 
 describe('substituteEmbedReferences', () => {
-  it('replaces each /a/:id path with a signed path, escaped for an HTML attribute', () => {
+  it('replaces each /a/:id path with a signed path, escaped for an HTML attribute', async () => {
     const html = `<img src="${BASE}/a/one#x"><img srcset="/a/two 1x, /a/one 2x">`;
 
-    const result = substituteEmbedReferences(html, extractEmbedReferences(html, BASE), fakeSign);
+    const result = await substituteEmbedReferences(
+      html,
+      extractEmbedReferences(html, BASE),
+      fakeSign,
+    );
 
     expect(result).toBe(
       `<img src="${BASE}/a/one?expires=9&amp;signature=sig-one#x">` +
@@ -137,11 +141,11 @@ describe('substituteEmbedReferences', () => {
     );
   });
 
-  it('signs each distinct artifact once per view', () => {
+  it('signs each distinct artifact once per view', async () => {
     const html = '<img src="/a/one"><img src="/a/two"><img src="/a/one">';
     const signed: string[] = [];
 
-    substituteEmbedReferences(html, extractEmbedReferences(html, BASE), (id) => {
+    await substituteEmbedReferences(html, extractEmbedReferences(html, BASE), async (id) => {
       signed.push(id);
       return fakeSign(id);
     });
@@ -149,14 +153,16 @@ describe('substituteEmbedReferences', () => {
     expect(signed).toEqual(['one', 'two']);
   });
 
-  it('returns the text unchanged when there are no references', () => {
-    expect(substituteEmbedReferences('<p>plain</p>', [], fakeSign)).toBe('<p>plain</p>');
+  it('returns the text unchanged when there are no references', async () => {
+    await expect(substituteEmbedReferences('<p>plain</p>', [], fakeSign)).resolves.toBe(
+      '<p>plain</p>',
+    );
   });
 
-  it('skips a stored reference that does not match the text at its position', () => {
+  it('skips a stored reference that does not match the text at its position', async () => {
     const html = '<img src="/a/one">';
 
-    const result = substituteEmbedReferences(
+    const result = await substituteEmbedReferences(
       html,
       [
         { id: 'other', start: html.indexOf('/a/one') },
