@@ -833,3 +833,65 @@ describe('mcp add_artifact -> display round-trip', () => {
     expect(body).toContain('Round-trip body');
   });
 });
+
+// The request a sandboxed artifact script can send without a CORS
+// preflight: a no-cors POST with a CORS-safelisted content type.
+function removeRequest(id: string, headers: Record<string, string> = {}): RequestInit {
+  return {
+    body: JSON.stringify({
+      id: 1,
+      jsonrpc: '2.0',
+      method: 'tools/call',
+      params: { arguments: { id }, name: 'remove_artifact' },
+    }),
+    headers: { 'Content-Type': 'text/plain; x=application/json', ...headers },
+    method: 'POST',
+  };
+}
+
+describe('post /mcp from a sandboxed html artifact', () => {
+  let dataDir: string;
+  let store: ArtifactStore;
+  let testApp: ReturnType<typeof createApp>;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), 'artifacts-mcp-origin-'));
+    store = await createArtifactStore({
+      databasePath: join(dataDir, 'artifacts.db'),
+      filesDir: join(dataDir, 'artifacts'),
+    });
+    testApp = createApp(store);
+  });
+
+  afterEach(async () => {
+    await rm(dataDir, { force: true, recursive: true });
+  });
+
+  async function createVictim() {
+    return store.createArtifact({
+      content: 'victim',
+      description: 'Target of a write from an artifact',
+      project: 'mcp-origin',
+      title: 'Victim',
+      type: 'txt',
+    });
+  }
+
+  it('rejects a request whose Origin is null, so the artifact is not removed', async () => {
+    const victim = await createVictim();
+
+    const res = await testApp.request('/mcp', removeRequest(victim.id, { Origin: 'null' }));
+
+    expect(res.status).toBe(403);
+    await expect(store.getArtifact(victim.id)).resolves.not.toBeNull();
+  });
+
+  it('still serves the same request from a client that sends no Origin', async () => {
+    const victim = await createVictim();
+
+    const res = await testApp.request('/mcp', removeRequest(victim.id));
+
+    expect(res.status).toBe(200);
+    await expect(store.getArtifact(victim.id)).resolves.toBeNull();
+  });
+});
