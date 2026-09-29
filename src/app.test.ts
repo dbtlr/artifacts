@@ -365,8 +365,8 @@ describe('get /a/:id', () => {
     expect(body).toContain('does-not-exist');
   });
 
-  // store.getArtifact deliberately throws when a row's content file is
-  // missing (see store.ts) — a corrupt-store signal, not an ordinary "not
+  // getArtifact deliberately rejects when a row's content file is missing
+  // (see artifacts/service.ts) — a corrupt-store signal, not an ordinary "not
   // found". The route must let that propagate as a 500, not mask it as a 404.
   it('surfaces a corrupt store (row present, content file missing) as a 500', async () => {
     const artifact = await store.createArtifact({

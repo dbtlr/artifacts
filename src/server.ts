@@ -19,11 +19,11 @@ const app = createApp(services);
 
 // Previews are screenshots of this server's own pages, so rendering can
 // only start once the port is bound. Backfill covers artifacts uploaded
-// before previews existed (or whose preview files were lost). Failing to
-// read them is fatal, so this reports and exits rather than rejecting.
+// before previews existed (or whose preview files were lost). Any failure
+// here is fatal, so this reports and exits rather than rejecting.
 async function startThumbnails(boundPort: number): Promise<void> {
-  services.thumbnailQueue.start(renderer, `http://127.0.0.1:${String(boundPort)}`);
   try {
+    services.thumbnailQueue.start(renderer, `http://127.0.0.1:${String(boundPort)}`);
     await services.thumbnailQueue.backfill(await services.artifacts.listArtifacts());
   } catch (error) {
     const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);

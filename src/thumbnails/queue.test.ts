@@ -270,6 +270,25 @@ describe('createThumbnailQueue', () => {
     expect(store.files.size).toBe(0);
   });
 
+  it('checks stored thumbnails one at a time during backfill', async () => {
+    const store = memoryStore();
+    const has = store.has;
+    let inFlight = 0;
+    let most = 0;
+    store.has = async (id) => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await Promise.resolve();
+      inFlight -= 1;
+      return has(id);
+    };
+    const queue = createThumbnailQueue({ lookup: found, store });
+
+    await queue.backfill([artifact('a'), artifact('b'), artifact('c')]);
+
+    expect(most).toBe(1);
+  });
+
   it('backfills only artifacts without a stored thumbnail', async () => {
     const store = memoryStore();
     await store.write('have', bytesFor('have'));

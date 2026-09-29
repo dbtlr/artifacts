@@ -117,6 +117,20 @@ export function createThumbnailQueue({
     draining = run();
   }
 
+  // Adds each artifact without a stored preview to `pending`, checking the
+  // store one artifact at a time: this runs once at startup, so a remote
+  // store gets a steady trickle of checks rather than all of them at once.
+  async function queueMissing(artifacts: Artifact[], index = 0): Promise<void> {
+    const artifact = artifacts[index];
+    if (artifact === undefined) {
+      return;
+    }
+    if (!(await store.has(artifact.id))) {
+      pending.add(artifact.id);
+    }
+    await queueMissing(artifacts, index + 1);
+  }
+
   async function idle(): Promise<void> {
     const current = draining;
     if (current === undefined) {
@@ -128,12 +142,7 @@ export function createThumbnailQueue({
 
   return {
     backfill: async (artifacts) => {
-      const stored = await Promise.all(artifacts.map(async ({ id }) => store.has(id)));
-      for (const [index, artifact] of artifacts.entries()) {
-        if (!stored[index]) {
-          pending.add(artifact.id);
-        }
-      }
+      await queueMissing(artifacts);
       schedule();
     },
     enqueue: (id) => {
