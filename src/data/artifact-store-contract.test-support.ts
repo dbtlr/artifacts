@@ -42,6 +42,15 @@ export function metadataStoreContract(
       await expect(store.remove(first.id)).resolves.toBe(true);
       await expect(store.remove(first.id)).resolves.toBe(false);
     });
+
+    it('rejects a create under a taken id and keeps the stored row', async () => {
+      const store = await createStore();
+      await store.create(first);
+
+      await expect(store.create({ ...second, id: first.id })).rejects.toThrow();
+
+      await expect(store.list()).resolves.toEqual([first]);
+    });
   });
 }
 
