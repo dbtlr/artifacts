@@ -171,3 +171,80 @@ describe('owner auth', () => {
     await expect(auth.logIn('wrong')).resolves.toMatchObject({ reason: 'incorrect-password' });
   });
 });
+
+describe('API keys', () => {
+  let dataDir: string;
+  let databasePath: string;
+  let auth: OwnerAuth;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), 'artifacts-api-keys-'));
+    databasePath = join(dataDir, 'artifacts.db');
+    auth = createOwnerAuth({
+      now: () => new Date('2026-09-29T12:00:00.000Z'),
+      password: PASSWORD,
+      store: await SqliteOwnerAuthStore.open(databasePath),
+    });
+  });
+
+  afterEach(async () => {
+    await rm(dataDir, { force: true, recursive: true });
+  });
+
+  it('creates a key that authenticates', async () => {
+    const { key } = await auth.createApiKey('laptop agent');
+
+    expect(key).toMatch(/^art_[\w-]{43}$/u);
+    await expect(auth.hasApiKey(key)).resolves.toBe(true);
+  });
+
+  it('does not accept a missing, blank, or unknown key', async () => {
+    await auth.createApiKey('laptop agent');
+
+    await expect(auth.hasApiKey(undefined)).resolves.toBe(false);
+    await expect(auth.hasApiKey('')).resolves.toBe(false);
+    await expect(auth.hasApiKey('art_not-a-key')).resolves.toBe(false);
+  });
+
+  it('stores only a hash of the key', async () => {
+    const { key } = await auth.createApiKey('laptop agent');
+
+    const database = new DatabaseSync(databasePath);
+    const rows = database.prepare('SELECT * FROM api_keys').all();
+    database.close();
+    expect(rows).toHaveLength(1);
+    expect(JSON.stringify(rows)).not.toContain(key.slice(4));
+  });
+
+  it('lists keys by name and creation time, oldest first, without their secrets', async () => {
+    const first = await auth.createApiKey('laptop agent');
+    const second = await auth.createApiKey('build server');
+
+    await expect(auth.listApiKeys()).resolves.toEqual([
+      { createdAt: '2026-09-29T12:00:00.000Z', id: first.id, name: 'laptop agent' },
+      { createdAt: '2026-09-29T12:00:00.000Z', id: second.id, name: 'build server' },
+    ]);
+  });
+
+  it('refuses a revoked key and keeps the others', async () => {
+    const revoked = await auth.createApiKey('laptop agent');
+    const kept = await auth.createApiKey('build server');
+
+    await auth.revokeApiKey(revoked.id);
+
+    await expect(auth.hasApiKey(revoked.key)).resolves.toBe(false);
+    await expect(auth.hasApiKey(kept.key)).resolves.toBe(true);
+    expect((await auth.listApiKeys()).map(({ name }) => name)).toEqual(['build server']);
+  });
+
+  it('keeps keys working when the password changes', async () => {
+    const { key } = await auth.createApiKey('laptop agent');
+
+    const rotated = createOwnerAuth({
+      password: 'a new password',
+      store: await SqliteOwnerAuthStore.open(databasePath),
+    });
+
+    await expect(rotated.hasApiKey(key)).resolves.toBe(true);
+  });
+});

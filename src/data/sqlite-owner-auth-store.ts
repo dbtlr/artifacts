@@ -1,12 +1,12 @@
 import { DatabaseSync } from 'node:sqlite';
 
-import type { OwnerAuthStore, StoredSession } from '../auth/types.js';
+import type { ApiKeySummary, OwnerAuthStore, StoredApiKey, StoredSession } from '../auth/types.js';
 import { runSqliteMigrations } from './sqlite-migrations.js';
 
 const SQLITE_BUSY_TIMEOUT_MS = 1_000;
 
-// Owner sessions and login attempts, in the same database file as the
-// artifact metadata. It opens its own connection; the migration runner's
+// Owner sessions, login attempts, and API keys, in the same database file as
+// the artifact metadata. It opens its own connection; the migration runner's
 // write lock makes opening both connections safe in either order.
 export class SqliteOwnerAuthStore implements OwnerAuthStore {
   private readonly database: DatabaseSync;
@@ -64,5 +64,32 @@ export class SqliteOwnerAuthStore implements OwnerAuthStore {
 
   async removeSession(tokenHash: string): Promise<void> {
     this.database.prepare('DELETE FROM owner_sessions WHERE token_hash = ?').run(tokenHash);
+  }
+
+  async createApiKey({ createdAt, id, keyHash, name }: StoredApiKey): Promise<void> {
+    this.database
+      .prepare('INSERT INTO api_keys (id, name, key_hash, created_at) VALUES (?, ?, ?, ?)')
+      .run(id, name, keyHash, createdAt);
+  }
+
+  async listApiKeys(): Promise<ApiKeySummary[]> {
+    return this.database
+      .prepare('SELECT id, name, created_at FROM api_keys ORDER BY created_at, rowid')
+      .all()
+      .map((row) => ({
+        createdAt: String(row.created_at),
+        id: String(row.id),
+        name: String(row.name),
+      }));
+  }
+
+  async hasApiKeyHash(keyHash: string): Promise<boolean> {
+    return (
+      this.database.prepare('SELECT 1 FROM api_keys WHERE key_hash = ?').get(keyHash) !== undefined
+    );
+  }
+
+  async removeApiKey(id: string): Promise<void> {
+    this.database.prepare('DELETE FROM api_keys WHERE id = ?').run(id);
   }
 }

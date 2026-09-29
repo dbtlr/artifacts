@@ -3,6 +3,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { CookieOptions } from 'hono/utils/cookie';
 
+import { ApiKeysPage } from '../components/api-keys-page.js';
 import { Layout } from '../components/layout.js';
 import { LoginPage } from '../components/login-page.js';
 import { resolvePublicBaseUrl } from '../urls.js';
@@ -11,7 +12,8 @@ import type { OwnerAuth } from './owner-auth.js';
 
 export const SESSION_COOKIE = 'artifacts_session';
 
-const MAX_LOGIN_BODY_BYTES = 16 * 1024;
+const MAX_FORM_BODY_BYTES = 16 * 1024;
+const MAX_API_KEY_NAME_LENGTH = 100;
 const SAFE_METHODS = new Set(['GET', 'HEAD']);
 // Served without a session: the login form and the static files it uses.
 const ICON_PATHS = new Set(['/apple-touch-icon.png', '/favicon.ico', '/favicon.svg']);
@@ -78,15 +80,45 @@ function loginPage(c: Context, next: string, status: 200 | 401 | 429, error?: st
   );
 }
 
+// The token from an `Authorization: Bearer <token>` header. The scheme is
+// case-insensitive (RFC 9110); anything else yields undefined.
+function bearerToken(header: string | undefined): string | undefined {
+  return header === undefined ? undefined : /^Bearer +(\S+) *$/iu.exec(header)?.[1];
+}
+
+async function apiKeysPage(
+  c: Context,
+  auth: OwnerAuth,
+  props: { created?: { key: string; name: string }; error?: string; status?: 200 | 400 },
+) {
+  return c.html(
+    <Layout title="API keys · Artifacts">
+      <ApiKeysPage
+        created={props.created}
+        error={props.error}
+        keys={await auth.listApiKeys()}
+        mcpUrl={`${resolvePublicBaseUrl()}/mcp`}
+      />
+    </Layout>,
+    props.status ?? 200,
+  );
+}
+
 // The response for a request that auth on does not let through, or
 // undefined when it may proceed.
 async function refuseWithoutSession(c: Context, auth: OwnerAuth): Promise<Response | undefined> {
   // Decide on the percent-decoded path that routing uses, so `/%6dcp` is /mcp.
   const path = c.req.path;
-  // MCP clients cannot hold a session cookie, and /mcp has no credential of
-  // its own yet, so it stays closed while auth is on.
+  // MCP clients cannot hold a session cookie, so /mcp takes an API key
+  // instead, and only an API key. A browser cannot attach the header to a
+  // cross-site request without a CORS preflight, which this server never
+  // grants, so the Origin rule below is not needed here.
   if (path === '/mcp') {
-    return c.text('Unauthorized: /mcp is unavailable while owner auth is on', 401);
+    return (await auth.hasApiKey(bearerToken(c.req.header('Authorization'))))
+      ? undefined
+      : c.text('Unauthorized: /mcp needs Authorization: Bearer <API key>', 401, {
+          'WWW-Authenticate': 'Bearer',
+        });
   }
   if (!SAFE_METHODS.has(c.req.method) && !hasAllowedOrigin(c)) {
     return c.text('Forbidden', 403);
@@ -134,7 +166,7 @@ export function installOwnerAuth(
     return loginPage(c, next, 200);
   });
 
-  app.post('/login', bodyLimit({ maxSize: MAX_LOGIN_BODY_BYTES }), async (c) => {
+  app.post('/login', bodyLimit({ maxSize: MAX_FORM_BODY_BYTES }), async (c) => {
     const auth = await resolveAuth();
     if (auth === undefined) {
       return c.notFound();
@@ -170,5 +202,42 @@ export function installOwnerAuth(
     await auth.logOut(getCookie(c, SESSION_COOKIE));
     deleteCookie(c, SESSION_COOKIE, cookieOptions());
     return c.redirect('/login', 303);
+  });
+
+  app.get('/keys', async (c) => {
+    const auth = await resolveAuth();
+    if (auth === undefined) {
+      return c.notFound();
+    }
+    return apiKeysPage(c, auth, {});
+  });
+
+  // Answers with the page rather than a redirect, so the new key is never in
+  // a URL, and marks it no-store, so no cache or history keeps the key.
+  app.post('/keys', bodyLimit({ maxSize: MAX_FORM_BODY_BYTES }), async (c) => {
+    const auth = await resolveAuth();
+    if (auth === undefined) {
+      return c.notFound();
+    }
+    const form = await c.req.parseBody();
+    const name = typeof form.name === 'string' ? form.name.trim() : '';
+    if (name === '' || name.length > MAX_API_KEY_NAME_LENGTH) {
+      return apiKeysPage(c, auth, {
+        error: `Give the key a name of 1 to ${String(MAX_API_KEY_NAME_LENGTH)} characters.`,
+        status: 400,
+      });
+    }
+    const { key } = await auth.createApiKey(name);
+    c.header('Cache-Control', 'no-store');
+    return apiKeysPage(c, auth, { created: { key, name } });
+  });
+
+  app.post('/keys/:id/revoke', async (c) => {
+    const auth = await resolveAuth();
+    if (auth === undefined) {
+      return c.notFound();
+    }
+    await auth.revokeApiKey(c.req.param('id'));
+    return c.redirect('/keys', 303);
   });
 }

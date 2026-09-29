@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
-import type { OwnerAuthStore } from './types.js';
+import type { ApiKeySummary, OwnerAuthStore } from './types.js';
 
 // A session lasts a fixed 7 days from login; using it does not extend it.
 export const SESSION_LIFETIME_SECONDS = 7 * 24 * 60 * 60;
@@ -16,11 +16,21 @@ export type LoginResult =
   | { ok: false; reason: 'incorrect-password' }
   | { ok: false; reason: 'rate-limited'; retryAfterSeconds: number };
 
+// A new key's secret, which exists only in this value: the store keeps a hash.
+export type CreatedApiKey = { id: string; key: string };
+
 export type OwnerAuth = {
+  createApiKey: (name: string) => Promise<CreatedApiKey>;
+  hasApiKey: (key: string | undefined) => Promise<boolean>;
   hasSession: (token: string | undefined) => Promise<boolean>;
+  listApiKeys: () => Promise<ApiKeySummary[]>;
   logIn: (password: string) => Promise<LoginResult>;
   logOut: (token: string | undefined) => Promise<void>;
+  revokeApiKey: (id: string) => Promise<void>;
 };
+
+// Keys read `art_` and 256 random bits, so a leaked key is recognizable.
+const API_KEY_PREFIX = 'art_';
 
 type OwnerAuthOptions = {
   now?: () => Date;
@@ -50,12 +60,21 @@ function tokenHash(token: string, passwordHash: Buffer): string {
   return createHmac('sha256', passwordHash).update(token).digest('hex');
 }
 
+// API keys are 256 random bits, so an unkeyed hash is enough to keep a copy
+// of the database from holding usable keys. Unlike session tokens, the hash
+// is not keyed by the password: a new password leaves agents connected, and
+// the owner revokes keys one by one.
+function apiKeyHash(key: string): string {
+  return createHash('sha256').update(key).digest('hex');
+}
+
 function secondsFrom(from: Date, until: Date): number {
   return Math.max(1, Math.ceil((until.getTime() - from.getTime()) / 1000));
 }
 
-// The single owner's password login and database sessions. It knows nothing
-// about HTTP: auth/routes.tsx maps it onto cookies and forms.
+// The single owner's password login, database sessions, and API keys. It
+// knows nothing about HTTP: auth/routes.tsx maps it onto cookies, forms, and
+// the Authorization header.
 export function createOwnerAuth({
   now = () => new Date(),
   password,
@@ -108,5 +127,32 @@ export function createOwnerAuth({
     }
   }
 
-  return { hasSession, logIn, logOut };
+  async function createApiKey(name: string): Promise<CreatedApiKey> {
+    const id = randomBytes(12).toString('base64url');
+    const key = `${API_KEY_PREFIX}${randomBytes(32).toString('base64url')}`;
+    await store.createApiKey({
+      createdAt: now().toISOString(),
+      id,
+      keyHash: apiKeyHash(key),
+      name,
+    });
+    return { id, key };
+  }
+
+  async function hasApiKey(key: string | undefined): Promise<boolean> {
+    if (key === undefined || key === '') {
+      return false;
+    }
+    return store.hasApiKeyHash(apiKeyHash(key));
+  }
+
+  return {
+    createApiKey,
+    hasApiKey,
+    hasSession,
+    listApiKeys: () => store.listApiKeys(),
+    logIn,
+    logOut,
+    revokeApiKey: (id) => store.removeApiKey(id),
+  };
 }

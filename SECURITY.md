@@ -29,7 +29,10 @@ only for the owner.
 - Login allows 10 attempts in any 15-minute window for the whole instance. An attacker who can
   reach the login form can keep the owner locked out.
 - A POST with a missing, foreign, or `null` Origin header is refused.
-- `/mcp` refuses every request, because it has no credential of its own yet.
+- `/mcp` requires `Authorization: Bearer <key>` with an API key. The owner creates and revokes keys
+  on the `/keys` page. A new key is shown once and stored only as a SHA-256 hash. Keys do not
+  expire, and a new password does not revoke them. After a password leak, change the password and
+  revoke every key that you did not create.
 
 Serve the instance over HTTPS when it is reachable beyond loopback. Over plain HTTP, the password and
 the session cookie cross the network in clear text. Use a long, random password.
