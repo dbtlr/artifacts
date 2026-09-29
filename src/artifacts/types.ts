@@ -33,6 +33,9 @@ export type ListArtifactsQuery = { collection?: string; project?: string };
 // atomicity across calls; the service relies only on the order of its calls
 // (see artifacts/service.ts), which holds across processes as well.
 export type ArtifactMetadataStore = {
+  // Rejects only when nothing was stored: the service removes the new
+  // content on rejection, so a row committed despite a rejection would point
+  // at missing content.
   create: (artifact: Artifact) => Promise<void>;
   find: (id: string) => Promise<Artifact | null>;
   list: (query?: ListArtifactsQuery) => Promise<Artifact[]>;

@@ -1,3 +1,4 @@
+import type { nanoid } from 'nanoid';
 import { describe, expect, it, vi } from 'vite-plus/test';
 
 import { createMemoryStores } from './memory-stores.test-support.js';
@@ -8,6 +9,14 @@ import type {
   ArtifactMetadataStore,
   CreateArtifactInput,
 } from './types.js';
+
+// Ids queued here are handed out by nanoid before it generates fresh ones.
+const ids = vi.hoisted(() => ({ next: [] as string[] }));
+
+vi.mock('nanoid', async (importOriginal) => {
+  const actual = await importOriginal<{ nanoid: typeof nanoid }>();
+  return { ...actual, nanoid: (size?: number) => ids.next.shift() ?? actual.nanoid(size) };
+});
 
 const artifact: Artifact = {
   createdAt: '2026-01-01T00:00:00.000Z',
@@ -187,5 +196,21 @@ describe('ArtifactService concurrent operations', () => {
     expect(new Set(created.map(({ id }) => id)).size).toBe(10);
     expect(stores.rows.size).toBe(10);
     expect(stores.files.size).toBe(10);
+  });
+});
+
+describe('ArtifactService ids', () => {
+  it('draws a new id instead of overwriting an existing artifact', async () => {
+    const stores = createMemoryStores([{ artifact, bytes }]);
+    const service = createArtifactService(stores.metadata, stores.content);
+    ids.next.push(artifact.id);
+
+    const created = await service.createArtifact({
+      ...input,
+      content: new TextEncoder().encode('new'),
+    });
+
+    expect(created.id).not.toBe(artifact.id);
+    await expect(service.getArtifact(artifact.id)).resolves.toMatchObject({ content: bytes });
   });
 });

@@ -99,10 +99,19 @@ function decodeContent(
   return content === undefined ? decodeBase64(contentBase64!) : new TextEncoder().encode(content);
 }
 
+// Names every field it returns, so the tool output stays this contract even
+// when a caller-supplied store hands back objects with extra fields.
 function artifactResult(artifact: Artifact) {
   const legacyType = legacyTypeFromMediaType(artifact.mediaType);
   return {
-    ...artifact,
+    ...(artifact.collection === undefined ? {} : { collection: artifact.collection }),
+    createdAt: artifact.createdAt,
+    description: artifact.description,
+    ...(artifact.filename === undefined ? {} : { filename: artifact.filename }),
+    id: artifact.id,
+    mediaType: artifact.mediaType,
+    project: artifact.project,
+    title: artifact.title,
     ...(legacyType === undefined ? {} : { type: legacyType }),
     url: buildArtifactUrl(artifact.id),
   };

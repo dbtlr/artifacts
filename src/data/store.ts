@@ -41,9 +41,17 @@ function isLegacyText(artifact: Artifact): boolean {
   return legacyTypeFromMediaType(artifact.mediaType) !== undefined;
 }
 
+// Copies only the fields of the current model: a caller-supplied store may
+// still hand back fields this model has dropped.
 function fromLegacyArtifact(artifact: LegacyArtifact): Artifact {
-  const { type, ...metadata } = artifact;
-  return { ...metadata, mediaType: mediaTypeFromLegacyType(type) };
+  return {
+    createdAt: artifact.createdAt,
+    description: artifact.description,
+    id: artifact.id,
+    mediaType: mediaTypeFromLegacyType(artifact.type),
+    project: artifact.project,
+    title: artifact.title,
+  };
 }
 
 // Preserve createApp(store)'s established one-argument embedding API. Its MCP

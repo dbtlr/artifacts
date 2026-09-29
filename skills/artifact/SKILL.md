@@ -27,7 +27,7 @@ Before creating anything, call `list_collections` and `list_artifacts` (pass `pr
 - **title** — short and human-scannable; it's what shows up in list views. ("Q3 Migration Plan", not "Plan for migrating the thing we discussed.")
 - **project** — a stable string per repo or initiative, reused across every artifact in that body of work (matches what `list_artifacts` filters on in Step 1). Pick it once and keep it consistent so Step 1 keeps finding the right artifacts.
 - **description** — one line, written for the list view, not the document body.
-- **collection** — optional shared metadata for related independent artifacts. Reuse one value for a document and its images so another agent can rediscover the set. A collection does not own its members.
+- **collection** — shared metadata for related independent artifacts. Set one on any document that may be revised later, because an artifact cannot be moved into a collection after it is published. Reuse one value for a document, its revisions, and its images so another agent can rediscover the set. A collection does not own its members.
 
 ### Step 3: Choose a media type and payload
 

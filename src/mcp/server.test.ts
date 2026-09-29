@@ -9,6 +9,7 @@ import type { ServerType } from '@hono/node-server';
 import { serve } from '@hono/node-server';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { z } from 'zod';
@@ -21,8 +22,9 @@ import { z } from 'zod';
 // intercept without reimplementing part of the transport — booting on an
 // ephemeral port (PORT=0 pattern) is the smaller, more honest surface.
 import { createApp } from '../app.js';
-import type { ArtifactService, ArtifactStore } from '../data/store.js';
+import type { Artifact, ArtifactService, ArtifactStore } from '../data/store.js';
 import { createArtifactStore, createByteNativeArtifactService } from '../data/store.js';
+import { createMcpServer } from './server.js';
 
 const artifactSchema = z.object({
   collection: z.string().optional(),
@@ -414,5 +416,49 @@ describe('public base url override', () => {
     expect(added.url).toBe(`https://artifacts.example/a/${added.id}`);
 
     await callTool('remove_artifact', { id: added.id }, removeResultSchema);
+  });
+});
+
+describe('artifact results', () => {
+  it('return only the documented fields, whatever the service hands back', async () => {
+    // A caller-supplied store may still carry fields this contract dropped.
+    const stale = {
+      createdAt: '2026-01-01T00:00:00.000Z',
+      description: 'd',
+      id: 'x',
+      mediaType: 'text/plain',
+      project: 'p',
+      title: 'X',
+      updatedAt: '2026-02-01T00:00:00.000Z',
+    } as Artifact;
+    const service: ArtifactService = {
+      createArtifact: async () => stale,
+      findArtifact: async () => stale,
+      getArtifact: async () => ({ ...stale, content: new Uint8Array() }),
+      listArtifacts: async () => [stale],
+      removeArtifact: async () => true,
+    };
+    const mcp = createMcpServer(service);
+    const local = new Client({ name: 'artifacts-fields-client', version: '0.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([mcp.connect(serverTransport), local.connect(clientTransport)]);
+
+    const raw = await local.callTool({ arguments: {}, name: 'list_artifacts' });
+    await local.close();
+    await mcp.close();
+
+    const [listed] = z
+      .array(z.record(z.string(), z.unknown()))
+      .parse(JSON.parse(resultText(CallToolResultSchema.parse(raw))));
+    expect(Object.keys(listed ?? {}).toSorted()).toEqual([
+      'createdAt',
+      'description',
+      'id',
+      'mediaType',
+      'project',
+      'title',
+      'type',
+      'url',
+    ]);
   });
 });

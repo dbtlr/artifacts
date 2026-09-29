@@ -1,6 +1,6 @@
 import type { Artifact, ArtifactContentStore, ArtifactMetadataStore, MediaType } from './types.js';
 
-export type HoldableStep = 'contentRead' | 'contentRemove' | 'contentWrite' | 'metadataCreate';
+export type HoldableStep = 'contentRead' | 'contentRemove' | 'metadataCreate';
 
 export type Hold = {
   // Resolves once the held step has been called and is waiting.
@@ -62,7 +62,6 @@ export function createMemoryStores(seed: { artifact: Artifact; bytes: Uint8Array
       return files.delete(fileKey(id, mediaType));
     },
     write: async (id, mediaType, bytes) => {
-      await pass('contentWrite');
       files.set(fileKey(id, mediaType), bytes);
     },
   };

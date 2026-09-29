@@ -6,7 +6,7 @@ export type ThumbnailQueue = {
   // Resolves once they are queued, not rendered; rejects if the store
   // cannot say which previews exist.
   backfill: (artifacts: Artifact[]) => Promise<void>;
-  // Queue one artifact for (re-)rendering. Never throws and never blocks the
+  // Queue one artifact for rendering. Never throws and never blocks the
   // caller: a create returns as soon as the metadata is written.
   enqueue: (id: string) => void;
   // Resolves once nothing is rendering and nothing is waiting. For tests and
@@ -35,7 +35,7 @@ function describe(error: unknown): string {
 
 // One render at a time, in enqueue order, so a burst of uploads never opens a
 // pile of browser pages at once. Ids are kept in a Set, so an artifact queued
-// twice before its turn renders once; queued again after, it renders again.
+// twice before its turn renders once.
 // Every failure (lookup, renderer, store) is reported and the queue moves on:
 // nothing here may reject into the caller or become an unhandled rejection.
 export function createThumbnailQueue({

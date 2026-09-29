@@ -244,8 +244,9 @@ export const sqliteMigrations: RunnableMigration<DatabaseSync>[] = [
     },
   },
   {
-    // Artifacts are immutable, so the time of the last change is always the
-    // creation time. A downgrade restores the column from created_at.
+    // Artifacts are immutable, so a last-change time would always equal the
+    // creation time. The edit times of rows changed before this migration are
+    // discarded; a downgrade restores the column from created_at.
     down: async ({ context: database }) => {
       database.exec(`
         ALTER TABLE artifacts ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';
