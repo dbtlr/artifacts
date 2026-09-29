@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vite-plus/test';
 
-import { extractEmbedReferences, substituteEmbedReferences } from './embeds.js';
+import {
+  extractEmbedReferences,
+  MAX_EMBED_REFERENCES,
+  substituteEmbedReferences,
+} from './embeds.js';
 
 const BASE = 'https://artifacts.example';
 
@@ -79,11 +83,31 @@ describe('extractEmbedReferences', () => {
       '<!-- <img src="/a/commented"> -->',
       '<textarea><img src="/a/typed"></textarea>',
       '<title><img src="/a/titled"></title>',
-      '<noscript><img src="/a/fallback"></noscript>',
       '<img src="/a/real">',
     ].join('\n');
 
     expect(idsIn(html)).toEqual(['real']);
+  });
+
+  // The thumbnail renderer runs without scripts, and then a browser reads
+  // <noscript> content as markup and loads its images.
+  it('finds references inside noscript, which loads when scripts are off', () => {
+    expect(idsIn('<noscript><img src="/a/fallback"></noscript><img src="/a/after">')).toEqual([
+      'fallback',
+      'after',
+    ]);
+  });
+
+  it(`keeps only the first ${MAX_EMBED_REFERENCES} references`, () => {
+    const html = Array.from(
+      { length: MAX_EMBED_REFERENCES + 5 },
+      (_, index) => `<img src="/a/id${index}">`,
+    ).join('');
+
+    const ids = idsIn(html);
+
+    expect(ids).toHaveLength(MAX_EMBED_REFERENCES);
+    expect(ids.at(-1)).toBe(`id${MAX_EMBED_REFERENCES - 1}`);
   });
 
   it('ends raw text only at an end tag in ASCII case', () => {
@@ -111,6 +135,18 @@ describe('substituteEmbedReferences', () => {
         '<img srcset="/a/two?expires=9&amp;signature=sig-two 1x, ' +
         '/a/one?expires=9&amp;signature=sig-one 2x">',
     );
+  });
+
+  it('signs each distinct artifact once per view', () => {
+    const html = '<img src="/a/one"><img src="/a/two"><img src="/a/one">';
+    const signed: string[] = [];
+
+    substituteEmbedReferences(html, extractEmbedReferences(html, BASE), (id) => {
+      signed.push(id);
+      return fakeSign(id);
+    });
+
+    expect(signed).toEqual(['one', 'two']);
   });
 
   it('returns the text unchanged when there are no references', () => {

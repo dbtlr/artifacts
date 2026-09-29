@@ -35,8 +35,9 @@ type ArtifactUrlSignerOptions = {
 
 // Short-lived capability URLs for one artifact each: the thumbnail renderer
 // reads an artifact through one when owner auth is on, since it has no
-// session, and so does a sandboxed HTML artifact for each artifact it embeds. A signature binds the artifact id and the expiry, so it cannot
-// be moved to another artifact or extended. It knows nothing about HTTP:
+// session, and so does a sandboxed HTML artifact for each artifact it
+// embeds. A signature binds the artifact id and the expiry, so it cannot be
+// moved to another artifact or extended. It knows nothing about HTTP:
 // auth/routes.tsx decides which requests may use one.
 export function createArtifactUrlSigner({
   key,

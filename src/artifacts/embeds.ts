@@ -7,6 +7,11 @@ export type EmbedReference = { id: string; start: number };
 // by another version are extracted again when next viewed.
 export const EMBED_EXTRACTOR_VERSION = 1;
 
+// The most references one template keeps; later ones stay unsigned. Each
+// view signs every distinct artifact its template names, so this bounds a
+// view's signing work and the size of the stored template.
+export const MAX_EMBED_REFERENCES = 1000;
+
 type UrlAttributeKind = 'srcset' | 'url';
 
 // The attributes whose URLs the browser loads while showing the page. Links,
@@ -32,11 +37,11 @@ function endTagPattern(element: string): RegExp {
   return new RegExp(`</${letters}(?=[\\t\\n\\f\\r />]|$)`, 'gu');
 }
 
-// Elements whose content the HTML parser reads as text, not markup, when
-// scripts are on (sandboxed artifacts run scripts, so <noscript> is text),
-// with the end tag that closes each.
+// Elements whose content the HTML parser reads as text, not markup, with
+// the end tag that closes each. <noscript> is not here: with scripts off, as
+// in the thumbnail renderer, its content is markup whose images load.
 const RAW_TEXT_END_TAGS = new Map(
-  ['iframe', 'noembed', 'noframes', 'noscript', 'script', 'style', 'textarea', 'title', 'xmp'].map(
+  ['iframe', 'noembed', 'noframes', 'script', 'style', 'textarea', 'title', 'xmp'].map(
     (element) => [element, endTagPattern(element)],
   ),
 );
@@ -64,13 +69,15 @@ type Span = { end: number; start: number };
 // enough to find attribute values: comments, doctypes, end tags, and the
 // text inside raw-text elements are skipped. Calls `onAttribute` with each
 // attribute's lower-cased element and attribute names and its value's span,
-// once per name per tag, as the browser keeps only the first.
+// once per name per tag, as the browser keeps only the first. Stops early
+// once `isDone` returns true.
 function scanAttributes(
   html: string,
   onAttribute: (element: string, name: string, value: Span) => void,
+  isDone: () => boolean,
 ): void {
   let index = 0;
-  while (index < html.length) {
+  while (index < html.length && !isDone()) {
     const open = html.indexOf('<', index);
     if (open === -1) {
       return;
@@ -222,33 +229,49 @@ function referenceAt(html: string, url: Span, publicBaseUrl: string): EmbedRefer
 // Finds, in document order, each place where an HTML artifact loads another
 // artifact of this instance by URL: the `src`, `srcset`, `poster`, or `href`
 // of img, source, iframe, video, audio, and link elements. Runs once, when
-// the artifact is stored; the result is its embed template.
+// the artifact is stored; the result is its embed template. Keeps at most
+// MAX_EMBED_REFERENCES.
 export function extractEmbedReferences(html: string, publicBaseUrl: string): EmbedReference[] {
   const references: EmbedReference[] = [];
-  scanAttributes(html, (element, name, value) => {
-    const kind = URL_ATTRIBUTES[element]?.[name];
-    if (kind === undefined) {
-      return;
-    }
-    const urls = kind === 'srcset' ? srcsetUrls(html, value) : [trimmed(html, value)];
-    for (const url of urls) {
-      const reference = referenceAt(html, url, publicBaseUrl);
-      if (reference !== undefined) {
-        references.push(reference);
+  const isFull = () => references.length >= MAX_EMBED_REFERENCES;
+  scanAttributes(
+    html,
+    (element, name, value) => {
+      const kind = URL_ATTRIBUTES[element]?.[name];
+      if (kind === undefined) {
+        return;
       }
-    }
-  });
+      const urls = kind === 'srcset' ? srcsetUrls(html, value) : [trimmed(html, value)];
+      for (const url of urls) {
+        const reference = referenceAt(html, url, publicBaseUrl);
+        if (reference !== undefined && !isFull()) {
+          references.push(reference);
+        }
+      }
+    },
+    isFull,
+  );
   return references;
 }
 
 // Replaces each referenced `/a/<id>` path with `signedPath(id)`, escaped for
-// an attribute value. A reference that does not match the text at its
-// position is left alone, so a stale template can never corrupt the page.
+// an attribute value, calling `signedPath` once per distinct id. A reference
+// that does not match the text at its position is left alone, so a stale
+// template can never corrupt the page.
 export function substituteEmbedReferences(
   html: string,
   references: readonly EmbedReference[],
   signedPath: (id: string) => string,
 ): string {
+  const signed = new Map<string, string>();
+  function escapedSignedPath(id: string): string {
+    let path = signed.get(id);
+    if (path === undefined) {
+      path = signedPath(id).replaceAll('&', '&amp;');
+      signed.set(id, path);
+    }
+    return path;
+  }
   let result = '';
   let copied = 0;
   for (const { id, start } of references) {
@@ -261,7 +284,7 @@ export function substituteEmbedReferences(
     ) {
       continue;
     }
-    result += html.slice(copied, start) + signedPath(id).replaceAll('&', '&amp;');
+    result += html.slice(copied, start) + escapedSignedPath(id);
     copied = start + path.length;
   }
   return result + html.slice(copied);
