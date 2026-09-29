@@ -11,6 +11,8 @@ type IndexHeaderProps = {
   current?: string;
   // Every project with its count, for the selector, regardless of scope.
   projects: CountedProject[];
+  // True when owner auth is on, so the page was served to a session.
+  showLogOut?: boolean;
   // Kind counts and the active kind come from the page's own (scoped) view.
   view: IndexView;
 };
@@ -39,7 +41,13 @@ function artifactsLabel(total: number): string {
 // nothing breaks inside a word, a long project name truncates but keeps its
 // caret, and the open menu is anchored to the header's own box (not the
 // selector), so it can never extend past the viewport.
-export const IndexHeader: FC<IndexHeaderProps> = ({ basePath, current, projects, view }) => (
+export const IndexHeader: FC<IndexHeaderProps> = ({
+  basePath,
+  current,
+  projects,
+  showLogOut = false,
+  view,
+}) => (
   <header class="relative flex flex-wrap items-center gap-x-7 gap-y-2 border-b border-stone-200 py-4 dark:border-ink-800">
     <a
       href="/"
@@ -82,6 +90,13 @@ export const IndexHeader: FC<IndexHeaderProps> = ({ basePath, current, projects,
       <span class="text-[13px] whitespace-nowrap text-stone-500 tabular-nums dark:text-ink-400">
         {artifactsLabel(view.total)}
       </span>
+      {showLogOut ? (
+        <form method="post" action="/logout">
+          <button type="submit" class={`cursor-pointer ${kindLink}`}>
+            Log out
+          </button>
+        </form>
+      ) : null}
     </nav>
   </header>
 );

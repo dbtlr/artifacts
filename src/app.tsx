@@ -8,6 +8,7 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 
 import { legacyTypeFromMediaType } from './artifacts/media.js';
+import { installOwnerAuth } from './auth/routes.js';
 import { ArtifactPage } from './components/artifact-page.js';
 import { HomePage } from './components/home-page.js';
 import { Layout } from './components/layout.js';
@@ -137,14 +138,18 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
     serveStatic({ path: 'apple-touch-icon.png', root: STATIC_ROOT }),
   );
 
+  // With an owner password configured, every route below needs a session.
+  installOwnerAuth(app, async () => (await resolveServices()).auth);
+
   // `?kind=html` narrows either gallery to one file kind; an unknown kind is
   // ignored rather than 404ed, for the same reason an unknown project is.
   app.get('/', async (c) => {
-    const artifacts = await (await resolveServices()).artifacts.listArtifacts();
+    const services = await resolveServices();
+    const artifacts = await services.artifacts.listArtifacts();
     const view = buildIndexView(artifacts, { kind: c.req.query('kind') });
     return c.html(
       <Layout title="Artifacts" wide>
-        <HomePage view={view} />
+        <HomePage view={view} showLogOut={services.auth !== undefined} />
       </Layout>,
     );
   });
@@ -160,7 +165,8 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
     // One read serves both the project-scoped view and the header's project
     // selector, which offers every project. The store's own project filter
     // is exact equality, so filtering here matches it.
-    const all = await (await resolveServices()).artifacts.listArtifacts();
+    const services = await resolveServices();
+    const all = await services.artifacts.listArtifacts();
     const { projects } = buildIndexView(all, {});
     const view = buildIndexView(
       all.filter((artifact) => artifact.project === project),
@@ -168,7 +174,12 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
     );
     return c.html(
       <Layout title={`${project} · Artifacts`} wide>
-        <ProjectPage project={project} projects={projects} view={view} />
+        <ProjectPage
+          project={project}
+          projects={projects}
+          showLogOut={services.auth !== undefined}
+          view={view}
+        />
       </Layout>,
     );
   });

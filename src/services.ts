@@ -1,6 +1,9 @@
 import type { ArtifactService } from './artifacts/types.js';
+import { createOwnerAuth, resolveOwnerPassword } from './auth/owner-auth.js';
+import type { OwnerAuth } from './auth/owner-auth.js';
 import { resolveStoragePaths } from './data-dir.js';
 import { FilesystemThumbnailStore } from './data/filesystem-thumbnail-store.js';
+import { SqliteOwnerAuthStore } from './data/sqlite-owner-auth-store.js';
 import { getDefaultByteNativeArtifactService } from './data/store.js';
 import { createThumbnailQueue } from './thumbnails/queue.js';
 import type { ThumbnailQueue } from './thumbnails/queue.js';
@@ -8,9 +11,12 @@ import type { ThumbnailStore } from './thumbnails/types.js';
 import { withThumbnails } from './thumbnails/with-thumbnails.js';
 
 // What createApp needs. `thumbnails` is optional so an embedding caller (or a
-// test) that has no preview store still gets placeholder images.
+// test) that has no preview store still gets placeholder images. `auth` is
+// present only when an owner password is configured; without it the app has
+// no login and serves every route to anyone who can reach it.
 export type AppServices = {
   artifacts: ArtifactService;
+  auth?: OwnerAuth;
   mcp: ArtifactService;
   thumbnails?: ThumbnailStore;
 };
@@ -24,14 +30,26 @@ let defaultServices: Promise<DefaultAppServices> | undefined;
 
 async function createDefaultAppServices(): Promise<DefaultAppServices> {
   try {
+    const password = resolveOwnerPassword();
     const base = await getDefaultByteNativeArtifactService();
-    const thumbnails = new FilesystemThumbnailStore(resolveStoragePaths().thumbsDir);
+    const paths = resolveStoragePaths();
+    const auth =
+      password === undefined
+        ? undefined
+        : createOwnerAuth({ password, store: await SqliteOwnerAuthStore.open(paths.databasePath) });
+    const thumbnails = new FilesystemThumbnailStore(paths.thumbsDir);
     const thumbnailQueue = createThumbnailQueue({ lookup: base.findArtifact, store: thumbnails });
     const artifacts = withThumbnails(base, {
       enqueue: thumbnailQueue.enqueue,
       remove: (id) => thumbnails.remove(id),
     });
-    return { artifacts, mcp: artifacts, thumbnailQueue, thumbnails };
+    return {
+      artifacts,
+      ...(auth === undefined ? {} : { auth }),
+      mcp: artifacts,
+      thumbnailQueue,
+      thumbnails,
+    };
   } catch (error) {
     defaultServices = undefined;
     throw error;

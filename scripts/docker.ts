@@ -8,6 +8,10 @@ import { fileURLToPath } from 'node:url';
 export type DockerConfig = {
   databaseMount: string;
   filesMount: string;
+  // Whether ARTIFACTS_OWNER_PASSWORD is set. The value itself never enters
+  // the config or the docker command line: `--env NAME` makes the Docker CLI
+  // copy it from its own environment.
+  ownerPassword: boolean;
   port: number;
   publicBaseUrl: string;
   // Rendered previews. Derived data (the server re-renders whatever is
@@ -108,9 +112,15 @@ export function resolveDockerConfig(env: NodeJS.ProcessEnv): DockerConfig {
     env.ARTIFACTS_THUMBS_MOUNT,
     'artifacts-thumbs',
   );
+  // The server refuses a blank password at startup; failing here says why
+  // before a container is replaced.
+  if (env.ARTIFACTS_OWNER_PASSWORD?.trim() === '') {
+    throw new Error('ARTIFACTS_OWNER_PASSWORD must not be blank; unset it to turn auth off');
+  }
   const config: DockerConfig = {
     databaseMount,
     filesMount,
+    ownerPassword: env.ARTIFACTS_OWNER_PASSWORD !== undefined,
     port,
     publicBaseUrl: env.ARTIFACTS_PUBLIC_BASE_URL ?? `http://localhost:${String(port)}`,
     thumbsMount,
@@ -147,6 +157,7 @@ export function buildBareRunArgs(config: DockerConfig): string[] {
     `ARTIFACTS_PORT=${String(config.port)}`,
     '--env',
     `ARTIFACTS_PUBLIC_BASE_URL=${config.publicBaseUrl}`,
+    ...(config.ownerPassword ? ['--env', 'ARTIFACTS_OWNER_PASSWORD'] : []),
     ...persistenceMounts(config).flatMap(([, source, target]) => [
       '--mount',
       mountArgument(source, target),

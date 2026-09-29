@@ -1,0 +1,68 @@
+import { DatabaseSync } from 'node:sqlite';
+
+import type { OwnerAuthStore, StoredSession } from '../auth/types.js';
+import { runSqliteMigrations } from './sqlite-migrations.js';
+
+const SQLITE_BUSY_TIMEOUT_MS = 1_000;
+
+// Owner sessions and login attempts, in the same database file as the
+// artifact metadata. It opens its own connection; the migration runner's
+// write lock makes opening both connections safe in either order.
+export class SqliteOwnerAuthStore implements OwnerAuthStore {
+  private readonly database: DatabaseSync;
+
+  private constructor(database: DatabaseSync) {
+    this.database = database;
+  }
+
+  static async open(databasePath: string): Promise<SqliteOwnerAuthStore> {
+    const database = new DatabaseSync(databasePath, { timeout: SQLITE_BUSY_TIMEOUT_MS });
+    try {
+      await runSqliteMigrations(database);
+      return new SqliteOwnerAuthStore(database);
+    } catch (error) {
+      database.close();
+      throw error;
+    }
+  }
+
+  async reserveLoginAttempt(at: string, since: string, limit: number): Promise<boolean> {
+    this.database.prepare('DELETE FROM login_attempts WHERE attempted_at <= ?').run(since);
+    const { changes } = this.database
+      .prepare(
+        `INSERT INTO login_attempts (attempted_at)
+         SELECT ? WHERE (SELECT COUNT(*) FROM login_attempts WHERE attempted_at > ?) < ?`,
+      )
+      .run(at, since, limit);
+    return changes > 0;
+  }
+
+  async oldestLoginAttemptAfter(since: string): Promise<string | null> {
+    const record = this.database
+      .prepare('SELECT MIN(attempted_at) AS oldest FROM login_attempts WHERE attempted_at > ?')
+      .get(since);
+    return record?.oldest === null || record?.oldest === undefined ? null : String(record.oldest);
+  }
+
+  async clearLoginAttempts(): Promise<void> {
+    this.database.exec('DELETE FROM login_attempts');
+  }
+
+  async createSession({ createdAt, expiresAt, tokenHash }: StoredSession): Promise<void> {
+    this.database.prepare('DELETE FROM owner_sessions WHERE expires_at <= ?').run(createdAt);
+    this.database
+      .prepare('INSERT INTO owner_sessions (token_hash, created_at, expires_at) VALUES (?, ?, ?)')
+      .run(tokenHash, createdAt, expiresAt);
+  }
+
+  async findSessionExpiry(tokenHash: string): Promise<string | null> {
+    const record = this.database
+      .prepare('SELECT expires_at FROM owner_sessions WHERE token_hash = ?')
+      .get(tokenHash);
+    return record === undefined ? null : String(record.expires_at);
+  }
+
+  async removeSession(tokenHash: string): Promise<void> {
+    this.database.prepare('DELETE FROM owner_sessions WHERE token_hash = ?').run(tokenHash);
+  }
+}

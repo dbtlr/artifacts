@@ -32,9 +32,16 @@ async function startThumbnails(boundPort: number): Promise<void> {
   }
 }
 
+// With owner auth on, the renderer holds no session and would capture the
+// login form, so previews stay as placeholders until the renderer has a
+// credential of its own.
 const server = serve({ fetch: app.fetch, port }, (info) => {
   process.stdout.write(`Artifacts listening on http://localhost:${String(info.port)}\n`);
-  void startThumbnails(info.port);
+  if (services.auth === undefined) {
+    void startThumbnails(info.port);
+  } else {
+    process.stdout.write('Owner auth is on; gallery previews are not rendered\n');
+  }
 });
 
 // The renderer opts out of Playwright's own signal handling (which would

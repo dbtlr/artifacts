@@ -7,10 +7,34 @@ security fixes will be backported.
 
 ## Deployment boundary
 
-Artifacts has no authentication or authorization. Anyone who can reach the server can list, read,
-create, change, and remove artifacts. Deploy it only on loopback or a trusted internal network. If
-broader access is required, place an authentication-capable reverse proxy in front of it and verify
-that the application itself is not directly reachable. Never store secrets in artifacts.
+Artifacts has two modes. `ARTIFACTS_OWNER_PASSWORD` selects between them.
+
+### Without an owner password
+
+This is the default. Artifacts has no authentication or authorization. Anyone who can reach the
+server can list, read, create, and remove artifacts. Deploy it only on loopback or a trusted
+internal network. If broader access is required, set an owner password or place an
+authentication-capable reverse proxy in front of it, and verify that the application itself is not
+directly reachable.
+
+### With an owner password
+
+Every page and every `/a/:id` link requires a session from the login form. Only the login form,
+`/assets/*`, and the root icons are public. There is one owner and no other accounts, so links work
+only for the owner.
+
+- Sessions are stored in the database as keyed hashes of random tokens and last 7 days. A new
+  password ends every session. The cookie is `HttpOnly` and `SameSite=Lax`. It is `Secure` when
+  `ARTIFACTS_PUBLIC_BASE_URL` uses HTTPS.
+- Login allows 10 attempts in any 15-minute window for the whole instance. An attacker who can
+  reach the login form can keep the owner locked out.
+- A POST with a missing, foreign, or `null` Origin header is refused.
+- `/mcp` refuses every request, because it has no credential of its own yet.
+
+Serve the instance over HTTPS when it is reachable beyond loopback. Over plain HTTP, the password and
+the session cookie cross the network in clear text. Use a long, random password.
+
+In both modes, HTML artifacts run in an opaque-origin CSP sandbox. Never store secrets in artifacts.
 
 ## Reporting a vulnerability
 

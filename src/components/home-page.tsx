@@ -4,7 +4,7 @@ import type { IndexView } from '../index-view.js';
 import { ArtifactGallery } from './gallery.js';
 import { IndexHeader } from './index-header.js';
 
-type HomePageProps = { view: IndexView };
+type HomePageProps = { showLogOut?: boolean; view: IndexView };
 
 // An empty grid means one of two things: nothing has been shared yet, or the
 // active kind filter excluded everything.
@@ -14,9 +14,9 @@ function emptyMessage(view: IndexView): string {
     : 'No artifacts yet. Once an agent shares one, it will show up here.';
 }
 
-export const HomePage: FC<HomePageProps> = ({ view }) => (
+export const HomePage: FC<HomePageProps> = ({ showLogOut = false, view }) => (
   <main>
-    <IndexHeader basePath="/" projects={view.projects} view={view} />
+    <IndexHeader basePath="/" projects={view.projects} showLogOut={showLogOut} view={view} />
     <ArtifactGallery artifacts={view.items} emptyMessage={emptyMessage(view)} />
   </main>
 );
