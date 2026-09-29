@@ -46,9 +46,11 @@ export type ListArtifactsQuery = { collection?: string; project?: string };
 // atomicity across calls; the service relies only on the order of its calls
 // (see artifacts/service.ts), which holds across processes as well.
 export type ArtifactMetadataStore = {
-  // Rejects only when nothing was stored: the service removes the new
-  // content on rejection, so a row committed despite a rejection would point
-  // at missing content.
+  // Rejects with CreateOutcomeUnknownError (see artifacts/errors.ts) when it
+  // cannot tell whether the row was stored, and the service then keeps the
+  // new content. Any other rejection means nothing was stored: the service
+  // removes the new content, so a row committed despite such a rejection
+  // would point at missing content.
   create: (artifact: Artifact) => Promise<void>;
   find: (id: string) => Promise<Artifact | null>;
   // Resolves null when no embed template is stored for the id.

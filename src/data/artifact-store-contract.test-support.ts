@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test';
 
+import { CreateOutcomeUnknownError } from '../artifacts/errors.js';
 import type {
   Artifact,
   ArtifactContentStore,
@@ -79,8 +80,12 @@ export function metadataStoreContract(
       const store = await createStore();
       await store.create(first);
 
-      await expect(store.create({ ...second, id: first.id })).rejects.toThrow();
+      const rejection = await store.create({ ...second, id: first.id }).catch((error) => error);
 
+      // A taken id is a known failure, so the service removes the content it
+      // wrote for the create.
+      expect(rejection).toBeInstanceOf(Error);
+      expect(rejection).not.toBeInstanceOf(CreateOutcomeUnknownError);
       await expect(store.list()).resolves.toEqual([first]);
     });
 

@@ -5,6 +5,7 @@ import type { MarkdownRenderer, RenderedMarkdown } from '../markdown.js';
 import { resolvePublicBaseUrl } from '../urls.js';
 import { EMBED_EXTRACTOR_VERSION, extractEmbedReferences } from './embeds.js';
 import type { EmbedReference } from './embeds.js';
+import { CreateOutcomeUnknownError } from './errors.js';
 import { hasValidSignature, isMediaType, MAX_ARTIFACT_BYTES, mediaDefinition } from './media.js';
 import type {
   Artifact,
@@ -121,6 +122,11 @@ function reportFailure(step: string, error: unknown): void {
 // way. Nothing here holds state between calls, so the same rules hold for
 // several processes sharing the stores.
 //
+// A create whose metadata store rejects removes the content it wrote, unless
+// the store reports that the outcome is unknown: then the content stays, as
+// content without a row is invisible, while a row without content fails
+// every read.
+//
 // An HTML artifact's embed template is extracted once, when it is created,
 // and stored beside its metadata, so a view signs its embedded URLs without
 // parsing HTML. The template is derived data: a failure to store it never
@@ -190,6 +196,10 @@ export function createArtifactService(
     try {
       await metadata.create(artifact);
     } catch (error) {
+      // The row may exist, and removing its content would break it for good.
+      if (error instanceof CreateOutcomeUnknownError) {
+        throw error;
+      }
       try {
         await content.remove(id, input.mediaType);
       } catch (cleanupError) {

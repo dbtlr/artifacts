@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vite-plus/test';
 
 import type { MarkdownRenderer } from '../markdown.js';
 import { EMBED_EXTRACTOR_VERSION } from './embeds.js';
+import { CreateOutcomeUnknownError } from './errors.js';
 import { createMemoryStores } from './memory-stores.test-support.js';
 import { createArtifactService } from './service.js';
 import type {
@@ -93,6 +94,38 @@ describe('ArtifactService lost metadata races', () => {
     ).rejects.toThrow(createError);
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining(cleanupError.message));
     stderr.mockRestore();
+  });
+
+  // Content without a row is invisible; a row without content fails every
+  // read. When the store cannot tell which happened, the content stays.
+  it('keeps the content when the metadata create has an unknown outcome', async () => {
+    const stores = createMemoryStores();
+    const unknown = new CreateOutcomeUnknownError('artifact-id', new Error('D1 timed out'));
+    const service = createArtifactService(
+      {
+        ...stores.metadata,
+        create: async (created) => {
+          await stores.metadata.create(created);
+          throw unknown;
+        },
+      },
+      stores.content,
+    );
+
+    await expect(
+      service.createArtifact({
+        content: new TextEncoder().encode('content'),
+        description: 'description',
+        mediaType: 'text/plain',
+        project: 'artifacts',
+        title: 'Title',
+      }),
+    ).rejects.toThrow(unknown);
+
+    const [stored] = stores.rows.values();
+    await expect(service.getArtifact(stored!.id)).resolves.toMatchObject({
+      content: new TextEncoder().encode('content'),
+    });
   });
 
   it('reports orphan cleanup but returns success after metadata removal commits', async () => {

@@ -47,6 +47,8 @@ export class SqliteArtifactMetadataStore implements ArtifactMetadataStore {
     return this.database.prepare(sql).run(...values);
   }
 
+  // node:sqlite runs the insert synchronously in its own transaction, so a
+  // failed insert stored nothing and the outcome is never unknown.
   async create(artifact: Artifact): Promise<void> {
     this.run(insertArtifact(artifact));
   }
