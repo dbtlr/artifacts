@@ -20,19 +20,26 @@ const URL_ATTRIBUTES: Record<string, Record<string, UrlAttributeKind>> = {
   video: { poster: 'url', src: 'url' },
 };
 
+// HTML names are case-insensitive in ASCII only, so `toLowerCase()`, which
+// also folds characters such as the Kelvin sign into `k`, is not used.
+function asciiLowerCase(value: string): string {
+  return value.replaceAll(/[A-Z]/gu, (letter) => letter.toLowerCase());
+}
+
+// A pattern for the end tag of `element` in any ASCII case.
+function endTagPattern(element: string): RegExp {
+  const letters = element.replaceAll(/[a-z]/gu, (letter) => `[${letter}${letter.toUpperCase()}]`);
+  return new RegExp(`</${letters}(?=[\\t\\n\\f\\r />]|$)`, 'gu');
+}
+
 // Elements whose content the HTML parser reads as text, not markup, when
-// scripts are on (sandboxed artifacts run scripts, so <noscript> is text).
-const RAW_TEXT_ELEMENTS = new Set([
-  'iframe',
-  'noembed',
-  'noframes',
-  'noscript',
-  'script',
-  'style',
-  'textarea',
-  'title',
-  'xmp',
-]);
+// scripts are on (sandboxed artifacts run scripts, so <noscript> is text),
+// with the end tag that closes each.
+const RAW_TEXT_END_TAGS = new Map(
+  ['iframe', 'noembed', 'noframes', 'noscript', 'script', 'style', 'textarea', 'title', 'xmp'].map(
+    (element) => [element, endTagPattern(element)],
+  ),
+);
 
 // `/a/<id>`, the id in the nanoid alphabet (see data/safe-id.ts).
 const REFERENCE_PATH = /^\/a\/([A-Za-z0-9_-]+)(?:#.*)?$/su;
@@ -94,7 +101,7 @@ function scanTag(
   while (!isNameEnd(html[index])) {
     index += 1;
   }
-  const element = html.slice(nameStart, index).toLowerCase();
+  const element = asciiLowerCase(html.slice(nameStart, index));
   const seen = new Set<string>();
   while (index < html.length) {
     while (isSpace(html[index]) || html[index] === '/') {
@@ -109,7 +116,7 @@ function scanTag(
     while (!isNameEnd(html[index]) && html[index] !== '=') {
       index += 1;
     }
-    const name = html.slice(attributeStart, index).toLowerCase();
+    const name = asciiLowerCase(html.slice(attributeStart, index));
     while (isSpace(html[index])) {
       index += 1;
     }
@@ -142,16 +149,14 @@ function scanTag(
   if (element === 'plaintext') {
     return html.length;
   }
-  if (!RAW_TEXT_ELEMENTS.has(element)) {
+  const endTag = RAW_TEXT_END_TAGS.get(element);
+  if (endTag === undefined) {
     return index;
   }
   // Raw text runs to the first matching end tag, whatever it contains.
-  const lower = html.toLowerCase();
-  let close = lower.indexOf(`</${element}`, index);
-  while (close !== -1 && !isNameEnd(lower[close + 2 + element.length])) {
-    close = lower.indexOf(`</${element}`, close + 1);
-  }
-  return close === -1 ? html.length : close;
+  endTag.lastIndex = index;
+  const close = endTag.exec(html);
+  return close === null ? html.length : close.index;
 }
 
 // The URL spans in a srcset value: comma-separated candidates, each a URL

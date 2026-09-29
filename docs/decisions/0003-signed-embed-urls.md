@@ -51,8 +51,10 @@ derived from an artifact's content can be computed once and kept.
 
 ## Consequences
 
-- An HTML artifact's own scripts can read the signed URLs in the page. That grants nothing new:
-  creating an artifact needs an API key, which can read every artifact.
+- An HTML artifact's own scripts can read the signed URLs in the page and send them elsewhere. That
+  grants nothing new. Artifacts are immutable and IDs are random, so the references are fixed when
+  the artifact is created and can name only artifacts that existed then. Whoever created it could
+  already read those: through an API key with auth on, or without one with auth off.
 - A signed URL copied from a page reads that one artifact for up to 10 minutes.
 - Embeds that the extractor does not find, such as script-built URLs or CSS `url()`, still fail
   with auth on.

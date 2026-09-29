@@ -39,7 +39,8 @@ only for the owner.
   request with an expired, altered, or misapplied signature and no session gets `403`.
 - An HTML artifact's embedded `/a/:id` URLs get the same kind of signature on each view, valid for
   10 minutes. A page read through a signature also gets its embeds signed. The artifact's own
-  scripts can read these URLs, which grants nothing an API key does not already grant.
+  scripts can read these URLs. The references are fixed when the artifact is created, so they name
+  only artifacts that its creator could already read.
 
 Serve the instance over HTTPS when it is reachable beyond loopback. Over plain HTTP, the password and
 the session cookie cross the network in clear text. Use a long, random password.

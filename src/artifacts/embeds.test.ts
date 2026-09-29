@@ -86,6 +86,15 @@ describe('extractEmbedReferences', () => {
     expect(idsIn(html)).toEqual(['real']);
   });
 
+  it('ends raw text only at an end tag in ASCII case', () => {
+    const html = [
+      '<SCRIPT>"</scriptx>"; \'<img src="/a/scripted">\'</Script >',
+      '<img src="/a/after">',
+    ].join('');
+
+    expect(idsIn(html)).toEqual(['after']);
+  });
+
   it('finds nothing in plain text that only looks like a reference', () => {
     expect(idsIn('<p>src="/a/prose"</p>')).toEqual([]);
   });
