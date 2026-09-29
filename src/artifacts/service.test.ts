@@ -1,5 +1,8 @@
+import { setImmediate } from 'node:timers/promises';
+
 import { describe, expect, it, vi } from 'vite-plus/test';
 
+import { createMemoryStores } from './memory-stores.test-support.js';
 import { createArtifactService } from './service.js';
 import type { Artifact, ArtifactContentStore, ArtifactMetadataStore } from './types.js';
 
@@ -155,54 +158,21 @@ describe('ArtifactService lost metadata races', () => {
   });
 });
 
-// Map-backed stores whose content writes wait for the test to open a gate,
-// so a second operation can be started while the first is mid-flight.
-function createGatedStores(initial: Artifact, bytes: Uint8Array) {
-  const rows = new Map([[initial.id, initial]]);
-  const files = new Map([[`${initial.id}:${initial.mediaType}`, bytes]]);
-  const writeGate = Promise.withResolvers<void>();
-  const writeStarted = Promise.withResolvers<void>();
-  const metadata: ArtifactMetadataStore = {
-    create: async (next) => {
-      rows.set(next.id, next);
-    },
-    find: async (id) => rows.get(id) ?? null,
-    list: async () => [...rows.values()],
-    remove: async (id) => rows.delete(id),
-    update: async (next) => rows.has(next.id) && Boolean(rows.set(next.id, next)),
-  };
-  const content: ArtifactContentStore = {
-    read: async (id, mediaType) => {
-      const stored = files.get(`${id}:${mediaType}`);
-      if (stored === undefined) {
-        throw new Error(`ENOENT ${id}:${mediaType}`);
-      }
-      return stored;
-    },
-    remove: async (id, mediaType) => files.delete(`${id}:${mediaType}`),
-    write: async (id, mediaType, next) => {
-      writeStarted.resolve();
-      await writeGate.promise;
-      files.set(`${id}:${mediaType}`, next);
-    },
-  };
-  return { content, files, metadata, openWrites: writeGate.resolve, rows, writeStarted };
-}
+const pngBytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+const pdfBytes = new TextEncoder().encode('%PDF-1.7');
+const png: Artifact = { ...artifact, filename: 'old.png', mediaType: 'image/png' };
+const toPdf = { content: pdfBytes, filename: 'new.pdf', mediaType: 'application/pdf' } as const;
 
 describe('ArtifactService concurrent operations', () => {
   it('does not start a remove until an in-flight update has finished', async () => {
-    const previous: Artifact = { ...artifact, filename: 'old.png', mediaType: 'image/png' };
-    const stores = createGatedStores(previous, Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const stores = createMemoryStores([{ artifact: png, bytes: pngBytes }]);
     const service = createArtifactService(stores.metadata, stores.content);
+    const write = stores.hold('contentWrite');
 
-    const update = service.updateArtifact(previous.id, {
-      content: new TextEncoder().encode('%PDF-1.7'),
-      filename: 'new.pdf',
-      mediaType: 'application/pdf',
-    });
-    await stores.writeStarted.promise;
-    const remove = service.removeArtifact(previous.id);
-    stores.openWrites();
+    const update = service.updateArtifact(png.id, toPdf);
+    await write.reached;
+    const remove = service.removeArtifact(png.id);
+    write.release();
 
     // Interleaved, the remove would delete the row mid-update, and the
     // update's rollback would then restore the old file with no row.
@@ -210,5 +180,43 @@ describe('ArtifactService concurrent operations', () => {
     await expect(remove).resolves.toBe(true);
     expect(stores.rows.size).toBe(0);
     expect([...stores.files.keys()]).toEqual([]);
+  });
+
+  it('does not serve a get between the file swap and the metadata update', async () => {
+    const stores = createMemoryStores([{ artifact: png, bytes: pngBytes }]);
+    const service = createArtifactService(stores.metadata, stores.content);
+    const metadataUpdate = stores.hold('metadataUpdate');
+
+    const update = service.updateArtifact(png.id, toPdf);
+    // The old .png is gone and the row still says image/png.
+    await metadataUpdate.reached;
+    const get = service.getArtifact(png.id);
+    metadataUpdate.release();
+
+    await update;
+    await expect(get).resolves.toMatchObject({ content: pdfBytes, mediaType: 'application/pdf' });
+  });
+
+  it('does not make an operation on one artifact wait for another', async () => {
+    const other: Artifact = { ...artifact, id: 'other-id' };
+    const stores = createMemoryStores([
+      { artifact: png, bytes: pngBytes },
+      { artifact: other, bytes: new TextEncoder().encode('other') },
+    ]);
+    const service = createArtifactService(stores.metadata, stores.content);
+    const write = stores.hold('contentWrite');
+
+    const update = service.updateArtifact(png.id, toPdf);
+    await write.reached;
+    let read = false;
+    const get = (async () => {
+      await service.getArtifact(other.id);
+      read = true;
+    })();
+    await setImmediate();
+
+    expect(read).toBe(true);
+    write.release();
+    await Promise.all([update, get]);
   });
 });

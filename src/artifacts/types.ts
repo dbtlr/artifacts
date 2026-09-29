@@ -40,7 +40,10 @@ export type ListArtifactsQuery = { collection?: string; project?: string };
 
 // Storage ports are async so that adapters over async-only backends fit
 // behind them. The sqlite and filesystem adapters still do their I/O
-// synchronously and merely resolve with the result.
+// synchronously and merely resolve with the result. The ports promise no
+// atomicity across calls: the service orders them per artifact only within
+// one service instance (see artifacts/service.ts), so adapters shared across
+// processes need their own consistency design.
 export type ArtifactMetadataStore = {
   create: (artifact: Artifact) => Promise<void>;
   find: (id: string) => Promise<Artifact | null>;

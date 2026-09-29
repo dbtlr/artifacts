@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 
+import { createKeyedLane } from './keyed-lane.js';
 import { hasValidSignature, isMediaType, MAX_ARTIFACT_BYTES, mediaDefinition } from './media.js';
 import type {
   Artifact,
@@ -110,59 +111,26 @@ async function runRollback(
   }
 }
 
-type SerialLane = <T>(task: () => Promise<T>) => Promise<T>;
-
-// Runs each task only after every earlier task has settled, in call order.
-// Create, update, and remove change content and metadata in a fixed order
-// with compensating rollback, awaiting each step; the lane keeps another
-// operation from reading or changing an artifact between those steps.
-function createSerialLane(): SerialLane {
-  let tail: Promise<void> = Promise.resolve();
-  return async (task) => {
-    const previous = tail;
-    const { promise: settled, resolve: release } = Promise.withResolvers<void>();
-    tail = settled;
-    await previous;
-    try {
-      return await task();
-    } finally {
-      release();
-    }
-  };
-}
-
+// Every operation that reads and then writes, or touches both stores, runs
+// in its artifact's lane: create, update, and remove change content and
+// metadata in a fixed order with compensating rollback, awaiting each step,
+// and get reads metadata then content. The lane keeps another operation on
+// the same artifact from running between those steps. It orders operations
+// within this service instance only; it cannot coordinate other processes
+// sharing the same stores, which need their own consistency design.
+// Single metadata reads (find, list) stay outside it.
 export function createArtifactService(
   metadata: ArtifactMetadataStore,
   content: ArtifactContentStore,
 ): ArtifactService {
-  const serial = createSerialLane();
+  const lane = createKeyedLane();
 
-  // Tries up to MAX_ID_ATTEMPTS fresh ids, one lookup at a time.
-  async function generateId(attempt = 0): Promise<string> {
-    if (attempt >= MAX_ID_ATTEMPTS) {
-      throw new Error(
-        `Failed to generate a unique artifact id after ${String(MAX_ID_ATTEMPTS)} attempts`,
-      );
+  // Stores the artifact under a fresh id. Checking that the id is unused and
+  // writing it happen in that id's lane; a taken id resolves null.
+  async function storeUnderId(id: string, input: CreateArtifactInput): Promise<Artifact | null> {
+    if (await metadata.find(id)) {
+      return null;
     }
-    const id = nanoid(ID_LENGTH);
-    if (!(await metadata.find(id))) {
-      return id;
-    }
-    return generateId(attempt + 1);
-  }
-
-  async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
-    assertValidMediaType(input.mediaType);
-    assertNonBlank('title', input.title);
-    assertNonBlank('project', input.project);
-    assertNonBlank('description', input.description);
-    if (input.collection !== undefined) {
-      assertNonBlank('collection', input.collection);
-    }
-    assertValidFilename(input.mediaType, input.filename);
-    assertValidContent(input.mediaType, input.content);
-
-    const id = await generateId();
     const now = new Date().toISOString();
     const artifact: Artifact = {
       ...(input.collection === undefined ? {} : { collection: input.collection }),
@@ -188,6 +156,31 @@ export function createArtifactService(
       throw error;
     }
     return artifact;
+  }
+
+  // Tries up to MAX_ID_ATTEMPTS fresh ids, one at a time.
+  async function storeNew(input: CreateArtifactInput, attempt = 0): Promise<Artifact> {
+    if (attempt >= MAX_ID_ATTEMPTS) {
+      throw new Error(
+        `Failed to generate a unique artifact id after ${String(MAX_ID_ATTEMPTS)} attempts`,
+      );
+    }
+    const id = nanoid(ID_LENGTH);
+    const created = await lane.run(id, () => storeUnderId(id, input));
+    return created ?? storeNew(input, attempt + 1);
+  }
+
+  async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
+    assertValidMediaType(input.mediaType);
+    assertNonBlank('title', input.title);
+    assertNonBlank('project', input.project);
+    assertNonBlank('description', input.description);
+    if (input.collection !== undefined) {
+      assertNonBlank('collection', input.collection);
+    }
+    assertValidFilename(input.mediaType, input.filename);
+    assertValidContent(input.mediaType, input.content);
+    return storeNew(input);
   }
 
   async function getArtifact(id: string): Promise<ArtifactWithContent | null> {
@@ -290,14 +283,12 @@ export function createArtifactService(
     return true;
   }
 
-  // Single metadata reads are atomic on their own; everything that touches
-  // both stores, or reads then writes, goes through the lane.
   return {
-    createArtifact: (input) => serial(() => createArtifact(input)),
+    createArtifact,
     findArtifact: (id) => metadata.find(id),
-    getArtifact: (id) => serial(() => getArtifact(id)),
+    getArtifact: (id) => lane.run(id, () => getArtifact(id)),
     listArtifacts: (query) => metadata.list(query),
-    removeArtifact: (id) => serial(() => removeArtifact(id)),
-    updateArtifact: (id, patch) => serial(() => updateArtifact(id, patch)),
+    removeArtifact: (id) => lane.run(id, () => removeArtifact(id)),
+    updateArtifact: (id, patch) => lane.run(id, () => updateArtifact(id, patch)),
   };
 }
