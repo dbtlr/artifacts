@@ -40,8 +40,8 @@ derived from an artifact's content can be computed once and kept.
   signature, gets that artifact's embeds signed. This lets a framed HTML artifact and a gallery
   preview show their images.
 - **The template is derived data.** It stores positions only, not a copy of the page. A failure to
-  store it does not fail the create. A missing template, or one from another extractor version, is
-  extracted and stored on the next view.
+  store it does not fail the create. A missing or unreadable template, or one from another extractor
+  version, is extracted and stored on the next view.
 
 ## Considered options
 
