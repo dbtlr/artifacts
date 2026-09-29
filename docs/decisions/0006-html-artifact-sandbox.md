@@ -53,6 +53,10 @@ an error the author could see.
 - A window that an artifact opens is not sandboxed. If it shows this server, it is an ordinary
   top-level page with the reader's session, the same as a link the reader follows. The artifact
   cannot read that page, because the two have different origins.
+- A page opened with `window.open()`, unless the call passes `noopener`, keeps a `window.opener`
+  handle and can navigate the artifact's tab to another URL, such as a phishing page. It cannot
+  read the artifact, because the two have different origins. Browsers open `target="_blank"` links
+  with `noopener` by default.
 - HTML artifacts still cannot use `localStorage`, `sessionStorage`, IndexedDB, or cookies, submit
   forms, or read responses from this server. CORS loads from this server, such as
   `<script type="module">`, fail. An embedded PDF does not display.
