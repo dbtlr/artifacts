@@ -11,7 +11,6 @@ export type Artifact = {
   mediaType: MediaType;
   project: string;
   title: string;
-  updatedAt: string;
 };
 
 export type ArtifactWithContent = Artifact & { content: Uint8Array };
@@ -26,57 +25,35 @@ export type CreateArtifactInput = {
   title: string;
 };
 
-export type UpdateArtifactInput = {
-  collection?: string | null;
-  content?: Uint8Array;
-  description?: string;
-  filename?: string | null;
-  mediaType?: MediaType;
-  project?: string;
-  title?: string;
-};
-
 export type ListArtifactsQuery = { collection?: string; project?: string };
 
 // Storage ports are async so that adapters over async-only backends fit
 // behind them. The sqlite and filesystem adapters still do their I/O
 // synchronously and merely resolve with the result. The ports promise no
-// atomicity across calls: the service orders them per artifact only within
-// one service instance (see artifacts/service.ts), so adapters shared across
-// processes need their own consistency design.
+// atomicity across calls; the service relies only on the order of its calls
+// (see artifacts/service.ts), which holds across processes as well.
 export type ArtifactMetadataStore = {
   create: (artifact: Artifact) => Promise<void>;
   find: (id: string) => Promise<Artifact | null>;
   list: (query?: ListArtifactsQuery) => Promise<Artifact[]>;
   remove: (id: string) => Promise<boolean>;
-  update: (artifact: Artifact) => Promise<boolean>;
 };
 
 export type ArtifactContentStore = {
-  read: (id: string, mediaType: MediaType) => Promise<Uint8Array>;
+  // Resolves null when no content is stored under the id and media type.
+  read: (id: string, mediaType: MediaType) => Promise<Uint8Array | null>;
   remove: (id: string, mediaType: MediaType) => Promise<boolean>;
   write: (id: string, mediaType: MediaType, content: Uint8Array) => Promise<void>;
 };
 
-// A decision made from the artifact as it is when the service acts on it,
-// after any earlier operation on the same artifact has finished. Use it
-// instead of a separate findArtifact whenever what to write depends on what
-// is stored, so nothing can change in between.
-export type FromCurrent<T> = (current: Artifact) => T;
-
+// Artifacts are immutable: once created, an artifact only changes by being
+// removed. A variation is a new artifact, usually in the same collection.
 export type ArtifactService = {
   createArtifact: (input: CreateArtifactInput) => Promise<Artifact>;
   findArtifact: (id: string) => Promise<Artifact | null>;
   getArtifact: (id: string) => Promise<ArtifactWithContent | null>;
   listArtifacts: (query?: ListArtifactsQuery) => Promise<Artifact[]>;
-  // With `when`, removes only if it returns true; otherwise resolves false.
-  removeArtifact: (id: string, when?: FromCurrent<boolean>) => Promise<boolean>;
-  // A patch resolved to null leaves the artifact alone and resolves null, as
-  // for an unknown id. Errors thrown while resolving it reject the update.
-  updateArtifact: (
-    id: string,
-    patch: UpdateArtifactInput | FromCurrent<UpdateArtifactInput | null>,
-  ) => Promise<Artifact | null>;
+  removeArtifact: (id: string) => Promise<boolean>;
 };
 
 export type LegacyArtifact = Omit<Artifact, 'collection' | 'filename' | 'mediaType'> & {
@@ -90,13 +67,6 @@ export type LegacyCreateArtifactInput = Omit<
   content: string;
   type: ArtifactType;
 };
-export type LegacyUpdateArtifactInput = Omit<
-  UpdateArtifactInput,
-  'collection' | 'content' | 'filename' | 'mediaType'
-> & {
-  content?: string;
-  type?: ArtifactType;
-};
 
 // The text-only presentation adapter remains until ART-21 moves MCP to the
 // canonical mediaType/byte contract.
@@ -105,5 +75,4 @@ export type ArtifactStore = {
   getArtifact: (id: string) => Promise<LegacyArtifactWithContent | null>;
   listArtifacts: (query?: ListArtifactsQuery) => Promise<LegacyArtifact[]>;
   removeArtifact: (id: string) => Promise<boolean>;
-  updateArtifact: (id: string, patch: LegacyUpdateArtifactInput) => Promise<LegacyArtifact | null>;
 };

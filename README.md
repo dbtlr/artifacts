@@ -63,11 +63,12 @@ Claude Code:
 claude mcp add --transport http --scope user artifacts http://localhost:4242/mcp
 ```
 
-The server exposes `add_artifact`, `update_artifact`, `remove_artifact`, `list_artifacts`,
-`list_collections`, and `get_artifact`.
+The server exposes `add_artifact`, `remove_artifact`, `list_artifacts`, `list_collections`, and
+`get_artifact`. Artifacts are immutable: there is no update tool. A revision or variation is a new
+artifact, usually in the same collection, so earlier versions keep their links.
 
 Text artifacts use `content`; binary artifacts use canonical `mediaType`, a safe `filename`, and
-strictly encoded `contentBase64`. Binary content is omitted from add, update, list, and ordinary get
+strictly encoded `contentBase64`. Binary content is omitted from add, list, and ordinary get
 responses. Pass `includeContent: true` to `get_artifact` when the bytes are actually needed. The
 decoded size limit is 10 MiB, and the HTTP body guard may reject an oversized base64 request before
 an MCP tool result can be returned.
@@ -78,15 +79,15 @@ discoverable together. `list_artifacts` filters collections case-insensitively, 
 
 1. Add the binary artifact and retain the absolute `url` returned by the server.
 2. Put that URL in an HTML `<img>` element or Markdown image expression.
-3. Add or update the containing document with the same collection.
+3. Add the containing document with the same collection.
 
-Updating a binary artifact in place preserves its URL. Removing one can break every document that
-embeds it; collections group artifacts for discovery but do not create ownership or cascading
-deletion.
+To replace an embedded file, add the new file and then a new version of the document that embeds
+it. Removing a file can break every document that embeds it; collections group artifacts for
+discovery but do not create ownership or cascading deletion.
 
 ### Optional artifact skill
 
-The bundled skill teaches an agent when to create or update documents and files, how to embed
+The bundled skill teaches an agent how to publish documents, files, and their revisions, how to embed
 returned file URLs, and how to rediscover related artifacts through collections. From the repository
 root, install it for the client you use:
 
@@ -164,7 +165,7 @@ path variables are deliberately different; one is not an alias for the other.
 ### Gallery previews
 
 The index shows a screenshot of every artifact. A headless Chromium renders each artifact's own
-page after it is created or updated, off the request path, and the JPEG is stored under the
+page after it is created, off the request path, and the JPEG is stored under the
 thumbnails directory. Until it exists the card shows a drawn placeholder for the file kind, and a
 PDF keeps its placeholder because headless Chromium downloads PDFs instead of drawing them. Previews
 are derived data: the server re-renders any that are missing at startup, so the thumbnails directory

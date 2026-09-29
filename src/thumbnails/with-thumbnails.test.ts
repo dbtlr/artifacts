@@ -10,7 +10,6 @@ const sample: Artifact = {
   mediaType: 'text/html',
   project: 'p',
   title: 't',
-  updatedAt: '2026-09-24T10:00:00.000Z',
 };
 
 function stubService(overrides: Partial<ArtifactService> = {}): ArtifactService {
@@ -20,7 +19,6 @@ function stubService(overrides: Partial<ArtifactService> = {}): ArtifactService 
     getArtifact: async () => ({ ...sample, content: new Uint8Array() }),
     listArtifacts: async () => [sample],
     removeArtifact: async () => true,
-    updateArtifact: async () => sample,
     ...overrides,
   };
 }
@@ -66,16 +64,6 @@ describe('withThumbnails', () => {
 
     await expect(wrapped.createArtifact(input)).rejects.toThrow('invalid');
     expect(enqueued).toEqual([]);
-  });
-
-  it('queues a render after a successful update, but not for an unknown id', async () => {
-    const { enqueued, wrapped } = harness(stubService());
-    await expect(wrapped.updateArtifact('abc', { title: 'new' })).resolves.toEqual(sample);
-    expect(enqueued).toEqual(['abc']);
-
-    const missing = harness(stubService({ updateArtifact: async () => null }));
-    await expect(missing.wrapped.updateArtifact('nope', { title: 'new' })).resolves.toBeNull();
-    expect(missing.enqueued).toEqual([]);
   });
 
   it('drops the stored thumbnail after a successful remove only', async () => {

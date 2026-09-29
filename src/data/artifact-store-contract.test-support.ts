@@ -9,7 +9,6 @@ const first: Artifact = {
   mediaType: 'text/plain',
   project: 'alpha',
   title: 'First',
-  updatedAt: '2026-01-01T00:00:00.000Z',
 };
 
 const second: Artifact = {
@@ -21,7 +20,6 @@ const second: Artifact = {
   mediaType: 'text/markdown',
   project: 'beta',
   title: 'Second',
-  updatedAt: '2026-01-02T00:00:00.000Z',
 };
 
 export function metadataStoreContract(
@@ -29,7 +27,7 @@ export function metadataStoreContract(
   createStore: () => Promise<ArtifactMetadataStore>,
 ): void {
   describe(`${name} metadata contract`, () => {
-    it('creates, finds, updates, lists, filters, and removes metadata', async () => {
+    it('creates, finds, lists, filters, and removes metadata', async () => {
       const store = await createStore();
       await store.create(first);
       await store.create(second);
@@ -41,9 +39,6 @@ export function metadataStoreContract(
       await expect(store.list({ collection: 'reports' })).resolves.toEqual([second]);
       await expect(store.list({ collection: 'missing' })).resolves.toEqual([]);
 
-      const updated = { ...first, title: 'Updated', updatedAt: '2026-01-03T00:00:00.000Z' };
-      await expect(store.update(updated)).resolves.toBe(true);
-      await expect(store.find(first.id)).resolves.toEqual(updated);
       await expect(store.remove(first.id)).resolves.toBe(true);
       await expect(store.remove(first.id)).resolves.toBe(false);
     });
@@ -57,9 +52,13 @@ export function contentStoreContract(name: string, createStore: () => ArtifactCo
       const bytes = Uint8Array.from([0, 255, 1, 128, 10]);
 
       await store.write('asset', 'text/plain', bytes);
-      expect([...(await store.read('asset', 'text/plain'))]).toEqual([...bytes]);
+      expect([...((await store.read('asset', 'text/plain')) ?? [])]).toEqual([...bytes]);
       await expect(store.remove('asset', 'text/plain')).resolves.toBe(true);
       await expect(store.remove('asset', 'text/plain')).resolves.toBe(false);
+    });
+
+    it('reads missing content as null', async () => {
+      await expect(createStore().read('missing', 'text/plain')).resolves.toBeNull();
     });
   });
 }

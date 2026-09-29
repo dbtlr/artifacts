@@ -10,7 +10,6 @@ import {
   adaptLegacyArtifactStore,
   createArtifactStore,
   createByteNativeArtifactService,
-  legacyArtifactStoreFromService,
 } from './store.js';
 
 let dir: string;
@@ -37,7 +36,6 @@ describe('adaptLegacyArtifactStore', () => {
       project: 'artifacts',
       title: 'Metadata',
       type: 'txt' as const,
-      updatedAt: '2026-01-01T00:00:00.000Z',
     };
     const getArtifact = vi.fn(() => {
       throw new Error('content must not be read');
@@ -47,7 +45,6 @@ describe('adaptLegacyArtifactStore', () => {
       getArtifact,
       listArtifacts: vi.fn(async () => [artifact]),
       removeArtifact: vi.fn(),
-      updateArtifact: vi.fn(),
     };
 
     await expect(adaptLegacyArtifactStore(legacyStore).findArtifact(artifact.id)).resolves.toEqual({
@@ -57,7 +54,6 @@ describe('adaptLegacyArtifactStore', () => {
       mediaType: 'text/plain',
       project: artifact.project,
       title: artifact.title,
-      updatedAt: artifact.updatedAt,
     });
     expect(getArtifact).not.toHaveBeenCalled();
   });
@@ -67,12 +63,11 @@ describe('adaptLegacyArtifactStore', () => {
 // IMMEDIATE (write) lock, makes any *write* from the store's own connection
 // fail deterministically with "database is locked" — while leaving reads
 // (SELECT) unaffected. That distinction matters: a plain `BEGIN EXCLUSIVE`
-// also blocks the store's own reads, so createArtifact/updateArtifact would
-// fail at their first getRow() lookup, before ever touching a file — making
-// any rollback/cleanup assertion vacuously true. WAL + BEGIN IMMEDIATE forces
-// the failure specifically at the INSERT/UPDATE statement, which only runs
-// after the file has already been written/renamed, so these tests genuinely
-// exercise the cleanup/rollback code.
+// also blocks the store's own reads, so createArtifact would fail at its
+// first id lookup, before ever touching a file — making any cleanup assertion
+// vacuously true. WAL + BEGIN IMMEDIATE forces the failure specifically at
+// the INSERT statement, which only runs after the file has already been
+// written, so these tests genuinely exercise the cleanup code.
 function lockDatabaseForWrites(dbPath: string): { release: () => void } {
   const lock = new DatabaseSync(dbPath);
   lock.exec('PRAGMA journal_mode = WAL');
@@ -114,7 +109,6 @@ describe('createArtifact', () => {
 
     expect(artifact.id).toHaveLength(10);
     expect(artifact.title).toBe('Plan');
-    expect(artifact.createdAt).toBe(artifact.updatedAt);
 
     const filePath = join(dir, 'artifacts', `${artifact.id}.md`);
     expect(existsSync(filePath)).toBe(true);
@@ -199,189 +193,6 @@ describe('getArtifact', () => {
 
   it('returns null for a missing id', async () => {
     await expect(store.getArtifact('missing-id')).resolves.toBeNull();
-  });
-});
-
-describe('updateArtifact', () => {
-  it('patches metadata fields without touching the content file', async () => {
-    const created = await store.createArtifact({
-      content: '# v1',
-      description: 'v1',
-      project: 'demo',
-      title: 'Draft',
-      type: 'md',
-    });
-
-    const updated = await store.updateArtifact(created.id, { description: 'v2', title: 'Final' });
-
-    expect(updated?.title).toBe('Final');
-    expect(updated?.description).toBe('v2');
-    expect(updated?.project).toBe('demo');
-    expect(updated?.createdAt).toBe(created.createdAt);
-    expect(new Date(updated?.updatedAt ?? '').getTime()).toBeGreaterThanOrEqual(
-      new Date(created.updatedAt).getTime(),
-    );
-    expect((await store.getArtifact(created.id))?.content).toBe('# v1');
-  });
-
-  it('replaces content in place when the type is unchanged', async () => {
-    const created = await store.createArtifact({
-      content: 'old',
-      description: 'v1',
-      project: 'demo',
-      title: 'Draft',
-      type: 'txt',
-    });
-
-    await store.updateArtifact(created.id, { content: 'new' });
-
-    expect((await store.getArtifact(created.id))?.content).toBe('new');
-    expect(existsSync(join(dir, 'artifacts', `${created.id}.txt`))).toBe(true);
-  });
-
-  it('requires replacement content when the type changes', async () => {
-    const created = await store.createArtifact({
-      content: 'plain',
-      description: 'v1',
-      project: 'demo',
-      title: 'Draft',
-      type: 'txt',
-    });
-
-    await expect(store.updateArtifact(created.id, { type: 'md' })).rejects.toThrow(
-      'requires replacement content',
-    );
-
-    expect(existsSync(join(dir, 'artifacts', `${created.id}.txt`))).toBe(true);
-    expect(existsSync(join(dir, 'artifacts', `${created.id}.md`))).toBe(false);
-    expect((await store.getArtifact(created.id))?.content).toBe('plain');
-  });
-
-  it('writes new content under the new extension when type and content both change', async () => {
-    const created = await store.createArtifact({
-      content: 'plain',
-      description: 'v1',
-      project: 'demo',
-      title: 'Draft',
-      type: 'txt',
-    });
-
-    await store.updateArtifact(created.id, { content: '<p>hi</p>', type: 'html' });
-
-    expect(existsSync(join(dir, 'artifacts', `${created.id}.txt`))).toBe(false);
-    expect((await store.getArtifact(created.id))?.content).toBe('<p>hi</p>');
-  });
-
-  it('returns null for a missing id', async () => {
-    await expect(store.updateArtifact('missing-id', { title: 'x' })).resolves.toBeNull();
-  });
-
-  it('rejects an invalid type', async () => {
-    const created = await store.createArtifact({
-      content: 'plain',
-      description: 'v1',
-      project: 'demo',
-      title: 'Draft',
-      type: 'txt',
-    });
-
-    // @ts-expect-error deliberately invalid for the test
-    await expect(store.updateArtifact(created.id, { type: 'exe' })).rejects.toThrow(
-      'Invalid artifact type',
-    );
-  });
-
-  it.each(['title', 'project', 'description'] as const)(
-    'rejects a blank %s patch',
-    async (field) => {
-      const created = await store.createArtifact({
-        content: 'plain',
-        description: 'v1',
-        project: 'demo',
-        title: 'Draft',
-        type: 'txt',
-      });
-
-      await expect(store.updateArtifact(created.id, { [field]: '   ' })).rejects.toThrow(
-        `Invalid artifact ${field}`,
-      );
-      expect((await store.getArtifact(created.id))?.[field]).toBe(created[field]);
-    },
-  );
-
-  it('restores the original content file when the row update fails', async () => {
-    const created = await store.createArtifact({
-      content: 'original',
-      description: 'v1',
-      project: 'demo',
-      title: 'Draft',
-      type: 'txt',
-    });
-    const lock = lockDatabaseForWrites(join(dir, 'artifacts.db'));
-
-    try {
-      // Proves the read (getRow) inside updateArtifact isn't what's failing.
-      expect((await store.getArtifact(created.id))?.content).toBe('original');
-
-      await expect(store.updateArtifact(created.id, { content: 'new' })).rejects.toThrow(
-        'database is locked',
-      );
-    } finally {
-      lock.release();
-    }
-
-    expect((await store.getArtifact(created.id))?.content).toBe('original');
-    expect(readdirSync(join(dir, 'artifacts'))).toEqual([`${created.id}.txt`]);
-  });
-
-  it('restores the original file path when a type-changing update fails', async () => {
-    const created = await store.createArtifact({
-      content: 'plain',
-      description: 'v1',
-      project: 'demo',
-      title: 'Draft',
-      type: 'txt',
-    });
-    const lock = lockDatabaseForWrites(join(dir, 'artifacts.db'));
-
-    try {
-      expect((await store.getArtifact(created.id))?.content).toBe('plain');
-
-      await expect(
-        store.updateArtifact(created.id, { content: '# plain', type: 'md' }),
-      ).rejects.toThrow('database is locked');
-    } finally {
-      lock.release();
-    }
-
-    expect((await store.getArtifact(created.id))?.type).toBe('txt');
-    expect((await store.getArtifact(created.id))?.content).toBe('plain');
-    expect(readdirSync(join(dir, 'artifacts'))).toEqual([`${created.id}.txt`]);
-  });
-
-  it('restores both the original path and content when a content+type update fails', async () => {
-    const created = await store.createArtifact({
-      content: 'plain',
-      description: 'v1',
-      project: 'demo',
-      title: 'Draft',
-      type: 'txt',
-    });
-    const lock = lockDatabaseForWrites(join(dir, 'artifacts.db'));
-
-    try {
-      expect((await store.getArtifact(created.id))?.content).toBe('plain');
-
-      await expect(
-        store.updateArtifact(created.id, { content: '<p>hi</p>', type: 'html' }),
-      ).rejects.toThrow('database is locked');
-    } finally {
-      lock.release();
-    }
-
-    expect((await store.getArtifact(created.id))?.type).toBe('txt');
-    expect((await store.getArtifact(created.id))?.content).toBe('plain');
-    expect(readdirSync(join(dir, 'artifacts'))).toEqual([`${created.id}.txt`]);
   });
 });
 
@@ -472,22 +283,20 @@ describe('listArtifacts', () => {
     ]);
     expect((await store.getArtifact(text.id))?.content).toBe('text');
     await expect(store.getArtifact(binary.id)).resolves.toBeNull();
-    await expect(store.updateArtifact(binary.id, { title: 'Hidden mutation' })).resolves.toBeNull();
     await expect(store.removeArtifact(binary.id)).resolves.toBe(false);
     expect((await byteNative.getArtifact(binary.id))?.title).toBe('Binary');
   });
 
-  it('updates metadata and removes a text row when its content file is missing', async () => {
+  it('removes a text row when its content file is missing', async () => {
     const artifact = await store.createArtifact({
       content: 'missing later',
       description: 'repairable metadata',
       project: 'repairs',
-      title: 'Before',
+      title: 'Missing content',
       type: 'txt',
     });
     rmSync(join(dir, 'artifacts', `${artifact.id}.txt`));
 
-    expect((await store.updateArtifact(artifact.id, { title: 'After' }))?.title).toBe('After');
     await expect(store.removeArtifact(artifact.id)).resolves.toBe(true);
     await expect(store.listArtifacts()).resolves.toEqual([]);
   });
@@ -519,91 +328,6 @@ describe('listArtifacts', () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-});
-
-describe('legacy store over a shared service', () => {
-  const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
-  const toPng = { content: png, filename: 'x.png', mediaType: 'image/png' } as const;
-
-  async function markdownArtifact() {
-    const service = await createByteNativeArtifactService({
-      databasePath: join(dir, 'shared.db'),
-      filesDir: join(dir, 'shared'),
-    });
-    const created = await service.createArtifact({
-      content: new TextEncoder().encode('# md'),
-      description: 'd',
-      mediaType: 'text/markdown',
-      project: 'p',
-      title: 'Markdown',
-    });
-    return { created, legacy: legacyArtifactStoreFromService(service), service };
-  }
-
-  it('does not remove an artifact that a concurrent update made binary', async () => {
-    const { created, legacy, service } = await markdownArtifact();
-
-    const [, removed] = await Promise.all([
-      service.updateArtifact(created.id, toPng),
-      legacy.removeArtifact(created.id),
-    ]);
-
-    expect(removed).toBe(false);
-    expect((await service.findArtifact(created.id))?.mediaType).toBe('image/png');
-  });
-
-  it('does not update an artifact that a concurrent update made binary', async () => {
-    const { created, legacy, service } = await markdownArtifact();
-
-    const [, updated] = await Promise.all([
-      service.updateArtifact(created.id, toPng),
-      legacy.updateArtifact(created.id, { title: 'Hidden mutation' }),
-    ]);
-
-    expect(updated).toBeNull();
-    expect((await service.findArtifact(created.id))?.title).toBe('Markdown');
-  });
-});
-
-const appendOne = (current: { title: string }) => ({ title: `${current.title}1` });
-
-describe('service adapted from a legacy store', () => {
-  it('decides each concurrent update against the result of the one before it', async () => {
-    const created = await store.createArtifact({
-      content: '# md',
-      description: 'd',
-      project: 'p',
-      title: 'T',
-      type: 'md',
-    });
-    const service = adaptLegacyArtifactStore(store);
-
-    await Promise.all([
-      service.updateArtifact(created.id, appendOne),
-      service.updateArtifact(created.id, appendOne),
-    ]);
-
-    expect((await service.findArtifact(created.id))?.title).toBe('T11');
-  });
-
-  it('checks a remove precondition against the result of an earlier update', async () => {
-    const created = await store.createArtifact({
-      content: '# md',
-      description: 'd',
-      project: 'p',
-      title: 'Keep',
-      type: 'md',
-    });
-    const service = adaptLegacyArtifactStore(store);
-
-    const [, removed] = await Promise.all([
-      service.updateArtifact(created.id, { title: 'Remove me' }),
-      service.removeArtifact(created.id, (current) => current.title === 'Keep'),
-    ]);
-
-    expect(removed).toBe(false);
-    expect((await service.findArtifact(created.id))?.title).toBe('Remove me');
   });
 });
 

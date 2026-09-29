@@ -1,6 +1,5 @@
 import { nanoid } from 'nanoid';
 
-import { createKeyedLane } from './keyed-lane.js';
 import { hasValidSignature, isMediaType, MAX_ARTIFACT_BYTES, mediaDefinition } from './media.js';
 import type {
   Artifact,
@@ -9,9 +8,7 @@ import type {
   ArtifactService,
   ArtifactWithContent,
   CreateArtifactInput,
-  FromCurrent,
   MediaType,
-  UpdateArtifactInput,
 } from './types.js';
 
 const ID_LENGTH = 10;
@@ -98,51 +95,33 @@ function reportCleanupFailure(action: string, error: unknown): void {
   }
 }
 
-async function runRollback(
-  action: string,
-  rollback: (() => Promise<void>) | undefined,
-): Promise<void> {
-  if (rollback === undefined) {
-    return;
-  }
-  try {
-    await rollback();
-  } catch (error) {
-    reportCleanupFailure(`${action} rollback`, error);
-  }
-}
-
-// Every operation that reads and then writes, or touches both stores, runs
-// in its artifact's lane: create, update, and remove change content and
-// metadata in a fixed order with compensating rollback, awaiting each step,
-// and get reads metadata then content. The lane keeps another operation on
-// the same artifact from running between those steps. It orders operations
-// within this service instance only; it cannot coordinate other processes
-// sharing the same stores, which need their own consistency design.
-// Single metadata reads (find, list) stay outside it.
+// Artifacts are immutable, so the only writes are create and remove, and
+// their order keeps a stored row pointing at stored content: create writes
+// content before metadata, and remove drops metadata before content. A get
+// that loses a race with a remove therefore finds no row, or finds its
+// content already gone once the row is gone too, and resolves null either
+// way. Nothing here holds state between calls, so the same rules hold for
+// several processes sharing the stores.
 export function createArtifactService(
   metadata: ArtifactMetadataStore,
   content: ArtifactContentStore,
 ): ArtifactService {
-  const lane = createKeyedLane();
-
-  // Stores the artifact under a fresh id. Checking that the id is unused and
-  // writing it happen in that id's lane; a taken id resolves null.
+  // Stores the artifact under a fresh id; a taken id resolves null. Two
+  // creates that draw the same fresh id at once are not guarded against:
+  // with ten-character nanoids that is not a practical risk.
   async function storeUnderId(id: string, input: CreateArtifactInput): Promise<Artifact | null> {
     if (await metadata.find(id)) {
       return null;
     }
-    const now = new Date().toISOString();
     const artifact: Artifact = {
       ...(input.collection === undefined ? {} : { collection: input.collection }),
-      createdAt: now,
+      createdAt: new Date().toISOString(),
       description: input.description,
       ...(input.filename === undefined ? {} : { filename: input.filename }),
       id,
       mediaType: input.mediaType,
       project: input.project,
       title: input.title,
-      updatedAt: now,
     };
 
     await content.write(id, input.mediaType, input.content);
@@ -167,7 +146,7 @@ export function createArtifactService(
       );
     }
     const id = nanoid(ID_LENGTH);
-    const created = await lane.run(id, () => storeUnderId(id, input));
+    const created = await storeUnderId(id, input);
     return created ?? storeNew(input, attempt + 1);
   }
 
@@ -184,103 +163,25 @@ export function createArtifactService(
     return storeNew(input);
   }
 
+  // Missing content under a row that still exists is corruption, not a race.
   async function getArtifact(id: string): Promise<ArtifactWithContent | null> {
     const artifact = await metadata.find(id);
-    return artifact === null
-      ? null
-      : { ...artifact, content: await content.read(id, artifact.mediaType) };
-  }
-
-  async function updateArtifact(
-    id: string,
-    patchOrPlan: UpdateArtifactInput | FromCurrent<UpdateArtifactInput | null>,
-  ): Promise<Artifact | null> {
-    const previous = await metadata.find(id);
-    if (!previous) {
+    if (artifact === null) {
       return null;
     }
-    const patch = typeof patchOrPlan === 'function' ? patchOrPlan(previous) : patchOrPlan;
-    if (patch === null) {
+    const bytes = await content.read(id, artifact.mediaType);
+    if (bytes !== null) {
+      return { ...artifact, content: bytes };
+    }
+    if ((await metadata.find(id)) === null) {
       return null;
     }
-    const nextMediaType = patch.mediaType ?? previous.mediaType;
-    assertValidMediaType(nextMediaType);
-    if (
-      patch.mediaType !== undefined &&
-      patch.mediaType !== previous.mediaType &&
-      patch.content === undefined
-    ) {
-      throw new Error('Changing artifact mediaType requires replacement content');
-    }
-    if (patch.title !== undefined) {
-      assertNonBlank('title', patch.title);
-    }
-    if (patch.project !== undefined) {
-      assertNonBlank('project', patch.project);
-    }
-    if (patch.description !== undefined) {
-      assertNonBlank('description', patch.description);
-    }
-    if (patch.collection !== undefined && patch.collection !== null) {
-      assertNonBlank('collection', patch.collection);
-    }
-
-    const nextFilename =
-      patch.filename === null ? undefined : (patch.filename ?? previous.filename);
-    assertValidFilename(nextMediaType, nextFilename);
-    if (patch.content !== undefined) {
-      assertValidContent(nextMediaType, patch.content);
-    }
-
-    const next: Artifact = {
-      ...(patch.collection === null ? {} : { collection: patch.collection ?? previous.collection }),
-      createdAt: previous.createdAt,
-      description: patch.description ?? previous.description,
-      ...(nextFilename === undefined ? {} : { filename: nextFilename }),
-      id: previous.id,
-      mediaType: nextMediaType,
-      project: patch.project ?? previous.project,
-      title: patch.title ?? previous.title,
-      updatedAt: new Date().toISOString(),
-    };
-
-    let rollbackContent: (() => Promise<void>) | undefined;
-    if (patch.content !== undefined) {
-      const previousBytes = await content.read(id, previous.mediaType);
-      await content.write(id, next.mediaType, patch.content);
-      rollbackContent = async () => {
-        await content.write(id, previous.mediaType, previousBytes);
-        if (next.mediaType !== previous.mediaType) {
-          await content.remove(id, next.mediaType);
-        }
-      };
-      if (next.mediaType !== previous.mediaType) {
-        try {
-          await content.remove(id, previous.mediaType);
-        } catch (error) {
-          await runRollback('update', async () => {
-            await content.remove(id, next.mediaType);
-          });
-          throw error;
-        }
-      }
-    }
-
-    try {
-      if (!(await metadata.update(next))) {
-        await runRollback('update', rollbackContent);
-        return null;
-      }
-    } catch (error) {
-      await runRollback('update', rollbackContent);
-      throw error;
-    }
-    return next;
+    throw new Error(`Artifact ${JSON.stringify(id)} content is missing`);
   }
 
-  async function removeArtifact(id: string, when?: FromCurrent<boolean>): Promise<boolean> {
+  async function removeArtifact(id: string): Promise<boolean> {
     const artifact = await metadata.find(id);
-    if (!artifact || (when !== undefined && !when(artifact)) || !(await metadata.remove(id))) {
+    if (!artifact || !(await metadata.remove(id))) {
       return false;
     }
     try {
@@ -294,9 +195,8 @@ export function createArtifactService(
   return {
     createArtifact,
     findArtifact: (id) => metadata.find(id),
-    getArtifact: (id) => lane.run(id, () => getArtifact(id)),
+    getArtifact,
     listArtifacts: (query) => metadata.list(query),
-    removeArtifact: (id, when) => lane.run(id, () => removeArtifact(id, when)),
-    updateArtifact: (id, patch) => lane.run(id, () => updateArtifact(id, patch)),
+    removeArtifact,
   };
 }

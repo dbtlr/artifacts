@@ -81,16 +81,12 @@ function decodeContent(
   mediaType: MediaType,
   content: string | undefined,
   contentBase64: string | undefined,
-  required: boolean,
-): Uint8Array | undefined {
+): Uint8Array {
   if (content !== undefined && contentBase64 !== undefined) {
     throw new Error('content and contentBase64 are mutually exclusive');
   }
   if (content === undefined && contentBase64 === undefined) {
-    if (required) {
-      throw new Error('Exactly one of content or contentBase64 is required');
-    }
-    return undefined;
+    throw new Error('Exactly one of content or contentBase64 is required');
   }
 
   const binary = mediaDefinition(mediaType).renderingMode === 'binary';
@@ -137,7 +133,9 @@ export function createMcpServer(service: ArtifactService): McpServer {
     {
       description:
         'Create a text or binary artifact and return its metadata and resolved URL. Use content ' +
-        'for text media and contentBase64 for binary media. Legacy type remains accepted for text.',
+        'for text media and contentBase64 for binary media. Legacy type remains accepted for text. ' +
+        'Artifacts cannot be changed after creation: publish a revision or variation as a new ' +
+        'artifact, usually in the same collection.',
       inputSchema: {
         collection: z
           .string()
@@ -159,7 +157,7 @@ export function createMcpServer(service: ArtifactService): McpServer {
     async (args) => {
       try {
         const mediaType = resolveMediaType(args.mediaType, args.type);
-        const content = decodeContent(mediaType, args.content, args.contentBase64, true)!;
+        const content = decodeContent(mediaType, args.content, args.contentBase64);
         const artifact = await service.createArtifact({
           ...(args.collection === undefined ? {} : { collection: args.collection }),
           content,
@@ -170,57 +168,6 @@ export function createMcpServer(service: ArtifactService): McpServer {
           title: args.title,
         });
         return jsonResult(artifactResult(artifact));
-      } catch (error) {
-        return toolError(errorMessage(error));
-      }
-    },
-  );
-
-  server.registerTool(
-    'update_artifact',
-    {
-      description:
-        'Update an artifact by id. Unset fields remain unchanged; null clears collection or filename. ' +
-        'Use content for text media and contentBase64 for binary media.',
-      inputSchema: {
-        collection: z.string().nullable().optional().describe('New collection, or null to clear'),
-        content: z.string().optional().describe('Replacement UTF-8 content for a text artifact'),
-        contentBase64: z
-          .string()
-          .optional()
-          .describe('Replacement canonical base64 binary content'),
-        description: z.string().optional().describe('New short description'),
-        filename: z.string().nullable().optional().describe('New filename, or null to clear'),
-        id: z.string().describe('Artifact id'),
-        mediaType: MEDIA_TYPE.optional().describe('New canonical media type'),
-        project: z.string().optional().describe('New project name'),
-        title: z.string().optional().describe('New title'),
-        type: ARTIFACT_TYPE.optional().describe('Legacy new text type: html, md, or txt'),
-      },
-    },
-    async ({ id, ...args }) => {
-      try {
-        // Decoding depends on the stored media type, so the patch is built
-        // from the artifact as the service holds it when the update runs.
-        const updated = await service.updateArtifact(id, (existing) => {
-          const mediaType =
-            args.mediaType === undefined && args.type === undefined
-              ? existing.mediaType
-              : resolveMediaType(args.mediaType, args.type);
-          const content = decodeContent(mediaType, args.content, args.contentBase64, false);
-          return {
-            ...(args.collection === undefined ? {} : { collection: args.collection }),
-            ...(content === undefined ? {} : { content }),
-            ...(args.description === undefined ? {} : { description: args.description }),
-            ...(args.filename === undefined ? {} : { filename: args.filename }),
-            ...(args.mediaType === undefined && args.type === undefined ? {} : { mediaType }),
-            ...(args.project === undefined ? {} : { project: args.project }),
-            ...(args.title === undefined ? {} : { title: args.title }),
-          };
-        });
-        return updated === null
-          ? toolError(`No artifact found with id ${JSON.stringify(id)}`)
-          : jsonResult(artifactResult(updated));
       } catch (error) {
         return toolError(errorMessage(error));
       }

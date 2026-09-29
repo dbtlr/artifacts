@@ -41,7 +41,7 @@ describe('FilesystemArtifactContentStore hardening', () => {
     await store.write('safe-id', 'text/plain', Uint8Array.from([1, 2]));
     await store.write('safe-id', 'text/plain', Uint8Array.from([3, 4]));
 
-    expect([...(await store.read('safe-id', 'text/plain'))]).toEqual([3, 4]);
+    expect([...((await store.read('safe-id', 'text/plain')) ?? [])]).toEqual([3, 4]);
     expect(readdirSync(filesDir)).toEqual(['safe-id.txt']);
   });
 });
