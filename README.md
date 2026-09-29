@@ -240,7 +240,9 @@ an artifact's scripts never run on the server host, and a Mermaid fence shows as
 thumbnail. Declarative loads (images, frames, stylesheets) may only GET from the server's own
 origin; everything else, including `/mcp` and anything on loopback or the container network, is
 blocked at a proxy nobody listens on, and a render that is still busy after 15 seconds is
-abandoned.
+abandoned. A load of a URL under `ARTIFACTS_PUBLIC_BASE_URL`, such as an artifact embedded by the
+URL that `add_artifact` returned, is redirected to the same path on the server's own origin, so the
+embed shows in the preview without the renderer reaching the public address.
 
 ## Development
 

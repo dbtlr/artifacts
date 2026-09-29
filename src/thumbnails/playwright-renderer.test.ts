@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 
 import {
   createPlaywrightRenderer,
+  localUrlFor,
   proxyFencedTo,
   resolveChromiumPath,
 } from './playwright-renderer.js';
@@ -48,6 +49,42 @@ describe('proxyFencedTo', () => {
   });
 });
 
+describe('localUrlFor', () => {
+  const origin = 'http://127.0.0.1:3000';
+
+  it('moves a URL under the public base URL to the same path and query on the local origin', () => {
+    expect(
+      localUrlFor('https://artifacts.example/base/a/x1?expires=1&signature=s', {
+        origin,
+        publicBaseUrl: 'https://artifacts.example/base',
+      }),
+    ).toBe('http://127.0.0.1:3000/a/x1?expires=1&signature=s');
+    expect(
+      localUrlFor('https://artifacts.example/a/x1', {
+        origin,
+        publicBaseUrl: 'https://artifacts.example:443',
+      }),
+    ).toBe('http://127.0.0.1:3000/a/x1');
+  });
+
+  it('leaves other hosts and paths outside the public base URL alone', () => {
+    const publicBaseUrl = 'https://artifacts.example/base';
+
+    expect(localUrlFor('https://elsewhere.example/base/a/x1', { origin, publicBaseUrl })).toBe(
+      undefined,
+    );
+    expect(localUrlFor('http://artifacts.example/base/a/x1', { origin, publicBaseUrl })).toBe(
+      undefined,
+    );
+    expect(localUrlFor('https://artifacts.example/a/x1', { origin, publicBaseUrl })).toBe(
+      undefined,
+    );
+    expect(localUrlFor('https://artifacts.example/baseline/a/x1', { origin, publicBaseUrl })).toBe(
+      undefined,
+    );
+  });
+});
+
 describe('createPlaywrightRenderer without a Chromium', () => {
   it('reports the failed launch once and declines every render', async () => {
     const reported: string[] = [];
@@ -75,6 +112,10 @@ describe('createPlaywrightRenderer without a Chromium', () => {
 const CHROMIUM_TIMEOUT_MS = 30_000;
 const WARM_UP_TIMEOUT_MS = 120_000;
 
+// The instance's public base URL in these tests: a name that never resolves,
+// so a request that reached the network for it would fail.
+const PUBLIC_BASE_URL = 'https://artifacts.invalid/base';
+
 describe.skipIf(chromiumPath === undefined)(
   'createPlaywrightRenderer',
   { timeout: CHROMIUM_TIMEOUT_MS },
@@ -90,6 +131,7 @@ describe.skipIf(chromiumPath === undefined)(
     let udp: Socket;
     let udpPackets = 0;
     let mcpPosts = 0;
+    let siblingQueries: string[] = [];
     let renderer: ThumbnailRenderer;
 
     beforeAll(async () => {
@@ -120,6 +162,21 @@ describe.skipIf(chromiumPath === undefined)(
       app.get('/a/image', (c) => c.body(PNG.buffer, 200, { 'Content-Type': 'image/png' }));
       app.get('/a/pdf', (c) =>
         c.body('%PDF-1.4 not really a pdf', 200, { 'Content-Type': 'application/pdf' }),
+      );
+      app.get('/a/sibling', (c) => {
+        siblingQueries.push(new URL(c.req.url).search);
+        return c.body(PNG.buffer, 200, { 'Content-Type': 'image/png' });
+      });
+      // Embeds addressed the way agents write them: by the full URL that
+      // add_artifact returned, with a signed query on an owner-auth instance.
+      app.get('/a/public-embeds', (c) =>
+        c.html(
+          `<!doctype html><body><img src="${PUBLIC_BASE_URL}/a/sibling?expires=1&amp;signature=page">` +
+            `<iframe src="${PUBLIC_BASE_URL}/a/public-frame"></iframe></body>`,
+        ),
+      );
+      app.get('/a/public-frame', (c) =>
+        c.html(`<!doctype html><body><img src="${PUBLIC_BASE_URL}/a/sibling?from=frame"></body>`),
       );
       // What the server answers an expired or tampered signed URL.
       app.get('/a/refused', (c) => c.text('Forbidden', 403));
@@ -155,7 +212,10 @@ describe.skipIf(chromiumPath === undefined)(
       // Scripts are off in previews, so the never-ending request is an <img>.
       app.get('/a/slow', (c) => c.html('<!doctype html><body><img src="/a/drip">slow</body>'));
       ({ server, url: baseUrl } = await listen(app));
-      renderer = createPlaywrightRenderer({ executablePath: chromiumPath });
+      renderer = createPlaywrightRenderer({
+        executablePath: chromiumPath,
+        publicBaseUrl: PUBLIC_BASE_URL,
+      });
       // Pay for the cold Chromium launch here, with a generous hook budget,
       // rather than inside whichever test happens to run first: on a loaded
       // CI runner the launch alone has exceeded a test's timeout.
@@ -235,6 +295,19 @@ describe.skipIf(chromiumPath === undefined)(
       expect(neighbourUpgrades).toBe(0);
       expect(udpPackets).toBe(0);
       expect(mcpPosts).toBe(0);
+    });
+
+    it('loads embeds addressed by the public base URL from its own origin', async () => {
+      siblingQueries = [];
+
+      const bytes = await renderer.render({
+        id: 'public-embeds',
+        mediaType: 'text/html',
+        url: `${baseUrl}/a/public-embeds`,
+      });
+
+      expect(bytes).not.toBeNull();
+      expect(siblingQueries.toSorted()).toEqual(['?expires=1&signature=page', '?from=frame']);
     });
 
     it('abandons a page that never settles once the deadline passes', async () => {
