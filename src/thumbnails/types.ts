@@ -8,7 +8,8 @@ export type ThumbnailTarget = { id: string; mediaType: MediaType; url: string };
 export type ThumbnailRenderer = {
   close: () => Promise<void>;
   // Resolves to encoded JPEG bytes, or null when this kind cannot be
-  // rendered (the gallery then keeps its drawn placeholder).
+  // rendered or the server did not serve the artifact (the gallery then
+  // keeps its drawn placeholder).
   render: (target: ThumbnailTarget) => Promise<Uint8Array | null>;
 };
 

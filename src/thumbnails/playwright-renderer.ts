@@ -1,6 +1,6 @@
 import { access } from 'node:fs/promises';
 
-import type { Browser, BrowserContext } from 'playwright-core';
+import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { chromium } from 'playwright-core';
 
 import { mediaDefinition } from '../artifacts/media.js';
@@ -103,6 +103,22 @@ export function proxyFencedTo(origin: string): { bypass: string; server: string 
   return { bypass: `<-loopback>,${url.hostname}:${port}`, server: DEAD_PROXY };
 }
 
+// Reports whether the artifact's own URL answered with a 2xx, for a page
+// or for the <img> in an image wrapper. A refused signed URL (expired, say,
+// after a slow browser launch), a removed artifact, or a failed load is
+// declined, because the queue would otherwise store the error page as the
+// artifact's lasting preview.
+function watchArtifactResponse(page: Page, url: string): () => boolean {
+  const href = new URL(url).href;
+  let loaded = false;
+  page.on('response', (response) => {
+    if (response.url() === href) {
+      loaded = response.ok();
+    }
+  });
+  return () => loaded;
+}
+
 async function closeQuietly(context: BrowserContext): Promise<void> {
   try {
     await context.close();
@@ -185,13 +201,20 @@ export function createPlaywrightRenderer({
     }
   }
 
-  async function capture(context: BrowserContext, target: ThumbnailTarget): Promise<Uint8Array> {
+  async function capture(
+    context: BrowserContext,
+    target: ThumbnailTarget,
+  ): Promise<Uint8Array | null> {
     const page = await context.newPage();
     page.setDefaultTimeout(timeoutMs);
+    const artifactLoaded = watchArtifactResponse(page, target.url);
     if (mediaDefinition(target.mediaType).renderingMode === 'binary') {
       await page.setContent(imagePage(target.url), { waitUntil: 'networkidle' });
     } else {
       await page.goto(target.url, { waitUntil: 'networkidle' });
+    }
+    if (!artifactLoaded()) {
+      return null;
     }
     const shot = await page.screenshot({ quality: JPEG_QUALITY, type: 'jpeg' });
     return new Uint8Array(shot);

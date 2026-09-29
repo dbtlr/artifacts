@@ -28,7 +28,10 @@ does not send the session cookie on their subresource requests.
   from the owner password, so a leaked URL gives no offline way to test password guesses. A restart
   voids every outstanding URL, which costs nothing while URLs last seconds.
 - **Thumbnails sign per render.** The queue asks for the path when a render starts, not when the
-  artifact is queued, and a URL lasts 60 seconds against the renderer's 15-second cap.
+  artifact is queued, and a URL lasts 60 seconds against the renderer's 15-second cap. That cap
+  starts after the browser is ready, so a slow first launch or a clock jump can still outlast the
+  URL. The renderer therefore declines any artifact response that is not a 2xx instead of storing
+  the error page, and the next boot backfill queues the artifact again.
 
 The signer (`src/auth/signed-urls.ts`) knows nothing about HTTP, so embedded-artifact URLs can
 reuse it.
