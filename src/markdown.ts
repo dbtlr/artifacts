@@ -288,6 +288,8 @@ export function renderMarkdownToHtml(markdown: string): RenderedMarkdown {
 export type MarkdownRenderer = { render: (markdown: string) => RenderedMarkdown; version: number };
 
 // The renderer artifacts are stored with. Bump `version` in any change that
-// alters the output above (markup, ids, TOC, or flags): stored renderings
-// from another version are rendered again when next viewed.
+// alters the output above (markup, ids, TOC, or flags), including a change to
+// the language table in code-languages.ts or a markdown-it upgrade: stored
+// renderings from another version are rendered again when next viewed. A
+// test in markdown.test.ts pins the version to a fingerprint of those.
 export const markdownRenderer: MarkdownRenderer = { render: renderMarkdownToHtml, version: 1 };
