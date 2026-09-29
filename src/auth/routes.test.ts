@@ -677,7 +677,9 @@ describe('with an owner password', () => {
     const res = await testApp.request(`/a/${html.id}`, { headers: { Cookie: cookie } });
 
     expect(res.status).toBe(200);
-    expect(res.headers.get('content-security-policy')).toBe('sandbox allow-scripts');
+    expect(res.headers.get('content-security-policy')).toBe(
+      'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-modals',
+    );
     const [absolute, relative] = sources(await res.text());
     expect(absolute).toMatch(new RegExp(`^${buildArtifactUrl(image.id)}${SIGNED_EMBED}$`, 'u'));
     expect(relative).toMatch(new RegExp(`^/a/${image.id}${SIGNED_EMBED}#x$`, 'u'));
