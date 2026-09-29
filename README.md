@@ -65,14 +65,18 @@ claude mcp add --transport http --scope user artifacts http://localhost:4242/mcp
 ```
 
 When an owner password is set, `/mcp` requires an API key. Log in, open **API keys** in the
-gallery header, and create a key. The page shows the key once. Give it to the agent in an
-environment variable, here `ARTIFACTS_API_KEY`:
+gallery header, and create a key. The page shows the key once. Put it in an environment variable,
+here `ARTIFACTS_API_KEY`, and then add the server:
 
 ```sh
 codex mcp add artifacts --url http://localhost:4242/mcp --bearer-token-env-var ARTIFACTS_API_KEY
 claude mcp add --transport http --scope user artifacts http://localhost:4242/mcp \
-  --header "Authorization: Bearer $ARTIFACTS_API_KEY"
+  --header 'Authorization: Bearer ${ARTIFACTS_API_KEY}'
 ```
+
+Both agents read the variable each time they connect, so the key is not stored in their
+configuration. Keep the single quotes in the Claude Code command: they stop the shell from
+expanding the variable, and Claude Code expands `${ARTIFACTS_API_KEY}` itself.
 
 The server exposes `add_artifact`, `remove_artifact`, `list_artifacts`, `list_collections`, and
 `get_artifact`. Artifacts are immutable: there is no update tool. A revision or variation is a new
