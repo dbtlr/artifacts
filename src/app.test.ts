@@ -248,7 +248,7 @@ describe('get /a/:id', () => {
     expect(body).toBe(htmlContent);
   });
 
-  it('serves an html artifact in an opaque-origin sandbox that allows scripts', async () => {
+  it('serves an html artifact in an opaque-origin sandbox that allows scripts, popups, and dialogs', async () => {
     const artifact = await store.createArtifact({
       content: '<!doctype html><script>document.title = "ran"</script>',
       description: 'Scripted html',
@@ -260,11 +260,13 @@ describe('get /a/:id', () => {
     const get = await testApp.request(`/a/${artifact.id}`);
     const head = await testApp.request(`/a/${artifact.id}`, { method: 'HEAD' });
 
-    // No allow-same-origin: the document gets an opaque origin, so its
+    // Popups escape the sandbox, so a target="_blank" link opens a normal
+    // page. No allow-same-origin: the document gets an opaque origin, so its
     // scripts cannot read cookies, storage, or app responses. No allow-forms:
     // a form cannot submit to the app.
-    expect(get.headers.get('content-security-policy')).toBe('sandbox allow-scripts');
-    expect(head.headers.get('content-security-policy')).toBe('sandbox allow-scripts');
+    const csp = 'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-modals';
+    expect(get.headers.get('content-security-policy')).toBe(csp);
+    expect(head.headers.get('content-security-policy')).toBe(csp);
   });
 
   it('renders an md artifact inside the layout, with content escaped', async () => {

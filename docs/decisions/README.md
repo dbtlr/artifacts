@@ -12,3 +12,4 @@ and do not bind anything.
 | [0003](0003-signed-embed-urls.md) | accepted | An HTML artifact's embedded `/a/:id` URLs are found when it is stored and signed again on every view. |
 | [0004](0004-hourly-url-signing-keys.md) | accepted | Signed URLs use one random key per clock hour, stored in the database, and verify only against the current and previous hour's keys. |
 | [0005](0005-per-client-login-limit.md) | accepted | Logins are limited per client address, read from a header only when the operator names it, under a total ceiling; a password shorter than 16 characters stops startup. |
+| [0006](0006-html-artifact-sandbox.md) | accepted | HTML artifacts run in an opaque-origin CSP sandbox that allows scripts, new windows, and dialogs, but not storage or forms. |

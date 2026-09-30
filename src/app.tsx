@@ -45,7 +45,10 @@ const MAX_MCP_BODY_BYTES = 16 * 1024 * 1024;
 // allow-same-origin they cannot read the app's cookies, storage, or
 // responses, and without allow-forms they cannot submit forms to it. Their
 // requests carry `Origin: null`, which /mcp refuses (see the /mcp route).
-const HTML_ARTIFACT_CSP = 'sandbox allow-scripts';
+// They may open new windows, which load as ordinary pages outside the
+// sandbox, and show alert, confirm, and prompt dialogs. See ADR-0006.
+const HTML_ARTIFACT_CSP =
+  'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-modals';
 
 // server.ts passes the composed services in; `export const app` below (used
 // by embedding callers and tests) leaves `store` undefined and resolves the

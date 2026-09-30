@@ -105,13 +105,16 @@ To replace an embedded file, add the new file and then a new version of the docu
 it. Removing a file can break every document that embeds it; collections group artifacts for
 discovery but do not create ownership or cascading deletion.
 
-HTML artifacts are served with a `Content-Security-Policy: sandbox allow-scripts` header. Their
-scripts run, but in an opaque origin that is separate from the Artifacts server, and their requests
-carry `Origin: null`. As a result, an HTML artifact cannot use `localStorage`, `sessionStorage`,
-IndexedDB, or cookies, cannot read responses from other Artifacts routes, and cannot submit forms.
-The `/mcp` endpoint refuses requests with `Origin: null` or any other origin but its own, so
-artifact scripts and other web pages cannot create or remove artifacts. Links that open a new
-window, such as `target="_blank"`, and `alert()` dialogs are also blocked.
+HTML artifacts are served with a
+`Content-Security-Policy: sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-modals`
+header ([ADR-0006](docs/decisions/0006-html-artifact-sandbox.md)). Their scripts run, but in an
+opaque origin that is separate from the Artifacts server, and their requests carry `Origin: null`.
+As a result, an HTML artifact cannot use `localStorage`, `sessionStorage`, IndexedDB, or cookies,
+cannot read responses from other Artifacts routes, and cannot submit forms. The `/mcp` endpoint
+refuses requests with `Origin: null` or any other origin but its own, so artifact scripts and other
+web pages cannot create or remove artifacts. Links with `target="_blank"` and `window.open()` open a
+new window, which loads as an ordinary page outside the sandbox. `alert()`, `confirm()`, and
+`prompt()` dialogs work.
 
 Images, stylesheets, and classic scripts that the page loads by URL still work, including embedded
 `/a/:id` images. Loads that use CORS, such as `<script type="module">` or elements with a
