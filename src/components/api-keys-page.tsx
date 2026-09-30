@@ -1,11 +1,11 @@
 import type { FC } from 'hono/jsx';
 
 import type { ApiKeySummary } from '../auth/types.js';
-import { formatDate } from '../format-date.js';
+import { formatTimestamp } from '../format-date.js';
 
 type ApiKeysPageProps = {
-  // A key created by this request. Its secret is shown here once and never
-  // again, because only its hash is stored.
+  // A key created by the POST that redirected here. Its secret is shown
+  // once and never again, because only its hash is stored.
   created?: { key: string; name: string };
   // Shown above the create form after a refused request.
   error?: string;
@@ -17,9 +17,15 @@ type ApiKeysPageProps = {
 const button =
   'cursor-pointer border border-stone-900 bg-stone-900 px-3 py-2 font-semibold text-white dark:border-ink-100 dark:bg-ink-100 dark:text-ink-950';
 const muted = 'text-sm text-stone-500 dark:text-ink-400';
+const revokeButton = 'cursor-pointer text-red-700 hover:underline dark:text-red-400';
+
+const Timestamp: FC<{ iso: string }> = ({ iso }) => (
+  <time datetime={iso}>{formatTimestamp(iso)}</time>
+);
 
 // The owner's API keys for /mcp: plain form POSTs, so it works without
-// script. Creating a key shows its secret once; revoking deletes it.
+// script. Creating a key shows its secret once; revoking deletes it, and
+// revoking all is the recovery path after a suspected leak.
 export const ApiKeysPage: FC<ApiKeysPageProps> = ({ created, error, keys, mcpUrl }) => (
   <main>
     <a href="/" class="text-lg font-bold tracking-tight text-stone-900 dark:text-ink-100">
@@ -68,6 +74,7 @@ export const ApiKeysPage: FC<ApiKeysPageProps> = ({ created, error, keys, mcpUrl
           <tr>
             <th class="py-1 font-normal">Name</th>
             <th class="py-1 font-normal">Created</th>
+            <th class="py-1 font-normal">Last used</th>
             <th />
           </tr>
         </thead>
@@ -75,13 +82,15 @@ export const ApiKeysPage: FC<ApiKeysPageProps> = ({ created, error, keys, mcpUrl
           {keys.map((key) => (
             <tr key={key.id} class="border-t border-stone-200 dark:border-ink-800">
               <td class="py-2 break-all text-stone-900 dark:text-ink-100">{key.name}</td>
-              <td class="py-2 whitespace-nowrap">{formatDate(key.createdAt, 'short')}</td>
+              <td class="py-2 whitespace-nowrap">
+                <Timestamp iso={key.createdAt} />
+              </td>
+              <td class="py-2 whitespace-nowrap">
+                {key.lastUsedAt === null ? 'Never' : <Timestamp iso={key.lastUsedAt} />}
+              </td>
               <td class="py-2 text-right">
                 <form method="post" action={`/keys/${encodeURIComponent(key.id)}/revoke`}>
-                  <button
-                    type="submit"
-                    class="cursor-pointer text-red-700 hover:underline dark:text-red-400"
-                  >
+                  <button type="submit" class={revokeButton}>
                     Revoke
                   </button>
                 </form>
@@ -90,6 +99,13 @@ export const ApiKeysPage: FC<ApiKeysPageProps> = ({ created, error, keys, mcpUrl
           ))}
         </tbody>
       </table>
+    )}
+    {keys.length === 0 ? null : (
+      <form method="post" action="/keys/revoke-all" class="mt-4 text-right text-sm">
+        <button type="submit" class={revokeButton}>
+          Revoke all keys
+        </button>
+      </form>
     )}
   </main>
 );

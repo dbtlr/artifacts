@@ -244,7 +244,8 @@ With a password set:
 
 Sessions, API keys, and the hourly keys that sign URLs are stored in the SQLite database, API keys
 only as SHA-256 hashes. Changing the password and restarting ends every session but keeps API keys;
-revoke them on the **API keys** page. The design is recorded in
+revoke them on the **API keys** page, one at a time or all at once. The page shows when each key
+was created and last used. The design is recorded in
 [ADR-0001](docs/decisions/0001-opt-in-owner-auth.md).
 
 ### Gallery previews

@@ -24,9 +24,13 @@ export type OwnerAuthStore = UrlSigningKeyStore & {
   createApiKey: (key: StoredApiKey) => Promise<void>;
   // Every key, oldest first, without its hash.
   listApiKeys: () => Promise<ApiKeySummary[]>;
-  hasApiKeyHash: (keyHash: string) => Promise<boolean>;
+  // The key with this hash, or null when there is none.
+  findApiKeyByHash: (keyHash: string) => Promise<ApiKeyUse | null>;
+  // Sets the key's last use to `at`. An unknown id is not an error.
+  recordApiKeyUse: (id: string, at: string) => Promise<void>;
   // Removing an unknown id is not an error.
   removeApiKey: (id: string) => Promise<void>;
+  removeAllApiKeys: () => Promise<void>;
 };
 
 // `clientAddress` is empty when the request's address is unknown; all such
@@ -43,10 +47,13 @@ export type LoginAttemptCounts = { client: LoginAttemptCount; total: LoginAttemp
 
 export type StoredSession = { createdAt: string; expiresAt: string; tokenHash: string };
 
-// What the key page shows about a key. The secret itself is never kept.
-export type ApiKeySummary = { createdAt: string; id: string; name: string };
+export type StoredApiKey = { createdAt: string; id: string; keyHash: string; name: string };
 
-export type StoredApiKey = ApiKeySummary & { keyHash: string };
+// When a key last opened /mcp, or null when it never has.
+export type ApiKeyUse = { id: string; lastUsedAt: string | null };
+
+// What the key page shows about a key. The secret itself is never kept.
+export type ApiKeySummary = Omit<StoredApiKey, 'keyHash'> & ApiKeyUse;
 
 // The keys that sign artifact URLs, one per clock-hour bucket: the Unix time
 // in seconds divided by 3600, rounded down. Keys are base64url text. Every

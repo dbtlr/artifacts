@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 
 import { SqliteOwnerAuthStore } from '../data/sqlite-owner-auth-store.js';
 import {
+  API_KEY_USE_RESOLUTION_SECONDS,
   createOwnerAuth,
   LOGIN_ATTEMPT_LIMIT,
   LOGIN_ATTEMPT_TOTAL_LIMIT,
@@ -261,13 +262,15 @@ describe('owner auth', () => {
 describe('API keys', () => {
   let dataDir: string;
   let databasePath: string;
+  let now: Date;
   let auth: OwnerAuth;
 
   beforeEach(async () => {
     dataDir = await mkdtemp(join(tmpdir(), 'artifacts-api-keys-'));
     databasePath = join(dataDir, 'artifacts.db');
+    now = new Date('2026-09-29T12:00:00.000Z');
     auth = createOwnerAuth({
-      now: () => new Date('2026-09-29T12:00:00.000Z'),
+      now: () => now,
       password: PASSWORD,
       store: await SqliteOwnerAuthStore.open(databasePath),
     });
@@ -302,14 +305,65 @@ describe('API keys', () => {
     expect(JSON.stringify(rows)).not.toContain(key.slice(4));
   });
 
+  function advance(seconds: number): void {
+    now = new Date(now.getTime() + seconds * 1000);
+  }
+
+  async function lastUsedAt(id: string): Promise<string | null | undefined> {
+    return (await auth.listApiKeys()).find((key) => key.id === id)?.lastUsedAt;
+  }
+
   it('lists keys by name and creation time, oldest first, without their secrets', async () => {
     const first = await auth.createApiKey('laptop agent');
     const second = await auth.createApiKey('build server');
 
     await expect(auth.listApiKeys()).resolves.toEqual([
-      { createdAt: '2026-09-29T12:00:00.000Z', id: first.id, name: 'laptop agent' },
-      { createdAt: '2026-09-29T12:00:00.000Z', id: second.id, name: 'build server' },
+      {
+        createdAt: '2026-09-29T12:00:00.000Z',
+        id: first.id,
+        lastUsedAt: null,
+        name: 'laptop agent',
+      },
+      {
+        createdAt: '2026-09-29T12:00:00.000Z',
+        id: second.id,
+        lastUsedAt: null,
+        name: 'build server',
+      },
     ]);
+  });
+
+  it('records when a key last authenticated, and only for that key', async () => {
+    const used = await auth.createApiKey('laptop agent');
+    const unused = await auth.createApiKey('build server');
+    advance(90);
+
+    await auth.hasApiKey(used.key);
+
+    await expect(lastUsedAt(used.id)).resolves.toBe('2026-09-29T12:01:30.000Z');
+    await expect(lastUsedAt(unused.id)).resolves.toBeNull();
+  });
+
+  it("records a key's use at most once per resolution interval", async () => {
+    const { id, key } = await auth.createApiKey('laptop agent');
+    await auth.hasApiKey(key);
+    const firstUse = now.toISOString();
+
+    advance(API_KEY_USE_RESOLUTION_SECONDS - 1);
+    await auth.hasApiKey(key);
+    await expect(lastUsedAt(id)).resolves.toBe(firstUse);
+
+    advance(1);
+    await auth.hasApiKey(key);
+    await expect(lastUsedAt(id)).resolves.toBe(now.toISOString());
+  });
+
+  it('records no use for an unknown key', async () => {
+    const { id } = await auth.createApiKey('laptop agent');
+
+    await auth.hasApiKey('art_not-a-key');
+
+    await expect(lastUsedAt(id)).resolves.toBeNull();
   });
 
   it('refuses a revoked key and keeps the others', async () => {
@@ -321,6 +375,17 @@ describe('API keys', () => {
     await expect(auth.hasApiKey(revoked.key)).resolves.toBe(false);
     await expect(auth.hasApiKey(kept.key)).resolves.toBe(true);
     expect((await auth.listApiKeys()).map(({ name }) => name)).toEqual(['build server']);
+  });
+
+  it('revokes every key at once', async () => {
+    const first = await auth.createApiKey('laptop agent');
+    const second = await auth.createApiKey('build server');
+
+    await auth.revokeAllApiKeys();
+
+    await expect(auth.hasApiKey(first.key)).resolves.toBe(false);
+    await expect(auth.hasApiKey(second.key)).resolves.toBe(false);
+    await expect(auth.listApiKeys()).resolves.toEqual([]);
   });
 
   it('keeps keys working when the password changes', async () => {

@@ -9,3 +9,9 @@ export function formatDate(iso: string, style: 'long' | 'short' = 'long'): strin
     year: 'numeric',
   });
 }
+
+// A full UTC timestamp, "2026-09-29 12:00:05 UTC", for times where the hour
+// matters, such as when an API key was created or last used.
+export function formatTimestamp(iso: string): string {
+  return `${new Date(iso).toISOString().slice(0, 19).replace('T', ' ')} UTC`;
+}

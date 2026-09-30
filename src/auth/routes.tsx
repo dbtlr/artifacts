@@ -9,9 +9,15 @@ import { Layout } from '../components/layout.js';
 import { LoginPage } from '../components/login-page.js';
 import { isOwnOrigin, resolvePublicBaseUrl } from '../urls.js';
 import { SESSION_LIFETIME_SECONDS } from './owner-auth.js';
-import type { OwnerAuth } from './owner-auth.js';
+import type { CreatedApiKey, OwnerAuth } from './owner-auth.js';
 
 export const SESSION_COOKIE = 'artifacts_session';
+// Carries a new key from the create form's POST to the GET its redirect
+// asks for, which shows the key once and deletes the cookie. It is scoped to
+// /keys and lasts a minute, so an unfollowed redirect does not leave the
+// key in the browser for long.
+const NEW_KEY_COOKIE = 'artifacts_new_key';
+const NEW_KEY_COOKIE_SECONDS = 60;
 
 const MAX_FORM_BODY_BYTES = 16 * 1024;
 const MAX_API_KEY_NAME_LENGTH = 100;
@@ -57,6 +63,22 @@ function cookieOptions(): CookieOptions {
     sameSite: 'Lax',
     secure: resolvePublicBaseUrl().startsWith('https:'),
   };
+}
+
+function newKeyCookieOptions(): CookieOptions {
+  return { ...cookieOptions(), path: '/keys', sameSite: 'Strict' };
+}
+
+// The key a create form's POST left for this page, deleting it so a refresh
+// does not show it again. The id and the key hold no `.`.
+function takeNewKey(c: Context): CreatedApiKey | undefined {
+  const value = getCookie(c, NEW_KEY_COOKIE);
+  if (value === undefined) {
+    return undefined;
+  }
+  deleteCookie(c, NEW_KEY_COOKIE, newKeyCookieOptions());
+  const [id, key, ...rest] = value.split('.');
+  return id === undefined || key === undefined || rest.length > 0 ? undefined : { id, key };
 }
 
 // Pages for one owner must not be kept by a shared cache. An existing
@@ -119,17 +141,26 @@ function bearerToken(header: string | undefined): string | undefined {
   return header === undefined ? undefined : /^Bearer +(\S+) *$/iu.exec(header)?.[1];
 }
 
+// The key page. A new key is shown only while it still exists, so a key
+// revoked before the redirect landed is not offered for use.
 async function apiKeysPage(
   c: Context,
   auth: OwnerAuth,
-  props: { created?: { key: string; name: string }; error?: string; status?: 200 | 400 },
+  props: { error?: string; newKey?: CreatedApiKey; status?: 200 | 400 },
 ) {
+  const keys = await auth.listApiKeys();
+  const newKeyName =
+    props.newKey === undefined ? undefined : keys.find(({ id }) => id === props.newKey?.id)?.name;
   return c.html(
     <Layout title="API keys · Artifacts">
       <ApiKeysPage
-        created={props.created}
+        created={
+          props.newKey === undefined || newKeyName === undefined
+            ? undefined
+            : { key: props.newKey.key, name: newKeyName }
+        }
         error={props.error}
-        keys={await auth.listApiKeys()}
+        keys={keys}
         mcpUrl={`${resolvePublicBaseUrl()}/mcp`}
       />
     </Layout>,
@@ -264,11 +295,16 @@ export function installOwnerAuth(
     if (auth === undefined) {
       return c.notFound();
     }
-    return apiKeysPage(c, auth, {});
+    const newKey = takeNewKey(c);
+    if (newKey !== undefined) {
+      // No cache or history keeps the page that shows the key.
+      c.header('Cache-Control', 'no-store');
+    }
+    return apiKeysPage(c, auth, { newKey });
   });
 
-  // Answers with the page rather than a redirect, so the new key is never in
-  // a URL, and marks it no-store, so no cache or history keeps the key.
+  // Redirects so a refresh repeats the GET, not the POST, and creates no
+  // second key. The key travels in a cookie, so it is never in a URL.
   app.post('/keys', bodyLimit({ maxSize: MAX_FORM_BODY_BYTES }), async (c) => {
     const auth = await resolveAuth();
     if (auth === undefined) {
@@ -282,9 +318,21 @@ export function installOwnerAuth(
         status: 400,
       });
     }
-    const { key } = await auth.createApiKey(name);
-    c.header('Cache-Control', 'no-store');
-    return apiKeysPage(c, auth, { created: { key, name } });
+    const { id, key } = await auth.createApiKey(name);
+    setCookie(c, NEW_KEY_COOKIE, `${id}.${key}`, {
+      ...newKeyCookieOptions(),
+      maxAge: NEW_KEY_COOKIE_SECONDS,
+    });
+    return c.redirect('/keys', 303);
+  });
+
+  app.post('/keys/revoke-all', async (c) => {
+    const auth = await resolveAuth();
+    if (auth === undefined) {
+      return c.notFound();
+    }
+    await auth.revokeAllApiKeys();
+    return c.redirect('/keys', 303);
   });
 
   app.post('/keys/:id/revoke', async (c) => {
