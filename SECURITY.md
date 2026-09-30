@@ -42,7 +42,8 @@ only for the owner.
   the proxy can set the header to any address, and so can escape the per-address limit, but not the
   total limit. Name a header only when the proxy always sets it and the server is reachable only
   through the proxy. Without a named header, all clients behind a proxy share one address.
-- A POST with a missing, foreign, or `null` Origin header is refused.
+- A POST with a missing, foreign, or `null` Origin header is refused, except to `/mcp`. `/mcp`
+  follows the Origin rule above: a request with no Origin and a valid API key is accepted.
 - Pages other than `/a/:id` are sent with `X-Frame-Options: DENY` and
   `Content-Security-Policy: frame-ancestors 'none'`, so no other page can frame the login, key, or
   gallery pages. Artifacts stay frameable, because HTML artifacts embed them.
