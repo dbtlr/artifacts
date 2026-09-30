@@ -151,8 +151,11 @@ export function createArtifactUrlSigner({
     if (!isSafeId(id)) {
       throw new Error(`Cannot sign a URL for ${JSON.stringify(id)}: not an artifact id`);
     }
-    const key = await signingKey(currentBucket());
+    // One clock reading for both the key's hour and the expiry: reading the
+    // key can cross the hour, and a second reading would pair the old hour's
+    // key with the next window's expiry, so views would stop sharing a URL.
     const nowSeconds = Math.floor(now().getTime() / 1000);
+    const key = await signingKey(Math.floor(nowSeconds / SIGNING_KEY_BUCKET_SECONDS));
     const expires = String(expiryFor(nowSeconds, lifetime, expiryWindowSeconds));
     const query = new URLSearchParams({
       expires,
