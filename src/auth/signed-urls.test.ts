@@ -95,6 +95,30 @@ describe('createArtifactUrlSigner', () => {
     expect(inNextWindow).not.toBe(atStart);
   });
 
+  it('takes the key and the expiry from the same moment when reading the key crosses the hour', async () => {
+    now = new Date('2026-09-29T12:59:59.900Z');
+    const unhurried = await signerOver().signedPath('abc', EMBED_URL_EXPIRY);
+
+    now = new Date('2026-09-29T12:59:59.900Z');
+    // Every key-store call lets the clock run past the hour, as a slow
+    // database read would.
+    const slow = new Proxy(keys, {
+      get(target, property, receiver) {
+        const value: unknown = Reflect.get(target, property, receiver);
+        if (typeof value !== 'function') {
+          return value;
+        }
+        return (...args: unknown[]) => {
+          advance(1000);
+          return Reflect.apply(value, target, args);
+        };
+      },
+    });
+    const hurried = await signerOver(slow).signedPath('abc', EMBED_URL_EXPIRY);
+
+    expect(hurried).toBe(unhurried);
+  });
+
   it('keeps an embed URL working for 10 to 15 minutes, into the next hour', async () => {
     // Whether a URL signed at `signedAt` still works 10 and 15 minutes on.
     async function verdictsFor(signedAt: string): Promise<boolean[]> {

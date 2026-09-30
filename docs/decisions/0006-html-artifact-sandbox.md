@@ -31,7 +31,8 @@ an error the author could see.
 - **No `allow-forms`.** A form in an artifact cannot submit to the app.
 - **New windows open as ordinary pages.** `allow-popups` lets `target="_blank"` links and
   `window.open()` open a new window. `allow-popups-to-escape-sandbox` loads that window without the
-  artifact's sandbox, so a linked site works as it does when the reader opens it directly.
+  artifact's sandbox, so a linked site works as it does when the reader opens it directly. A window
+  that opens another HTML artifact gets that artifact's own sandbox header.
 - **Dialogs work.** `allow-modals` lets the page call `alert()`, `confirm()`, `prompt()`, and
   `print()`.
 - **No other sandbox flags.** Downloads, top-level navigation from a frame, pointer lock, and the

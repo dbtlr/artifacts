@@ -113,7 +113,8 @@ As a result, an HTML artifact cannot use `localStorage`, `sessionStorage`, Index
 cannot read responses from other Artifacts routes, and cannot submit forms. The `/mcp` endpoint
 refuses requests with `Origin: null` or any other origin but its own, so artifact scripts and other
 web pages cannot create or remove artifacts. Links with `target="_blank"` and `window.open()` open a
-new window, which loads as an ordinary page outside the sandbox. `alert()`, `confirm()`, and
+new window outside the artifact's sandbox, so another site loads as an ordinary page (another
+HTML artifact still gets its own sandbox). `alert()`, `confirm()`, and
 `prompt()` dialogs work.
 
 Images, stylesheets, and classic scripts that the page loads by URL still work, including embedded
