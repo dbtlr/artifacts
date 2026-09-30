@@ -1,9 +1,22 @@
 import { DatabaseSync } from 'node:sqlite';
+import type { SQLOutputValue } from 'node:sqlite';
 
-import type { ApiKeySummary, OwnerAuthStore, StoredApiKey, StoredSession } from '../auth/types.js';
+import type {
+  ApiKeySummary,
+  LoginAttempt,
+  LoginAttemptCounts,
+  LoginAttemptLimits,
+  OwnerAuthStore,
+  StoredApiKey,
+  StoredSession,
+} from '../auth/types.js';
 import { runSqliteMigrations } from './sqlite-migrations.js';
 
 const SQLITE_BUSY_TIMEOUT_MS = 1_000;
+
+function textOrNull(value: SQLOutputValue | undefined): string | null {
+  return value === null || value === undefined ? null : String(value);
+}
 
 // Owner sessions, login attempts, API keys, and URL signing keys, in the
 // same database file as the artifact metadata. It opens its own connection;
@@ -27,26 +40,42 @@ export class SqliteOwnerAuthStore implements OwnerAuthStore {
     }
   }
 
-  async reserveLoginAttempt(at: string, since: string, limit: number): Promise<boolean> {
+  async reserveLoginAttempt(
+    { at, clientAddress }: LoginAttempt,
+    since: string,
+    { perClient, total }: LoginAttemptLimits,
+  ): Promise<boolean> {
     this.database.prepare('DELETE FROM login_attempts WHERE attempted_at <= ?').run(since);
     const { changes } = this.database
       .prepare(
-        `INSERT INTO login_attempts (attempted_at)
-         SELECT ? WHERE (SELECT COUNT(*) FROM login_attempts WHERE attempted_at > ?) < ?`,
+        `INSERT INTO login_attempts (attempted_at, client_address)
+         SELECT ?, ?
+         WHERE (SELECT COUNT(*) FROM login_attempts
+                WHERE client_address = ? AND attempted_at > ?) < ?
+           AND (SELECT COUNT(*) FROM login_attempts WHERE attempted_at > ?) < ?`,
       )
-      .run(at, since, limit);
+      .run(at, clientAddress, clientAddress, since, perClient, since, total);
     return changes > 0;
   }
 
-  async oldestLoginAttemptAfter(since: string): Promise<string | null> {
+  async countLoginAttemptsAfter(since: string, clientAddress: string): Promise<LoginAttemptCounts> {
     const record = this.database
-      .prepare('SELECT MIN(attempted_at) AS oldest FROM login_attempts WHERE attempted_at > ?')
-      .get(since);
-    return record?.oldest === null || record?.oldest === undefined ? null : String(record.oldest);
+      .prepare(
+        `SELECT COUNT(*) AS total_count,
+                MIN(attempted_at) AS total_oldest,
+                COUNT(CASE WHEN client_address = ? THEN 1 END) AS client_count,
+                MIN(CASE WHEN client_address = ? THEN attempted_at END) AS client_oldest
+         FROM login_attempts WHERE attempted_at > ?`,
+      )
+      .get(clientAddress, clientAddress, since);
+    return {
+      client: { count: Number(record?.client_count), oldest: textOrNull(record?.client_oldest) },
+      total: { count: Number(record?.total_count), oldest: textOrNull(record?.total_oldest) },
+    };
   }
 
-  async clearLoginAttempts(): Promise<void> {
-    this.database.exec('DELETE FROM login_attempts');
+  async clearLoginAttempts(clientAddress: string): Promise<void> {
+    this.database.prepare('DELETE FROM login_attempts WHERE client_address = ?').run(clientAddress);
   }
 
   async createSession({ createdAt, expiresAt, tokenHash }: StoredSession): Promise<void> {

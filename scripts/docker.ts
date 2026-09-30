@@ -5,7 +5,12 @@ import { isAbsolute, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
+import { resolveClientAddressHeader, resolveOwnerPassword } from '../src/auth/owner-auth.js';
+
 export type DockerConfig = {
+  // ARTIFACTS_CLIENT_ADDRESS_HEADER, the header a proxy in front of the
+  // container sets to the client's address.
+  clientAddressHeader?: string;
   databaseMount: string;
   filesMount: string;
   // Whether ARTIFACTS_OWNER_PASSWORD is set. The value itself never enters
@@ -112,15 +117,16 @@ export function resolveDockerConfig(env: NodeJS.ProcessEnv): DockerConfig {
     env.ARTIFACTS_THUMBS_MOUNT,
     'artifacts-thumbs',
   );
-  // The server refuses a blank password at startup; failing here says why
-  // before a container is replaced.
-  if (env.ARTIFACTS_OWNER_PASSWORD?.trim() === '') {
-    throw new Error('ARTIFACTS_OWNER_PASSWORD must not be blank; unset it to turn auth off');
-  }
+  // The server refuses a blank or short password and a malformed header name
+  // at startup; applying the same rules here says why before a container is
+  // replaced. Like the server, it reads the header only with a password.
+  const ownerPassword = resolveOwnerPassword(env) !== undefined;
+  const clientAddressHeader = ownerPassword ? resolveClientAddressHeader(env) : undefined;
   const config: DockerConfig = {
+    ...(clientAddressHeader === undefined ? {} : { clientAddressHeader }),
     databaseMount,
     filesMount,
-    ownerPassword: env.ARTIFACTS_OWNER_PASSWORD !== undefined,
+    ownerPassword,
     port,
     publicBaseUrl: env.ARTIFACTS_PUBLIC_BASE_URL ?? `http://localhost:${String(port)}`,
     thumbsMount,
@@ -158,6 +164,9 @@ export function buildBareRunArgs(config: DockerConfig): string[] {
     '--env',
     `ARTIFACTS_PUBLIC_BASE_URL=${config.publicBaseUrl}`,
     ...(config.ownerPassword ? ['--env', 'ARTIFACTS_OWNER_PASSWORD'] : []),
+    ...(config.clientAddressHeader === undefined
+      ? []
+      : ['--env', `ARTIFACTS_CLIENT_ADDRESS_HEADER=${config.clientAddressHeader}`]),
     ...persistenceMounts(config).flatMap(([, source, target]) => [
       '--mount',
       mountArgument(source, target),
@@ -484,12 +493,14 @@ export async function executeDockerAction(
     return;
   }
 
-  const config = resolveDockerConfig(env);
   if (action === 'build') {
     await runRequired(run, ['build', '--tag', IMAGE_NAME, '.']);
     return;
   }
   if (action === 'start') {
+    // Only start reads the configuration, so a setting that start refuses
+    // never stops an operator from stopping or inspecting a running container.
+    const config = resolveDockerConfig(env);
     await validateBindMounts(config);
     await runRequired(run, ['build', '--tag', IMAGE_NAME, '.']);
     await validateBindMountWritability(config, run);

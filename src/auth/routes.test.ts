@@ -1,8 +1,11 @@
+import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { promisify } from 'node:util';
 
+import { serve } from '@hono/node-server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import { createApp } from '../app.js';
@@ -832,5 +835,139 @@ describe('with an owner password', () => {
     await queue.idle();
 
     expect(new TextDecoder().decode(store.get(artifact.id))).toContain('preview me');
+  });
+});
+
+// The bindings @hono/node-server passes a request, reduced to its peer address.
+function socket(remoteAddress: string) {
+  return { incoming: { socket: { remoteAddress } } };
+}
+
+describe('login limits per client address', () => {
+  // Fills one client's login limit with wrong passwords.
+  async function exhaust(app: ReturnType<typeof createApp>, headers: Record<string, string>) {
+    await Promise.all(
+      Array.from({ length: LOGIN_ATTEMPT_LIMIT }, async () =>
+        app.request('/login', loginRequest('wrong', { headers: { Origin: ORIGIN, ...headers } })),
+      ),
+    );
+  }
+
+  async function appWithHeader(clientAddressHeader?: string) {
+    const auth = createOwnerAuth({
+      ...(clientAddressHeader === undefined ? {} : { clientAddressHeader }),
+      password: PASSWORD,
+      store: await SqliteOwnerAuthStore.open(join(dataDir, 'artifacts.db')),
+    });
+    return createApp({ artifacts: service, auth, mcp: service });
+  }
+
+  it('reads the client address from the configured header', async () => {
+    const app = await appWithHeader('CF-Connecting-IP');
+    await exhaust(app, { 'CF-Connecting-IP': '203.0.113.7' });
+
+    const other = await app.request(
+      '/login',
+      loginRequest(PASSWORD, { headers: { 'CF-Connecting-IP': '198.51.100.20', Origin: ORIGIN } }),
+    );
+    const same = await app.request(
+      '/login',
+      loginRequest(PASSWORD, { headers: { 'CF-Connecting-IP': '203.0.113.7', Origin: ORIGIN } }),
+    );
+
+    expect(other.status).toBe(303);
+    expect(same.status).toBe(429);
+  });
+
+  it('ignores a client address header that is not configured', async () => {
+    const app = await appWithHeader();
+    await exhaust(app, { 'CF-Connecting-IP': '203.0.113.7', 'X-Forwarded-For': '203.0.113.7' });
+
+    const res = await app.request(
+      '/login',
+      loginRequest(PASSWORD, {
+        headers: {
+          'CF-Connecting-IP': '198.51.100.20',
+          Origin: ORIGIN,
+          'X-Forwarded-For': '1.2.3.4',
+        },
+      }),
+    );
+
+    expect(res.status).toBe(429);
+  });
+
+  it('ignores other headers when one is configured', async () => {
+    const app = await appWithHeader('CF-Connecting-IP');
+    await exhaust(app, { 'X-Forwarded-For': '203.0.113.7' });
+
+    const res = await app.request(
+      '/login',
+      loginRequest(PASSWORD, { headers: { Origin: ORIGIN, 'X-Forwarded-For': '198.51.100.20' } }),
+    );
+
+    expect(res.status).toBe(429);
+  });
+
+  it('counts a list-valued header by its last entry, which the nearest proxy added', async () => {
+    const app = await appWithHeader('X-Forwarded-For');
+    await Promise.all(
+      Array.from({ length: LOGIN_ATTEMPT_LIMIT }, async (_, index) =>
+        app.request(
+          '/login',
+          loginRequest('wrong', {
+            headers: { Origin: ORIGIN, 'X-Forwarded-For': `10.0.0.${String(index)}, 203.0.113.7` },
+          }),
+        ),
+      ),
+    );
+
+    const res = await app.request(
+      '/login',
+      loginRequest(PASSWORD, { headers: { Origin: ORIGIN, 'X-Forwarded-For': '203.0.113.7' } }),
+    );
+
+    expect(res.status).toBe(429);
+  });
+
+  it('falls back to the socket address when no header is configured', async () => {
+    const app = await appWithHeader();
+    await Promise.all(
+      Array.from({ length: LOGIN_ATTEMPT_LIMIT }, async () =>
+        app.request('/login', loginRequest('wrong'), socket('203.0.113.7')),
+      ),
+    );
+
+    const other = await app.request('/login', loginRequest(PASSWORD), socket('198.51.100.20'));
+    const same = await app.request('/login', loginRequest(PASSWORD), socket('203.0.113.7'));
+
+    expect(other.status).toBe(303);
+    expect(same.status).toBe(429);
+  });
+
+  it('counts an attempt over a real Node connection against its peer address', async () => {
+    const server = serve({ fetch: (await appWithHeader()).fetch, hostname: '127.0.0.1', port: 0 });
+    try {
+      await once(server, 'listening');
+      const address = server.address();
+      if (address === null || typeof address === 'string') {
+        throw new Error('expected serve() to bind a network address');
+      }
+      const origin = `http://127.0.0.1:${String(address.port)}`;
+
+      const res = await fetch(
+        `${origin}/login`,
+        loginRequest('wrong', { headers: { Origin: origin } }),
+      );
+
+      expect(res.status).toBe(401);
+      const database = new DatabaseSync(join(dataDir, 'artifacts.db'));
+      expect(database.prepare('SELECT client_address FROM login_attempts').all()).toEqual([
+        { client_address: '127.0.0.1' },
+      ]);
+      database.close();
+    } finally {
+      await promisify(server.close.bind(server))();
+    }
   });
 });

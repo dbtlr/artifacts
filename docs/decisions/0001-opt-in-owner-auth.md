@@ -76,3 +76,6 @@ Passkeys can later use the same session model.
 - 2026-09-29: [ADR-0003](0003-signed-embed-urls.md) signs the `/a/:id` URLs in an HTML artifact's
   loading attributes on every view, so the consequence above about HTML artifacts no longer holds
   for them.
+- 2026-09-29: [ADR-0005](0005-per-client-login-limit.md) replaces the single login count with a
+  per-address limit under a total ceiling, and requires a password of at least 16 characters. The
+  rate-limit decision and the rejected per-client option above no longer hold.
