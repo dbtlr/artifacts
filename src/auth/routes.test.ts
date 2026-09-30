@@ -1,8 +1,11 @@
+import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { promisify } from 'node:util';
 
+import { serve } from '@hono/node-server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import { createApp } from '../app.js';
@@ -940,5 +943,31 @@ describe('login limits per client address', () => {
 
     expect(other.status).toBe(303);
     expect(same.status).toBe(429);
+  });
+
+  it('counts an attempt over a real Node connection against its peer address', async () => {
+    const server = serve({ fetch: (await appWithHeader()).fetch, hostname: '127.0.0.1', port: 0 });
+    try {
+      await once(server, 'listening');
+      const address = server.address();
+      if (address === null || typeof address === 'string') {
+        throw new Error('expected serve() to bind a network address');
+      }
+      const origin = `http://127.0.0.1:${String(address.port)}`;
+
+      const res = await fetch(
+        `${origin}/login`,
+        loginRequest('wrong', { headers: { Origin: origin } }),
+      );
+
+      expect(res.status).toBe(401);
+      const database = new DatabaseSync(join(dataDir, 'artifacts.db'));
+      expect(database.prepare('SELECT client_address FROM login_attempts').all()).toEqual([
+        { client_address: '127.0.0.1' },
+      ]);
+      database.close();
+    } finally {
+      await promisify(server.close.bind(server))();
+    }
   });
 });
