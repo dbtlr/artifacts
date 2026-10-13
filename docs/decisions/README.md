@@ -9,7 +9,7 @@ and do not bind anything.
 | --- | --- | --- |
 | [0001](0001-opt-in-owner-auth.md) | accepted | An owner password turns on login; without one, Muninn keeps its no-auth, trusted-network boundary. |
 | [0002](0002-signed-artifact-urls.md) | accepted | A short-lived signed URL reads one artifact without a session; the thumbnail renderer uses one per render. |
-| [0003](0003-signed-embed-urls.md) | accepted | An HTML artifact's embedded `/a/:id` URLs are found when it is stored and signed again on every view. |
+| [0003](0003-signed-embed-urls.md) | accepted | An HTML artifact's embedded `/a/:id` URLs, and a Markdown rendering's, are found when stored and signed again on every view. |
 | [0004](0004-hourly-url-signing-keys.md) | accepted | Signed URLs use one random key per clock hour, stored in the database, and verify only against the current and previous hour's keys. |
 | [0005](0005-per-client-login-limit.md) | accepted | Logins are limited per client address, read from a header only when the operator names it, under a total ceiling; a password shorter than 16 characters stops startup. |
 | [0006](0006-html-artifact-sandbox.md) | accepted | HTML artifacts run in an opaque-origin CSP sandbox that allows scripts, new windows, and dialogs, but not storage or forms. |

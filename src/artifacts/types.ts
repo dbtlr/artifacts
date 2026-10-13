@@ -80,8 +80,9 @@ export type ArtifactService = {
   createArtifact: (input: CreateArtifactInput) => Promise<Artifact>;
   findArtifact: (id: string) => Promise<Artifact | null>;
   getArtifact: (id: string) => Promise<ArtifactWithContent | null>;
-  // Where an HTML artifact loads other artifacts of this instance, in text
-  // order. Resolves null when no HTML artifact has the id.
+  // Where an HTML artifact, or a Markdown artifact's rendering, loads other
+  // artifacts of this instance, in text order. Resolves null when no HTML or
+  // Markdown artifact has the id.
   getEmbedReferences: (id: string) => Promise<EmbedReference[] | null>;
   // The rendering of a Markdown artifact, for viewing it without parsing
   // Markdown. Resolves null when no Markdown artifact has the id.

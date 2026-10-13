@@ -480,3 +480,101 @@ describe('ArtifactService Markdown renderings', () => {
     stderr.mockRestore();
   });
 });
+
+const markdownWithImage: CreateArtifactInput = {
+  ...markdownInput,
+  content: new TextEncoder().encode('<img src="/a/chart-id">'),
+};
+
+// Where countingRenderer(version) puts the chart reference in its rendering.
+function renderedChartStart(version: number): number {
+  return `<p>v${String(version)}: <img src="`.length;
+}
+
+describe('ArtifactService Markdown embed templates', () => {
+  it('extracts a Markdown artifact’s embed template from its rendering when it is created', async () => {
+    const stores = createMemoryStores();
+    const service = createArtifactService(
+      stores.metadata,
+      stores.content,
+      countingRenderer(1).renderer,
+    );
+
+    const created = await service.createArtifact(markdownWithImage);
+
+    expect(stores.templates.get(created.id)).toEqual({
+      extractorVersion: EMBED_EXTRACTOR_VERSION,
+      references: [{ id: 'chart-id', start: renderedChartStart(1) }],
+    });
+  });
+
+  it('extracts a missing template from the stored rendering without parsing Markdown', async () => {
+    const stores = createMemoryStores();
+    const { parsed, renderer } = countingRenderer(1);
+    const service = createArtifactService(stores.metadata, stores.content, renderer);
+    const created = await service.createArtifact(markdownWithImage);
+    stores.templates.clear();
+    stores.files.clear();
+
+    await expect(service.getEmbedReferences(created.id)).resolves.toEqual([
+      { id: 'chart-id', start: renderedChartStart(1) },
+    ]);
+    expect(stores.templates.get(created.id)?.extractorVersion).toBe(EMBED_EXTRACTOR_VERSION);
+    expect(parsed).toHaveLength(1);
+  });
+
+  it('stores a new template with a rendering made again by another renderer version', async () => {
+    const stores = createMemoryStores();
+    const older = createArtifactService(
+      stores.metadata,
+      stores.content,
+      countingRenderer(1).renderer,
+    );
+    const created = await older.createArtifact(markdownWithImage);
+    const newer = createArtifactService(
+      stores.metadata,
+      stores.content,
+      countingRenderer(10).renderer,
+    );
+
+    const rendered = await newer.getRenderedMarkdown(created.id);
+
+    const references = await newer.getEmbedReferences(created.id);
+    expect(references).toEqual([{ id: 'chart-id', start: renderedChartStart(10) }]);
+    expect(rendered?.html.startsWith('/a/chart-id', references![0]!.start)).toBe(true);
+  });
+
+  it('does not store a rendering whose template could not be stored', async () => {
+    const stores = createMemoryStores();
+    const older = createArtifactService(
+      stores.metadata,
+      stores.content,
+      countingRenderer(1).renderer,
+    );
+    const created = await older.createArtifact(markdownWithImage);
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const failing = createArtifactService(
+      {
+        ...stores.metadata,
+        saveEmbedTemplate: async () => {
+          throw new Error('template write failed');
+        },
+      },
+      stores.content,
+      countingRenderer(10).renderer,
+    );
+    await failing.getRenderedMarkdown(created.id);
+    stderr.mockRestore();
+    const newer = createArtifactService(
+      stores.metadata,
+      stores.content,
+      countingRenderer(10).renderer,
+    );
+
+    await newer.getRenderedMarkdown(created.id);
+
+    await expect(newer.getEmbedReferences(created.id)).resolves.toEqual([
+      { id: 'chart-id', start: renderedChartStart(10) },
+    ]);
+  });
+});

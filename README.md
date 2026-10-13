@@ -245,7 +245,7 @@ With a password set:
   `MUNINN_PUBLIC_BASE_URL`, and it may have a fragment but no query. Each view replaces those
   URLs with signed URLs that work for 10 to 15 minutes. Views in the same clock five minutes get the
   same URLs, so the browser can reuse cached embeds. URLs that scripts build, and CSS `url()`, are
-  not signed and do not load.
+  not signed and do not load. Markdown artifacts sign the images in their rendering the same way.
 - Gallery previews still render. The renderer reads each artifact through a signed URL that works
   for 60 seconds and for that one artifact only. An expired or altered signature gets `403`.
 - Set `MUNINN_PUBLIC_BASE_URL` to the URL the browser uses. Login and logout forms are accepted

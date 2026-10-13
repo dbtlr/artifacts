@@ -1,7 +1,7 @@
 ---
 type: adr
 title: ADR-0003 - HTML artifacts load embedded artifacts through URLs signed at view time
-description: An HTML artifact's /a/:id references are found once when it is stored, and with owner auth on each view replaces them with fresh signed URLs.
+description: An HTML artifact's /a/:id references, and a Markdown rendering's, are found once when stored, and with owner auth on each view replaces them with fresh signed URLs.
 status: accepted
 created: 2026-09-29
 modified: 2026-10-13
@@ -34,15 +34,20 @@ derived from an artifact's content can be computed once and kept.
 - **Each view signs every reference again.** With auth on, a view replaces each recorded `/a/<id>`
   with a signed path to that artifact and keeps the author's host and fragment. The view does no
   HTML parsing. With auth off, the page is served unchanged.
+- **Markdown artifacts sign their rendering's embeds.** A Markdown artifact's template is extracted
+  from its stored rendering, not its source, so its positions match the HTML that a view serves.
+  Markdown image syntax renders as `img`, so embedded images are signed. A rendering is stored only
+  after its template is, so a rendering made again by a new renderer version does not keep the old
+  rendering's template.
 - **Embed URLs last 10 to 15 minutes.** A lazy image or frame loads when the reader scrolls to it,
   well after the page arrived. The expiry is rounded up to a five-minute boundary at least 10
   minutes after the end of the current clock five minutes, so every view in the same five minutes
   gets the same URLs and the browser can reuse what it cached. Five minutes divides an hour, so
   those views also share one [hourly signing key](0004-hourly-url-signing-keys.md). Thumbnail URLs
   keep their 60 seconds. Both use the same signer.
-- **A signed page signs its own embeds.** A request that reaches an HTML artifact, by session or by
-  signature, gets that artifact's embeds signed. This lets a framed HTML artifact and a gallery
-  preview show their images.
+- **A signed page signs its own embeds.** A request that reaches an HTML or Markdown artifact, by
+  session or by signature, gets that artifact's embeds signed. This lets a framed artifact and a
+  gallery preview show their images.
 - **The template is derived data.** It stores positions only, not a copy of the page. A failure to
   store it does not fail the create. A missing or unreadable template, or one from another extractor
   version, is extracted and stored on the next view.
@@ -80,3 +85,5 @@ derived from an artifact's content can be computed once and kept.
   five minutes share URLs and the browser cache. They last 10 to 15 minutes instead of exactly 10.
 - 2026-10-13: [ADR-0007](0007-rename-to-muninn.md) renames the product to Muninn and its variables
   from `ARTIFACTS_*` to `MUNINN_*`. This record now uses the new variable names.
+- 2026-10-13: Markdown artifacts sign the embeds in their stored rendering, so their images show in
+  frames and gallery previews with owner auth on.
