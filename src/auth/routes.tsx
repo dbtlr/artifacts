@@ -109,7 +109,7 @@ function markOwnerResponse(path: string, res: Response): void {
 
 function loginPage(c: Context, next: string, status: 200 | 401 | 429, error?: string) {
   return c.html(
-    <Layout title="Log in · Artifacts">
+    <Layout title="Log in · Muninn">
       <LoginPage error={error} next={next} />
     </Layout>,
     status,
@@ -152,7 +152,7 @@ async function apiKeysPage(
   const newKeyName =
     props.newKey === undefined ? undefined : keys.find(({ id }) => id === props.newKey?.id)?.name;
   return c.html(
-    <Layout title="API keys · Artifacts">
+    <Layout title="API keys · Muninn">
       <ApiKeysPage
         created={
           props.newKey === undefined || newKeyName === undefined

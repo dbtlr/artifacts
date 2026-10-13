@@ -1,6 +1,6 @@
 # Contributing
 
-Artifacts is unversioned pre-alpha software. Discuss substantial behavior, storage, protocol, or
+Muninn is unversioned pre-alpha software. Discuss substantial behavior, storage, protocol, or
 package-boundary changes before implementation; compatibility is not promised, but changes should
 still be intentional and documented.
 

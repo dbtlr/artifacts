@@ -8,8 +8,8 @@ declare module 'cloudflare:workers' {
   import type { ListableR2Bucket } from './data/r2-bucket.test-support.js';
 
   export const env: {
-    ARTIFACTS_BUCKET: ListableR2Bucket;
-    ARTIFACTS_DB: D1DatabaseBinding;
+    MUNINN_BUCKET: ListableR2Bucket;
+    MUNINN_DB: D1DatabaseBinding;
     TEST_MIGRATIONS: D1Migration[];
   };
 }

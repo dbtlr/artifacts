@@ -4,7 +4,7 @@ title: ADR-0005 - Login attempts are limited per client address, under a total c
 description: With owner auth on, failed logins are counted per client address, read from a proxy header only when the operator names one, with a higher total limit as a backstop; a password shorter than 16 characters stops startup.
 status: accepted
 created: 2026-09-29
-modified: 2026-09-29
+modified: 2026-10-13
 ---
 # ADR-0005 - Login attempts are limited per client address, under a total ceiling
 
@@ -26,7 +26,7 @@ limit was the only thing between a short password and a guess.
   attempts cannot slip past either limit. The window stays 15 minutes.
 - **A success clears its own address only.** The owner's login does not reset the counts of other
   addresses.
-- **The operator names the client address header.** `ARTIFACTS_CLIENT_ADDRESS_HEADER` names the
+- **The operator names the client address header.** `MUNINN_CLIENT_ADDRESS_HEADER` names the
   header that a trusted proxy sets, such as `CF-Connecting-IP` on Cloudflare. For a list header
   such as `X-Forwarded-For`, the last entry counts, because the nearest proxy appends it. No other
   header is ever read, because any client can send one. Without the setting, or when a request lacks
@@ -62,3 +62,8 @@ limit was the only thing between a short password and a guess.
   limit acts like the old single count.
 - An existing instance with a password shorter than 16 characters stops at startup until the
   password is replaced. A new password ends every session, as before.
+
+## Changelog
+
+- 2026-10-13: [ADR-0007](0007-rename-to-muninn.md) renames the product to Muninn and its variables
+  from `ARTIFACTS_*` to `MUNINN_*`. This record now uses the new variable names.

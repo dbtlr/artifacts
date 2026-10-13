@@ -332,26 +332,26 @@ describe('listArtifacts', () => {
 });
 
 describe('getDefaultArtifactStore', () => {
-  const originalDatabasePath = process.env.ARTIFACTS_DATABASE_PATH;
-  const originalFilesDir = process.env.ARTIFACTS_FILES_DIR;
+  const originalDatabasePath = process.env.MUNINN_DATABASE_PATH;
+  const originalFilesDir = process.env.MUNINN_FILES_DIR;
   let base: string;
 
   beforeEach(() => {
     base = mkdtempSync(join(tmpdir(), 'artifacts-default-'));
-    process.env.ARTIFACTS_DATABASE_PATH = join(base, 'database', 'artifacts.db');
-    process.env.ARTIFACTS_FILES_DIR = join(base, 'files');
+    process.env.MUNINN_DATABASE_PATH = join(base, 'database', 'artifacts.db');
+    process.env.MUNINN_FILES_DIR = join(base, 'files');
   });
 
   afterEach(() => {
     if (originalDatabasePath === undefined) {
-      delete process.env.ARTIFACTS_DATABASE_PATH;
+      delete process.env.MUNINN_DATABASE_PATH;
     } else {
-      process.env.ARTIFACTS_DATABASE_PATH = originalDatabasePath;
+      process.env.MUNINN_DATABASE_PATH = originalDatabasePath;
     }
     if (originalFilesDir === undefined) {
-      delete process.env.ARTIFACTS_FILES_DIR;
+      delete process.env.MUNINN_FILES_DIR;
     } else {
-      process.env.ARTIFACTS_FILES_DIR = originalFilesDir;
+      process.env.MUNINN_FILES_DIR = originalFilesDir;
     }
     rmSync(base, { force: true, recursive: true });
     vi.resetModules();

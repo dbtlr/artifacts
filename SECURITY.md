@@ -2,16 +2,16 @@
 
 ## Supported versions
 
-Artifacts is unversioned pre-alpha software. There are no supported releases and no guarantee that
+Muninn is unversioned pre-alpha software. There are no supported releases and no guarantee that
 security fixes will be backported.
 
 ## Deployment boundary
 
-Artifacts has two modes. `ARTIFACTS_OWNER_PASSWORD` selects between them.
+Muninn has two modes. `MUNINN_OWNER_PASSWORD` selects between them.
 
 ### Without an owner password
 
-This is the default. Artifacts has no authentication or authorization. Anyone who can reach the
+This is the default. Muninn has no authentication or authorization. Anyone who can reach the
 server can list, read, create, and remove artifacts. Deploy it only on loopback or a trusted
 internal network. If broader access is required, set an owner password or place an
 authentication-capable reverse proxy in front of it, and verify that the application itself is not
@@ -31,13 +31,13 @@ only for the owner.
 
 - Sessions are stored in the database as keyed hashes of random tokens and last 7 days. A new
   password ends every session. The cookie is `HttpOnly` and `SameSite=Lax`. It is `Secure` when
-  `ARTIFACTS_PUBLIC_BASE_URL` uses HTTPS.
+  `MUNINN_PUBLIC_BASE_URL` uses HTTPS.
 - The server refuses to start when the password is shorter than 16 characters.
 - Login allows 10 attempts from one client address in any 15-minute window, and 100 from all
   addresses together. The total limit bounds guesses to fewer than 10,000 a day. An attacker who
   controls enough addresses to reach it can keep the owner locked out.
 - The client address is the connection's address, unless the operator names a header in
-  `ARTIFACTS_CLIENT_ADDRESS_HEADER`, such as `CF-Connecting-IP`. The server reads only that header,
+  `MUNINN_CLIENT_ADDRESS_HEADER`, such as `CF-Connecting-IP`. The server reads only that header,
   and for a list it takes the last entry. A client that reaches the server without passing through
   the proxy can set the header to any address, and so can escape the per-address limit, but not the
   total limit. Name a header only when the proxy always sets it and the server is reachable only

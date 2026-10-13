@@ -29,7 +29,7 @@ const Timestamp: FC<{ iso: string }> = ({ iso }) => (
 export const ApiKeysPage: FC<ApiKeysPageProps> = ({ created, error, keys, mcpUrl }) => (
   <main>
     <a href="/" class="text-lg font-bold tracking-tight text-stone-900 dark:text-ink-100">
-      a<span class="text-amber-600 dark:text-accent">.</span> Artifacts
+      a<span class="text-amber-600 dark:text-accent">.</span> Muninn
     </a>
     <h1 class="mt-6 text-xl font-bold text-stone-900 dark:text-ink-100">API keys</h1>
     <p class={`mt-2 ${muted}`}>

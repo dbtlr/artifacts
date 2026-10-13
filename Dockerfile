@@ -42,14 +42,14 @@ RUN apk add --no-cache chromium nss freetype harfbuzz ca-certificates font-inter
     '  <alias><family>sans-serif</family><prefer><family>Inter</family><family>DejaVu Sans</family></prefer></alias>' \
     '  <alias><family>monospace</family><prefer><family>DejaVu Sans Mono</family></prefer></alias>' \
     '</fontconfig>' \
-    > /etc/fonts/conf.d/51-artifacts-generics.conf
+    > /etc/fonts/conf.d/51-muninn-generics.conf
 
 ENV NODE_ENV=production
-ENV ARTIFACTS_PORT=3000
-ENV ARTIFACTS_DATABASE_PATH=/app/data/database/artifacts.db
-ENV ARTIFACTS_FILES_DIR=/app/data/files
-ENV ARTIFACTS_THUMBS_DIR=/app/data/thumbs
-ENV ARTIFACTS_CHROMIUM_PATH=/usr/bin/chromium
+ENV MUNINN_PORT=3000
+ENV MUNINN_DATABASE_PATH=/app/data/database/artifacts.db
+ENV MUNINN_FILES_DIR=/app/data/files
+ENV MUNINN_THUMBS_DIR=/app/data/thumbs
+ENV MUNINN_CHROMIUM_PATH=/usr/bin/chromium
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 COPY --from=builder /app/dist ./dist
@@ -66,12 +66,12 @@ RUN mkdir -p /app/data/database /app/data/files /app/data/thumbs && chown -R nod
 # the container layer and are re-rendered on the next start.
 USER node
 
-EXPOSE ${ARTIFACTS_PORT}
+EXPOSE ${MUNINN_PORT}
 
 # Liveness probe: hits `/` so `docker ps` and any orchestrator that gates on
 # container health can see the server is actually bound. wget is the busybox
 # implementation bundled in node:*-alpine.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -qO- "http://localhost:${ARTIFACTS_PORT}/" || exit 1
+  CMD wget -qO- "http://localhost:${MUNINN_PORT}/" || exit 1
 
 CMD ["node", "dist/server.js"]

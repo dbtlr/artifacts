@@ -1,10 +1,10 @@
 ---
 type: adr
 title: ADR-0001 - Opt-in owner auth revises the no-auth boundary
-description: Setting ARTIFACTS_OWNER_PASSWORD turns on a single-owner password login with database sessions. Without it, Artifacts has no authentication and stays a trusted-network tool.
+description: Setting MUNINN_OWNER_PASSWORD turns on a single-owner password login with database sessions. Without it, Muninn has no authentication and stays a trusted-network tool.
 status: accepted
 created: 2026-09-29
-modified: 2026-09-29
+modified: 2026-10-13
 ---
 # ADR-0001 - Opt-in owner auth revises the no-auth boundary
 
@@ -21,7 +21,7 @@ credentials. Links serve the owner only, and sharing with other people is not su
 
 ## Decision
 
-- **One owner, one password.** The password comes from the `ARTIFACTS_OWNER_PASSWORD` secret. There
+- **One owner, one password.** The password comes from the `MUNINN_OWNER_PASSWORD` secret. There
   are no user, role, or tenant tables.
 - **Opt-in on Node.** When the variable is unset, the app has no login, no session, and no auth
   routes, and it behaves exactly as before. A blank value is a startup error, so a half-written
@@ -83,3 +83,5 @@ Passkeys can later use the same session model.
   since a new password keeps keys. It shows when each key was created and last used; a key's use
   is recorded at most once a minute. Creating a key redirects, and the new key reaches the page it
   lands on in a short-lived cookie scoped to `/keys`, so a refresh creates no second key.
+- 2026-10-13: [ADR-0007](0007-rename-to-muninn.md) renames the product to Muninn and its variables
+  from `ARTIFACTS_*` to `MUNINN_*`. This record now uses the new variable names.

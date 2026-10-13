@@ -10,7 +10,7 @@ const developmentDataDir = join(moduleDir, '..', 'data', 'development');
 
 export type StoragePaths = { databasePath: string; filesDir: string; thumbsDir: string };
 
-type PathVariable = 'ARTIFACTS_DATABASE_PATH' | 'ARTIFACTS_FILES_DIR' | 'ARTIFACTS_THUMBS_DIR';
+type PathVariable = 'MUNINN_DATABASE_PATH' | 'MUNINN_FILES_DIR' | 'MUNINN_THUMBS_DIR';
 
 function resolvePathOverride(
   name: PathVariable,
@@ -29,20 +29,20 @@ function resolvePathOverride(
 export function resolveStoragePaths(env: NodeJS.ProcessEnv = process.env): StoragePaths {
   return {
     databasePath: resolvePathOverride(
-      'ARTIFACTS_DATABASE_PATH',
-      env.ARTIFACTS_DATABASE_PATH,
+      'MUNINN_DATABASE_PATH',
+      env.MUNINN_DATABASE_PATH,
       join(developmentDataDir, 'database', 'artifacts.db'),
     ),
     filesDir: resolvePathOverride(
-      'ARTIFACTS_FILES_DIR',
-      env.ARTIFACTS_FILES_DIR,
+      'MUNINN_FILES_DIR',
+      env.MUNINN_FILES_DIR,
       join(developmentDataDir, 'files'),
     ),
     // Rendered previews are derived data: losing this directory only costs a
     // re-render, so it is a sibling of the two durable stores, not inside one.
     thumbsDir: resolvePathOverride(
-      'ARTIFACTS_THUMBS_DIR',
-      env.ARTIFACTS_THUMBS_DIR,
+      'MUNINN_THUMBS_DIR',
+      env.MUNINN_THUMBS_DIR,
       join(developmentDataDir, 'thumbs'),
     ),
   };

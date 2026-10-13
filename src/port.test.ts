@@ -23,17 +23,17 @@ describe('resolvePort', () => {
   });
 
   it('throws on non-numeric values', () => {
-    expect(() => resolvePort('abc')).toThrow(/ARTIFACTS_PORT must be a non-negative integer/u);
-    expect(() => resolvePort('0x50')).toThrow(/ARTIFACTS_PORT must be a non-negative integer/u);
-    expect(() => resolvePort('30.5')).toThrow(/ARTIFACTS_PORT must be a non-negative integer/u);
-    expect(() => resolvePort('+3000')).toThrow(/ARTIFACTS_PORT must be a non-negative integer/u);
-    expect(() => resolvePort('-1')).toThrow(/ARTIFACTS_PORT must be a non-negative integer/u);
+    expect(() => resolvePort('abc')).toThrow(/MUNINN_PORT must be a non-negative integer/u);
+    expect(() => resolvePort('0x50')).toThrow(/MUNINN_PORT must be a non-negative integer/u);
+    expect(() => resolvePort('30.5')).toThrow(/MUNINN_PORT must be a non-negative integer/u);
+    expect(() => resolvePort('+3000')).toThrow(/MUNINN_PORT must be a non-negative integer/u);
+    expect(() => resolvePort('-1')).toThrow(/MUNINN_PORT must be a non-negative integer/u);
   });
 
   it('throws on out-of-range values', () => {
-    expect(() => resolvePort('65536')).toThrow(/ARTIFACTS_PORT must be between 0 and 65535/u);
+    expect(() => resolvePort('65536')).toThrow(/MUNINN_PORT must be between 0 and 65535/u);
     expect(() => resolvePort('99999999999999999999')).toThrow(
-      /ARTIFACTS_PORT must be between 0 and 65535/u,
+      /MUNINN_PORT must be between 0 and 65535/u,
     );
   });
 });

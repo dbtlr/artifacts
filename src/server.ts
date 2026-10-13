@@ -3,6 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { serve } from '@hono/node-server';
 
 import { createApp } from './app.js';
+import { assertNoLegacyEnv } from './legacy-env.js';
 import { resolvePort } from './port.js';
 import { getDefaultAppServices } from './services.js';
 import { createPlaywrightRenderer, resolveChromiumPath } from './thumbnails/playwright-renderer.js';
@@ -12,7 +13,8 @@ import { resolvePublicBaseUrl } from './urls.js';
 // anyway; well inside Docker's default 10s stop grace period.
 const SHUTDOWN_GRACE_MS = 5_000;
 
-const port = resolvePort(process.env.ARTIFACTS_PORT);
+assertNoLegacyEnv();
+const port = resolvePort(process.env.MUNINN_PORT);
 const services = await getDefaultAppServices();
 const chromiumPath = await resolveChromiumPath(process.env);
 const renderer = createPlaywrightRenderer({
@@ -31,13 +33,13 @@ async function startThumbnails(boundPort: number): Promise<void> {
     await services.thumbnailQueue.backfill(await services.artifacts.listArtifacts());
   } catch (error) {
     const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
-    process.stderr.write(`Artifacts failed to start thumbnails: ${detail}\n`);
+    process.stderr.write(`Muninn failed to start thumbnails: ${detail}\n`);
     process.exit(1);
   }
 }
 
 const server = serve({ fetch: app.fetch, port }, (info) => {
-  process.stdout.write(`Artifacts listening on http://localhost:${String(info.port)}\n`);
+  process.stdout.write(`Muninn listening on http://localhost:${String(info.port)}\n`);
   void startThumbnails(info.port);
 });
 
@@ -45,7 +47,7 @@ const server = serve({ fetch: app.fetch, port }, (info) => {
 // close the browser but leave this server running), so shutdown is owned
 // here: stop accepting connections, give the browser a moment to close, exit.
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
-  process.stdout.write(`Artifacts shutting down on ${signal}\n`);
+  process.stdout.write(`Muninn shutting down on ${signal}\n`);
   server.close();
   try {
     await Promise.race([renderer.close(), delay(SHUTDOWN_GRACE_MS)]);

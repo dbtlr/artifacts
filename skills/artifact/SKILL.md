@@ -1,15 +1,15 @@
 ---
 name: artifact
-description: Share documents, images, and PDFs with a human as persistent links via the Artifacts MCP server. Use when the user asks to publish or share an artifact, document, diagram, generated image, or PDF with a link.
+description: Share documents, images, and PDFs with a human as persistent links via the Muninn MCP server. Use when the user asks to publish or share an artifact, document, diagram, generated image, or PDF with a link.
 ---
 
 # Artifact — Share Documents and Files via Persistent Links
 
-Publish a document or file to the Artifacts server and hand back the returned URL. Artifacts are immutable: once published, an artifact never changes. A revision or variation is a new artifact in the same collection, so every earlier version keeps its own working link.
+Publish a document or file to the Muninn server and hand back the returned URL. Artifacts are immutable: once published, an artifact never changes. A revision or variation is a new artifact in the same collection, so every earlier version keeps its own working link.
 
 ## Why This Skill Exists
 
-Documents produced mid-task — a plan, a design doc, a status update, a diagram — are easiest to review as a rendered page with a link, especially when working with the user remotely. Artifacts gives every such document a stable URL; this skill teaches the decisions an agent has to make before writing one: which collection it belongs to, and which template and metadata to use.
+Documents produced mid-task — a plan, a design doc, a status update, a diagram — are easiest to review as a rendered page with a link, especially when working with the user remotely. Muninn gives every such document a stable URL; this skill teaches the decisions an agent has to make before writing one: which collection it belongs to, and which template and metadata to use.
 
 ## Core Workflow
 
@@ -95,7 +95,7 @@ embeds the new URL. The earlier document keeps showing the earlier image.
 
 This skill assumes:
 
-1. The Artifacts MCP server is registered in the agent client using the deployment's `/mcp` URL.
+1. The Muninn MCP server is registered in the agent client using the deployment's `/mcp` URL.
 2. This skill directory is installed in the client-specific personal skills directory.
 
 Neither step is something the agent does mid-task — both are one-time environment setup performed by the person operating the agent.

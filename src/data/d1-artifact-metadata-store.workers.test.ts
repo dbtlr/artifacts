@@ -21,11 +21,11 @@ const artifact: Artifact = {
 // empties the table, so each test starts clean whatever storage isolation the
 // test runtime provides.
 beforeEach(async () => {
-  await applyD1Migrations(env.ARTIFACTS_DB, env.TEST_MIGRATIONS);
-  await env.ARTIFACTS_DB.prepare('DELETE FROM artifacts').run();
+  await applyD1Migrations(env.MUNINN_DB, env.TEST_MIGRATIONS);
+  await env.MUNINN_DB.prepare('DELETE FROM artifacts').run();
 });
 
-metadataStoreContract('d1', async () => new D1ArtifactMetadataStore(env.ARTIFACTS_DB));
+metadataStoreContract('d1', async () => new D1ArtifactMetadataStore(env.MUNINN_DB));
 
 type StatementFaults = {
   first?: (statement: D1PreparedStatementBinding) => Promise<Record<string, unknown> | null>;
@@ -44,7 +44,7 @@ function storeWithFaults(faults: StatementFaults): D1ArtifactMetadataStore {
     };
   }
   return new D1ArtifactMetadataStore({
-    prepare: (query) => faulty(env.ARTIFACTS_DB.prepare(query)),
+    prepare: (query) => faulty(env.MUNINN_DB.prepare(query)),
   });
 }
 
@@ -71,9 +71,7 @@ describe('D1ArtifactMetadataStore', () => {
 
     await expect(store.create(artifact)).rejects.toThrow('D1 unavailable');
 
-    await expect(
-      new D1ArtifactMetadataStore(env.ARTIFACTS_DB).find(artifact.id),
-    ).resolves.toBeNull();
+    await expect(new D1ArtifactMetadataStore(env.MUNINN_DB).find(artifact.id)).resolves.toBeNull();
   });
 
   it('rejects with an unknown outcome when its row cannot be checked', async () => {

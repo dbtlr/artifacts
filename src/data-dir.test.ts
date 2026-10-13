@@ -16,25 +16,25 @@ const defaults = {
 
 describe('resolveStoragePaths', () => {
   it('defaults to isolated development locations without honoring the legacy variable', () => {
-    const paths = resolveStoragePaths({ ARTIFACTS_DATA_DIR: '/legacy/production/data' });
+    const paths = resolveStoragePaths({ MUNINN_DATA_DIR: '/legacy/production/data' });
 
     expect(paths).toEqual(defaults);
   });
 
   it('overrides the files directory without redirecting the others', () => {
-    const paths = resolveStoragePaths({ ARTIFACTS_FILES_DIR: '/srv/artifacts/files' });
+    const paths = resolveStoragePaths({ MUNINN_FILES_DIR: '/srv/artifacts/files' });
 
     expect(paths).toEqual({ ...defaults, filesDir: '/srv/artifacts/files' });
   });
 
   it('overrides the database path without redirecting the others', () => {
-    const paths = resolveStoragePaths({ ARTIFACTS_DATABASE_PATH: '/srv/artifacts/metadata.db' });
+    const paths = resolveStoragePaths({ MUNINN_DATABASE_PATH: '/srv/artifacts/metadata.db' });
 
     expect(paths).toEqual({ ...defaults, databasePath: '/srv/artifacts/metadata.db' });
   });
 
   it('overrides the thumbnails directory without redirecting the others', () => {
-    const paths = resolveStoragePaths({ ARTIFACTS_THUMBS_DIR: '/srv/artifacts/thumbs' });
+    const paths = resolveStoragePaths({ MUNINN_THUMBS_DIR: '/srv/artifacts/thumbs' });
 
     expect(paths).toEqual({ ...defaults, thumbsDir: '/srv/artifacts/thumbs' });
   });
@@ -42,9 +42,9 @@ describe('resolveStoragePaths', () => {
   it('trims surrounding whitespace from path overrides', () => {
     expect(
       resolveStoragePaths({
-        ARTIFACTS_DATABASE_PATH: ' /srv/artifacts/metadata.db ',
-        ARTIFACTS_FILES_DIR: ' /srv/artifacts/files ',
-        ARTIFACTS_THUMBS_DIR: ' /srv/artifacts/thumbs ',
+        MUNINN_DATABASE_PATH: ' /srv/artifacts/metadata.db ',
+        MUNINN_FILES_DIR: ' /srv/artifacts/files ',
+        MUNINN_THUMBS_DIR: ' /srv/artifacts/thumbs ',
       }),
     ).toEqual({
       databasePath: '/srv/artifacts/metadata.db',
@@ -53,7 +53,7 @@ describe('resolveStoragePaths', () => {
     });
   });
 
-  it.each(['ARTIFACTS_FILES_DIR', 'ARTIFACTS_DATABASE_PATH', 'ARTIFACTS_THUMBS_DIR'] as const)(
+  it.each(['MUNINN_FILES_DIR', 'MUNINN_DATABASE_PATH', 'MUNINN_THUMBS_DIR'] as const)(
     'rejects a blank %s override',
     (name) => {
       expect(() => resolveStoragePaths({ [name]: '   ' })).toThrow(`${name} must not be blank`);

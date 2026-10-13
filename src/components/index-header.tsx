@@ -54,7 +54,7 @@ export const IndexHeader: FC<IndexHeaderProps> = ({
       href="/"
       class="mr-3 shrink-0 text-lg font-bold tracking-tight whitespace-nowrap text-stone-900 dark:text-ink-100"
     >
-      a<span class="text-amber-600 dark:text-accent">.</span> Artifacts
+      a<span class="text-amber-600 dark:text-accent">.</span> Muninn
     </a>
     <details class="min-w-0">
       <summary class="flex max-w-64 cursor-pointer list-none items-baseline font-semibold text-stone-900 select-none dark:text-ink-100 [&::-webkit-details-marker]:hidden">

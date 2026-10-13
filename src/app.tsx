@@ -34,10 +34,10 @@ import { isOwnOrigin } from './urls.js';
 // so a different WORKDIR/cwd (e.g. Docker) can't silently 404 every asset.
 // Both the dev entry (src/app.tsx) and the packed bundle (dist/server.js)
 // live exactly one directory below the repo root, so `../dist/public` reaches
-// the Vite build output from either location. ARTIFACTS_STATIC_ROOT overrides
+// the Vite build output from either location. MUNINN_STATIC_ROOT overrides
 // it outright for deployments with a different layout.
 const moduleDir = dirname(fileURLToPath(import.meta.url));
-const STATIC_ROOT = process.env.ARTIFACTS_STATIC_ROOT ?? join(moduleDir, '..', 'dist', 'public');
+const STATIC_ROOT = process.env.MUNINN_STATIC_ROOT ?? join(moduleDir, '..', 'dist', 'public');
 
 const MAX_MCP_BODY_BYTES = 16 * 1024 * 1024;
 
@@ -153,7 +153,7 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
     const artifacts = await services.artifacts.listArtifacts();
     const view = buildIndexView(artifacts, { kind: c.req.query('kind') });
     return c.html(
-      <Layout title="Artifacts" wide>
+      <Layout title="Muninn" wide>
         <HomePage view={view} showLogOut={services.auth !== undefined} />
       </Layout>,
     );
@@ -178,7 +178,7 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
       { kind: c.req.query('kind') },
     );
     return c.html(
-      <Layout title={`${project} · Artifacts`} wide>
+      <Layout title={`${project} · Muninn`} wide>
         <ProjectPage
           project={project}
           projects={projects}
