@@ -130,12 +130,6 @@ describe('bare Docker command construction', () => {
     );
   });
 
-  it('rejects a legacy owner password instead of starting without auth', () => {
-    expect(() =>
-      resolveDockerConfig({ ARTIFACTS_OWNER_PASSWORD: 'a long random password' }),
-    ).toThrow(/rename it to MUNINN_OWNER_PASSWORD/u);
-  });
-
   it('rejects a short owner password before replacing the container', () => {
     expect(() => resolveDockerConfig({ MUNINN_OWNER_PASSWORD: 'hunter2' })).toThrow(
       /MUNINN_OWNER_PASSWORD must be at least 16 characters/u,
@@ -251,6 +245,38 @@ describe('Docker operator actions', () => {
       ['compose', 'version'],
       ['compose', '--file', 'docker-compose.yaml', 'up', '--detach', '--build'],
     ]);
+  });
+
+  it.each([true, false])(
+    'refuses a legacy variable before starting (Compose: %s)',
+    async (composeFileExists) => {
+      const calls: string[][] = [];
+
+      await expect(
+        executeDockerAction('start', {
+          composeFileExists,
+          env: { ARTIFACTS_OWNER_PASSWORD: 'a long random password' },
+          run: successfulRunner(calls),
+        }),
+      ).rejects.toThrow(/rename it to MUNINN_OWNER_PASSWORD/u);
+      expect(calls).toEqual([
+        ['--version'],
+        ['info'],
+        ...(composeFileExists ? [['compose', 'version']] : []),
+      ]);
+    },
+  );
+
+  it('still stops through Compose while a legacy variable is set', async () => {
+    const calls: string[][] = [];
+
+    await executeDockerAction('stop', {
+      composeFileExists: true,
+      env: { ARTIFACTS_OWNER_PASSWORD: 'a long random password' },
+      run: successfulRunner(calls),
+    });
+
+    expect(calls).toContainEqual(['compose', '--file', 'docker-compose.yaml', 'down']);
   });
 
   it('reports a missing Docker CLI with an actionable error', async () => {

@@ -27,10 +27,10 @@ without a warning.
 - **Every variable moves to `MUNINN_*`, with no aliases.** `ARTIFACTS_OWNER_PASSWORD` becomes
   `MUNINN_OWNER_PASSWORD`, and the other variables change the same way. The Cloudflare bindings
   become `MUNINN_DB` and `MUNINN_BUCKET`.
-- **An old variable stops startup.** If any variable that starts with `ARTIFACTS_` is set, the
-  server and `pnpm docker:start` stop before they start. The error names each old variable and its
-  replacement. It does not include their values. An environment with no such variables behaves as
-  before.
+- **An old variable stops startup.** If any variable that starts with `ARTIFACTS_`, in any letter
+  case, is set, the server and `pnpm docker:start` stop before they start. The error names each old
+  variable and its replacement. It does not include their values. An environment with no such
+  variables behaves as before.
 - **An artifact keeps its name.** The things the product stores are still artifacts. The MCP tools
   (`add_artifact` and the others), `/a/:id` links, database tables, the `artifacts.db` file, the
   default Docker volumes (`artifacts-files`, `artifacts-database`, `artifacts-thumbs`), and the

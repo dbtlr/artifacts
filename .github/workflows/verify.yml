@@ -70,4 +70,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - run: docker build --tag artifacts:ci .
+      - run: docker build --tag muninn:ci .

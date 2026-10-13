@@ -99,7 +99,6 @@ function resolveMount(name: string, raw: string | undefined, fallback: string): 
 }
 
 export function resolveDockerConfig(env: NodeJS.ProcessEnv): DockerConfig {
-  assertNoLegacyEnv(env);
   const port = resolveDockerPort(env.MUNINN_PORT);
   const databaseMount = resolveMount(
     'MUNINN_DATABASE_MOUNT',
@@ -218,7 +217,7 @@ async function validateBindMountWritability(config: DockerConfig, run: DockerRun
           mountArgument(source, '/probe'),
           IMAGE_NAME,
           '-c',
-          'probe=/probe/.artifacts-write-probe-$$; : > "$probe" && rm "$probe"',
+          'probe=/probe/.muninn-write-probe-$$; : > "$probe" && rm "$probe"',
         ],
         { allowFailure: true },
       );
@@ -472,6 +471,11 @@ export async function executeDockerAction(
   await preflight(run, composeFileExists);
   if (action === 'check') {
     return;
+  }
+  // Like the server, start refuses pre-rename variables on both paths, so a
+  // stale .env cannot start a container with owner auth off (ADR-0007).
+  if (action === 'start') {
+    assertNoLegacyEnv(env);
   }
   if (composeFileExists) {
     const actionArgs: Record<Exclude<DockerAction, 'check'>, string[]> = {

@@ -47,6 +47,11 @@ The helper builds locally, binds only to `127.0.0.1`, and uses the deterministic
 `muninn`. If an ignored `docker-compose.yaml` exists, the same commands delegate to Docker
 Compose so operators can maintain a private topology without committing it.
 
+Before the first start after the rename from Artifacts, run `docker rm -f artifacts` to remove the
+old container. Its data stays in the same volumes. Then rename each `ARTIFACTS_*` variable to
+`MUNINN_*` and register the MCP server as `muninn`
+([ADR-0007](docs/decisions/0007-rename-to-muninn.md)).
+
 ## Connect an agent
 
 Replace `http://localhost:4242` in these examples with the URL that your trusted network or proxy

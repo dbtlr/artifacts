@@ -1,7 +1,7 @@
 ---
 type: adr
 title: ADR-0001 - Opt-in owner auth revises the no-auth boundary
-description: Setting MUNINN_OWNER_PASSWORD turns on a single-owner password login with database sessions. Without it, Artifacts has no authentication and stays a trusted-network tool.
+description: Setting MUNINN_OWNER_PASSWORD turns on a single-owner password login with database sessions. Without it, Muninn has no authentication and stays a trusted-network tool.
 status: accepted
 created: 2026-09-29
 modified: 2026-10-13

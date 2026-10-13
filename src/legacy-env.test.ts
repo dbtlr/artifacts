@@ -21,6 +21,12 @@ describe('assertNoLegacyEnv', () => {
     }).toThrow(/ARTIFACTS_PORT .* MUNINN_PORT/u);
   });
 
+  it('refuses a legacy variable in any case, as Windows reads names', () => {
+    expect(() => {
+      assertNoLegacyEnv({ artifacts_owner_password: 'a long random password' });
+    }).toThrow(/artifacts_owner_password .* MUNINN_OWNER_PASSWORD/u);
+  });
+
   it('names every legacy variable at once', () => {
     expect(() => {
       assertNoLegacyEnv({ ARTIFACTS_PORT: '4242', ARTIFACTS_PUBLIC_BASE_URL: 'https://x.example' });
