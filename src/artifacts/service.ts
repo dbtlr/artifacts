@@ -159,11 +159,14 @@ export function createArtifactService(
     }
   }
 
-  async function saveTemplate(id: string, template: EmbedTemplate): Promise<void> {
+  // Resolves whether the template was stored.
+  async function saveTemplate(id: string, template: EmbedTemplate): Promise<boolean> {
     try {
       await metadata.saveEmbedTemplate(id, template);
+      return true;
     } catch (error) {
       reportFailure('embed template save', error);
+      return false;
     }
   }
 
@@ -181,10 +184,14 @@ export function createArtifactService(
     }
   }
 
-  // Saves the rendering's embed template with it, so a rendering made again
-  // by another renderer version does not keep the old one's positions.
+  // Stores a rendering only once its embed template is stored, so a stored
+  // rendering never keeps a template made from an older one. When the
+  // template cannot be stored, neither is the rendering, and the next view
+  // makes both again.
   async function saveRendering(id: string, rendering: StoredMarkdownRendering): Promise<void> {
-    await saveTemplate(id, extractTemplate(rendering.html));
+    if (!(await saveTemplate(id, extractTemplate(rendering.html)))) {
+      return;
+    }
     try {
       await metadata.saveRendering(id, rendering);
     } catch (error) {

@@ -196,7 +196,9 @@ describe('with no owner password', () => {
 
     const res = await testApp.request(`/a/${notes.id}`);
 
-    expect(sources(await res.text())).toContain(`/a/${image.id}`);
+    const body = await res.text();
+    expect(sources(body)).toContain(`/a/${image.id}`);
+    expect(body).not.toContain('signature=');
   });
 
   it('serves /mcp without a key', async () => {

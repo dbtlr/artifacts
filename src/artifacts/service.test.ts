@@ -543,4 +543,38 @@ describe('ArtifactService Markdown embed templates', () => {
     expect(references).toEqual([{ id: 'chart-id', start: renderedChartStart(10) }]);
     expect(rendered?.html.startsWith('/a/chart-id', references![0]!.start)).toBe(true);
   });
+
+  it('does not store a rendering whose template could not be stored', async () => {
+    const stores = createMemoryStores();
+    const older = createArtifactService(
+      stores.metadata,
+      stores.content,
+      countingRenderer(1).renderer,
+    );
+    const created = await older.createArtifact(markdownWithImage);
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const failing = createArtifactService(
+      {
+        ...stores.metadata,
+        saveEmbedTemplate: async () => {
+          throw new Error('template write failed');
+        },
+      },
+      stores.content,
+      countingRenderer(10).renderer,
+    );
+    await failing.getRenderedMarkdown(created.id);
+    stderr.mockRestore();
+    const newer = createArtifactService(
+      stores.metadata,
+      stores.content,
+      countingRenderer(10).renderer,
+    );
+
+    await newer.getRenderedMarkdown(created.id);
+
+    await expect(newer.getEmbedReferences(created.id)).resolves.toEqual([
+      { id: 'chart-id', start: renderedChartStart(10) },
+    ]);
+  });
 });

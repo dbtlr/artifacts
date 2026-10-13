@@ -35,10 +35,10 @@ derived from an artifact's content can be computed once and kept.
   with a signed path to that artifact and keeps the author's host and fragment. The view does no
   HTML parsing. With auth off, the page is served unchanged.
 - **Markdown artifacts sign their rendering's embeds.** A Markdown artifact's template is extracted
-  from its stored rendering, not its source, and is saved again with every rendering, so its
-  positions match the HTML that a view serves. Markdown image syntax renders as `img`, so embedded
-  images are signed. An image in a heading also appears in the table of contents, which is not
-  signed.
+  from its stored rendering, not its source, so its positions match the HTML that a view serves.
+  Markdown image syntax renders as `img`, so embedded images are signed. A rendering is stored only
+  after its template is, so a rendering made again by a new renderer version does not keep the old
+  rendering's template.
 - **Embed URLs last 10 to 15 minutes.** A lazy image or frame loads when the reader scrolls to it,
   well after the page arrived. The expiry is rounded up to a five-minute boundary at least 10
   minutes after the end of the current clock five minutes, so every view in the same five minutes
