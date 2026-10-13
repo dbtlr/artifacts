@@ -42,7 +42,24 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
+    env:
+      # The runner image's Chromium snapshot. Pinned so the renderer suite
+      # fails, rather than skips or silently switches browsers, if it moves.
+      MUNINN_CHROMIUM_PATH: /usr/bin/chromium
     steps:
+      # A fresh runner's disk reads Chromium's 600MB install slowly (10-30s,
+      # sometimes far more), and a cold launch pays for it inside the
+      # renderer suite's warm-up hook. Read it into the page cache while
+      # dependencies install, and wait for that before the tests start.
+      - name: Read Chromium into the page cache
+        run: |
+          (
+            if [ -e "$MUNINN_CHROMIUM_PATH" ]; then
+              find "$(dirname "$(readlink -f "$MUNINN_CHROMIUM_PATH")")" -type f -print0 |
+                xargs -0 cat > /dev/null
+            fi
+            touch "$RUNNER_TEMP/chromium-read"
+          ) &
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
@@ -50,6 +67,9 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Wait for Chromium's files
+        timeout-minutes: 5
+        run: until [ -e "$RUNNER_TEMP/chromium-read" ]; do sleep 1; done
       - run: pnpm test
 
   application-build:
