@@ -4,7 +4,7 @@ const DEFAULT_BASE_URL = 'http://localhost:3000';
 // public base URL between cases without a module reset. Owner auth also reads
 // it: its origin is an allowed form Origin, and https makes cookies Secure.
 export function resolvePublicBaseUrl(): string {
-  const raw = process.env.ARTIFACTS_PUBLIC_BASE_URL;
+  const raw = process.env.MUNINN_PUBLIC_BASE_URL;
   if (raw === undefined) {
     return DEFAULT_BASE_URL;
   }
@@ -14,7 +14,7 @@ export function resolvePublicBaseUrl(): string {
     url = new URL(base);
   } catch {
     throw new Error(
-      `ARTIFACTS_PUBLIC_BASE_URL must be an absolute HTTP(S) URL, got ${JSON.stringify(raw)}`,
+      `MUNINN_PUBLIC_BASE_URL must be an absolute HTTP(S) URL, got ${JSON.stringify(raw)}`,
     );
   }
   if (
@@ -26,7 +26,7 @@ export function resolvePublicBaseUrl(): string {
     base === ''
   ) {
     throw new Error(
-      `ARTIFACTS_PUBLIC_BASE_URL must be an absolute HTTP(S) URL, got ${JSON.stringify(raw)}`,
+      `MUNINN_PUBLIC_BASE_URL must be an absolute HTTP(S) URL, got ${JSON.stringify(raw)}`,
     );
   }
   return url.toString().replace(/\/+$/u, '');
@@ -40,7 +40,7 @@ export function resolvePublicBaseUrl(): string {
 export function isOwnOrigin(origin: string, requestUrl: string): boolean {
   return (
     origin === new URL(requestUrl).origin ||
-    (process.env.ARTIFACTS_PUBLIC_BASE_URL !== undefined &&
+    (process.env.MUNINN_PUBLIC_BASE_URL !== undefined &&
       origin === new URL(resolvePublicBaseUrl()).origin)
   );
 }

@@ -1,9 +1,9 @@
-# Artifacts
+# Muninn
 
 [![CI](https://github.com/dbtlr/artifacts/actions/workflows/verify.yml/badge.svg)](https://github.com/dbtlr/artifacts/actions/workflows/verify.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Artifacts turns agent-generated Markdown, HTML, and text into persistent links. Its byte-native
+Muninn turns agent-generated Markdown, HTML, and text into persistent links. Its byte-native
 storage core also recognizes PNG, JPEG, GIF, WebP, SVG, and PDF files up to 10 MiB each. Images and
 PDFs use the same stable `/a/:id` links as documents and are served inline with content-type,
 filename, revalidation, and content-sniffing protections. It includes a streamable HTTP MCP server
@@ -11,10 +11,10 @@ for creating and managing documents, plus a small server-rendered web interface 
 finding them.
 
 > [!WARNING]
-> Artifacts is unversioned pre-alpha software. It has no compatibility guarantees: configuration,
+> Muninn is unversioned pre-alpha software. It has no compatibility guarantees: configuration,
 > storage, MCP tools, and URLs may change or be removed without a migration path.
 
-By default, Artifacts has no authentication or authorization. Run it that way only on a trusted
+By default, Muninn has no authentication or authorization. Run it that way only on a trusted
 internal network or loopback interface. To reach it from elsewhere, set an owner password (see
 [Owner login](#owner-login)) and serve it over HTTPS, or put an authentication-capable proxy in front
 of it.
@@ -35,7 +35,7 @@ pnpm docker:check
 pnpm docker:start
 ```
 
-Wait until `docker ps` reports the `artifacts` container as healthy, then open
+Wait until `docker ps` reports the `muninn` container as healthy, then open
 <http://localhost:4242>. The MCP endpoint is <http://localhost:4242/mcp>.
 
 ```sh
@@ -44,7 +44,7 @@ pnpm docker:stop
 ```
 
 The helper builds locally, binds only to `127.0.0.1`, and uses the deterministic container name
-`artifacts`. If an ignored `docker-compose.yaml` exists, the same commands delegate to Docker
+`muninn`. If an ignored `docker-compose.yaml` exists, the same commands delegate to Docker
 Compose so operators can maintain a private topology without committing it.
 
 ## Connect an agent
@@ -55,28 +55,28 @@ uses to reach the deployment.
 Codex:
 
 ```sh
-codex mcp add artifacts --url http://localhost:4242/mcp
+codex mcp add muninn --url http://localhost:4242/mcp
 ```
 
 Claude Code:
 
 ```sh
-claude mcp add --transport http --scope user artifacts http://localhost:4242/mcp
+claude mcp add --transport http --scope user muninn http://localhost:4242/mcp
 ```
 
 When an owner password is set, `/mcp` requires an API key. Log in, open **API keys** in the
 gallery header, and create a key. The page shows the key once. Put it in an environment variable,
-here `ARTIFACTS_API_KEY`, and then add the server:
+here `MUNINN_API_KEY`, and then add the server:
 
 ```sh
-codex mcp add artifacts --url http://localhost:4242/mcp --bearer-token-env-var ARTIFACTS_API_KEY
-claude mcp add --transport http --scope user artifacts http://localhost:4242/mcp \
-  --header 'Authorization: Bearer ${ARTIFACTS_API_KEY}'
+codex mcp add muninn --url http://localhost:4242/mcp --bearer-token-env-var MUNINN_API_KEY
+claude mcp add --transport http --scope user muninn http://localhost:4242/mcp \
+  --header 'Authorization: Bearer ${MUNINN_API_KEY}'
 ```
 
 Both agents read the variable each time they connect, so the key is not stored in their
 configuration. Keep the single quotes in the Claude Code command: they stop the shell from
-expanding the variable, and Claude Code expands `${ARTIFACTS_API_KEY}` itself.
+expanding the variable, and Claude Code expands `${MUNINN_API_KEY}` itself.
 
 `/mcp` refuses a request whose `Origin` header names any origin but the server's own, with or
 without an owner password. Command-line and desktop MCP clients, such as Codex and Claude Code, send
@@ -108,9 +108,9 @@ discovery but do not create ownership or cascading deletion.
 HTML artifacts are served with a
 `Content-Security-Policy: sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-modals`
 header ([ADR-0006](docs/decisions/0006-html-artifact-sandbox.md)). Their scripts run, but in an
-opaque origin that is separate from the Artifacts server, and their requests carry `Origin: null`.
+opaque origin that is separate from the Muninn server, and their requests carry `Origin: null`.
 As a result, an HTML artifact cannot use `localStorage`, `sessionStorage`, IndexedDB, or cookies,
-cannot read responses from other Artifacts routes, and cannot submit forms. The `/mcp` endpoint
+cannot read responses from other Muninn routes, and cannot submit forms. The `/mcp` endpoint
 refuses requests with `Origin: null` or any other origin but its own, so artifact scripts and other
 web pages cannot create or remove artifacts. Links with `target="_blank"` and `window.open()` open a
 new window outside the artifact's sandbox, so another site loads as an ordinary page (another
@@ -155,13 +155,17 @@ override Docker defaults.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ARTIFACTS_PORT` | `4242` | Loopback host and container port used by the Docker helper. |
-| `ARTIFACTS_PUBLIC_BASE_URL` | `http://localhost:4242` | Base URL returned for artifacts; must be an absolute HTTP(S) URL without credentials, query, or fragment. |
-| `ARTIFACTS_FILES_MOUNT` | `artifacts-files` | Docker volume name or existing absolute host directory for document bodies. |
-| `ARTIFACTS_DATABASE_MOUNT` | `artifacts-database` | Separate Docker volume name or existing absolute host directory for SQLite. |
-| `ARTIFACTS_THUMBS_MOUNT` | `artifacts-thumbs` | Separate Docker volume name or existing absolute host directory for rendered gallery previews. |
-| `ARTIFACTS_OWNER_PASSWORD` | unset | Turns on owner login; see [Owner login](#owner-login). Passed to the container by name, so the value does not appear on the Docker command line. |
-| `ARTIFACTS_CLIENT_ADDRESS_HEADER` | unset | With owner login, the header that your proxy sets to the client's address, such as `CF-Connecting-IP`; see [Owner login](#owner-login). |
+| `MUNINN_PORT` | `4242` | Loopback host and container port used by the Docker helper. |
+| `MUNINN_PUBLIC_BASE_URL` | `http://localhost:4242` | Base URL returned for artifacts; must be an absolute HTTP(S) URL without credentials, query, or fragment. |
+| `MUNINN_FILES_MOUNT` | `artifacts-files` | Docker volume name or existing absolute host directory for document bodies. |
+| `MUNINN_DATABASE_MOUNT` | `artifacts-database` | Separate Docker volume name or existing absolute host directory for SQLite. |
+| `MUNINN_THUMBS_MOUNT` | `artifacts-thumbs` | Separate Docker volume name or existing absolute host directory for rendered gallery previews. |
+| `MUNINN_OWNER_PASSWORD` | unset | Turns on owner login; see [Owner login](#owner-login). Passed to the container by name, so the value does not appear on the Docker command line. |
+| `MUNINN_CLIENT_ADDRESS_HEADER` | unset | With owner login, the header that your proxy sets to the client's address, such as `CF-Connecting-IP`; see [Owner login](#owner-login). |
+
+The server and the Docker helper refuse to start while any variable from before the rename to
+Muninn (`ARTIFACTS_*`) is set, and name the `MUNINN_*` variable that replaces it
+([ADR-0007](docs/decisions/0007-rename-to-muninn.md)).
 
 Named volumes survive container replacement and `pnpm docker:stop`. The three mounts must be
 different. Absolute bind-mount directories must exist and be writable from the container by the
@@ -195,21 +199,21 @@ Direct development uses `.env.development` and intentionally separate paths:
 
 | Variable | Default |
 | --- | --- |
-| `ARTIFACTS_PORT` | `3000` |
-| `ARTIFACTS_PUBLIC_BASE_URL` | `http://localhost:3000` |
-| `ARTIFACTS_FILES_DIR` | `data/development/files` |
-| `ARTIFACTS_DATABASE_PATH` | `data/development/database/artifacts.db` |
-| `ARTIFACTS_THUMBS_DIR` | `data/development/thumbs` |
-| `ARTIFACTS_CHROMIUM_PATH` | probed: Alpine `chromium`, Linux `google-chrome`, macOS Chrome |
-| `ARTIFACTS_OWNER_PASSWORD` | unset: no login |
-| `ARTIFACTS_CLIENT_ADDRESS_HEADER` | unset: the connection's address |
+| `MUNINN_PORT` | `3000` |
+| `MUNINN_PUBLIC_BASE_URL` | `http://localhost:3000` |
+| `MUNINN_FILES_DIR` | `data/development/files` |
+| `MUNINN_DATABASE_PATH` | `data/development/database/artifacts.db` |
+| `MUNINN_THUMBS_DIR` | `data/development/thumbs` |
+| `MUNINN_CHROMIUM_PATH` | probed: Alpine `chromium`, Linux `google-chrome`, macOS Chrome |
+| `MUNINN_OWNER_PASSWORD` | unset: no login |
+| `MUNINN_CLIENT_ADDRESS_HEADER` | unset: the connection's address |
 
 See `.env.development.example` for copyable overrides. Docker mount variables and direct-runtime
 path variables are deliberately different; one is not an alias for the other.
 
 ### Owner login
 
-Set `ARTIFACTS_OWNER_PASSWORD` to require a login. When it is unset, there is no login and every
+Set `MUNINN_OWNER_PASSWORD` to require a login. When it is unset, there is no login and every
 route is open, as described above. A blank value, or one shorter than 16 characters, stops the
 server at startup. Use a long, random password.
 
@@ -222,7 +226,7 @@ With a password set:
   addresses together. After that the form answers `429` with a `Retry-After` header. A successful
   login clears the count for its own address only.
 - The client address is the connection's address. Behind a reverse proxy, every connection comes
-  from the proxy, so all clients share one count. Set `ARTIFACTS_CLIENT_ADDRESS_HEADER` to the
+  from the proxy, so all clients share one count. Set `MUNINN_CLIENT_ADDRESS_HEADER` to the
   header that your proxy sets to the client's address: `CF-Connecting-IP` behind Cloudflare, or
   `X-Real-IP` or `X-Forwarded-For` behind a proxy that you configure to set it. For a list header,
   the last entry counts. The server reads no other header, and a request without the named header
@@ -233,13 +237,13 @@ With a password set:
 - HTML artifacts still show embedded artifacts. When an HTML artifact is added, the server records
   each `/a/:id` URL in the `src`, `srcset`, `poster`, or `href` of an `img`, `source`, `iframe`,
   `video`, `audio`, or `link` element. The URL must be root-relative or start with
-  `ARTIFACTS_PUBLIC_BASE_URL`, and it may have a fragment but no query. Each view replaces those
+  `MUNINN_PUBLIC_BASE_URL`, and it may have a fragment but no query. Each view replaces those
   URLs with signed URLs that work for 10 to 15 minutes. Views in the same clock five minutes get the
   same URLs, so the browser can reuse cached embeds. URLs that scripts build, and CSS `url()`, are
   not signed and do not load.
 - Gallery previews still render. The renderer reads each artifact through a signed URL that works
   for 60 seconds and for that one artifact only. An expired or altered signature gets `403`.
-- Set `ARTIFACTS_PUBLIC_BASE_URL` to the URL the browser uses. Login and logout forms are accepted
+- Set `MUNINN_PUBLIC_BASE_URL` to the URL the browser uses. Login and logout forms are accepted
   only from that origin or the origin the request arrived on, and an `https:` base URL marks the
   session cookie `Secure`.
 
@@ -264,7 +268,7 @@ an artifact's scripts never run on the server host, and a Mermaid fence shows as
 thumbnail. Declarative loads (images, frames, stylesheets) may only GET from the server's own
 origin; everything else, including `/mcp` and anything on loopback or the container network, is
 blocked at a proxy nobody listens on, and a render that is still busy after 15 seconds is
-abandoned. A load of a URL under `ARTIFACTS_PUBLIC_BASE_URL`, such as an artifact embedded by the
+abandoned. A load of a URL under `MUNINN_PUBLIC_BASE_URL`, such as an artifact embedded by the
 URL that `add_artifact` returned, is redirected to the same path on the server's own origin, so the
 embed shows in the preview without the renderer reaching the public address.
 
@@ -303,13 +307,13 @@ files first.
   `docker-compose.yaml` to use the bare-Docker path.
 - A mount error before startup: use different valid volume names, or create the absolute files and
   database directories first. Commas are not supported in mount sources.
-- Returned links point at the wrong host: set `ARTIFACTS_PUBLIC_BASE_URL` to the externally reachable
+- Returned links point at the wrong host: set `MUNINN_PUBLIC_BASE_URL` to the externally reachable
   base URL and restart.
-- Port 4242 is occupied: set `ARTIFACTS_PORT` and the matching `ARTIFACTS_PUBLIC_BASE_URL` in `.env`.
+- Port 4242 is occupied: set `MUNINN_PORT` and the matching `MUNINN_PUBLIC_BASE_URL` in `.env`.
 
 ## Architecture
 
-Artifacts is a Node.js 24 TypeScript application built on Hono. The same process serves the web UI,
+Muninn is a Node.js 24 TypeScript application built on Hono. The same process serves the web UI,
 artifact routes, static assets, and the streamable HTTP MCP endpoint at `/mcp`. Metadata lives in
 SQLite while byte-native content lives in a separate files directory. The MCP adapter uses bounded
 base64 for binary transport; base64 is not part of the storage or service model. Markdown is rendered once, when it
@@ -327,10 +331,10 @@ temporary directory.
 The metadata and content adapters are deliberately narrow seams for a future hosting requirement,
 not a configurable backend system. PostgreSQL, object storage, multipart browser uploads, presigned
 uploads, tenancy, permissions, and public hosting remain out of scope. Owner login protects one
-owner's instance; it does not share artifacts with anyone else. Artifacts is a preview tool, not a
+owner's instance; it does not share artifacts with anyone else. Muninn is a preview tool, not a
 general-purpose file-sharing service.
 
 ## Security and license
 
-Read [SECURITY.md](SECURITY.md) before deploying. Artifacts is available under the [MIT
+Read [SECURITY.md](SECURITY.md) before deploying. Muninn is available under the [MIT
 License](LICENSE).

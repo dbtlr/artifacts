@@ -4,7 +4,7 @@ title: ADR-0003 - HTML artifacts load embedded artifacts through URLs signed at 
 description: An HTML artifact's /a/:id references are found once when it is stored, and with owner auth on each view replaces them with fresh signed URLs.
 status: accepted
 created: 2026-09-29
-modified: 2026-09-29
+modified: 2026-10-13
 ---
 # ADR-0003 - HTML artifacts load embedded artifacts through URLs signed at view time
 
@@ -23,7 +23,7 @@ derived from an artifact's content can be computed once and kept.
   starts. The result, the embed template, is a row in `artifact_embed_templates`. Its foreign key
   drops it with the artifact.
 - **Only loading attributes count.** A reference is `/a/<id>` from the site root, or under
-  `ARTIFACTS_PUBLIC_BASE_URL`, in the `src`, `srcset`, `poster`, or `href` of `img`, `source`,
+  `MUNINN_PUBLIC_BASE_URL`, in the `src`, `srcset`, `poster`, or `href` of `img`, `source`,
   `iframe`, `video`, `audio`, and `link`. It may end with a fragment, but not a query or a further
   path. Text inside `script`, `style`, comments, and other raw-text elements is skipped. Markup
   inside `noscript` counts, because the thumbnail renderer runs without scripts and then loads it.
@@ -78,3 +78,5 @@ derived from an artifact's content can be computed once and kept.
 
 - 2026-09-29: Embed URLs round their expiry up to a five-minute boundary, so views in the same
   five minutes share URLs and the browser cache. They last 10 to 15 minutes instead of exactly 10.
+- 2026-10-13: [ADR-0007](0007-rename-to-muninn.md) renames the product to Muninn and its variables
+  from `ARTIFACTS_*` to `MUNINN_*`. This record now uses the new variable names.

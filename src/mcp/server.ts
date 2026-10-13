@@ -135,7 +135,7 @@ function artifactWithContentResult(
 }
 
 export function createMcpServer(service: ArtifactService): McpServer {
-  const server = new McpServer({ name: 'artifacts', version: '0.1.0' });
+  const server = new McpServer({ name: 'muninn', version: '0.1.0' });
 
   server.registerTool(
     'add_artifact',

@@ -190,10 +190,10 @@ describe('with no owner password', () => {
 describe('with an owner password', () => {
   let auth: OwnerAuth;
   let testApp: ReturnType<typeof createApp>;
-  const originalBaseUrl = process.env.ARTIFACTS_PUBLIC_BASE_URL;
+  const originalBaseUrl = process.env.MUNINN_PUBLIC_BASE_URL;
 
   beforeEach(async () => {
-    delete process.env.ARTIFACTS_PUBLIC_BASE_URL;
+    delete process.env.MUNINN_PUBLIC_BASE_URL;
     auth = createOwnerAuth({
       password: PASSWORD,
       store: await SqliteOwnerAuthStore.open(join(dataDir, 'artifacts.db')),
@@ -203,9 +203,9 @@ describe('with an owner password', () => {
 
   afterEach(() => {
     if (originalBaseUrl === undefined) {
-      delete process.env.ARTIFACTS_PUBLIC_BASE_URL;
+      delete process.env.MUNINN_PUBLIC_BASE_URL;
     } else {
-      process.env.ARTIFACTS_PUBLIC_BASE_URL = originalBaseUrl;
+      process.env.MUNINN_PUBLIC_BASE_URL = originalBaseUrl;
     }
   });
 
@@ -533,7 +533,7 @@ describe('with an owner password', () => {
   });
 
   it('marks the session cookie Secure when the public base URL is https', async () => {
-    process.env.ARTIFACTS_PUBLIC_BASE_URL = 'https://artifacts.example';
+    process.env.MUNINN_PUBLIC_BASE_URL = 'https://artifacts.example';
 
     const res = await testApp.request(
       '/login',

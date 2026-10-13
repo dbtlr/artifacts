@@ -62,22 +62,22 @@ type OwnerAuthOptions = {
   store: OwnerAuthStore;
 };
 
-// Owner auth is on exactly when ARTIFACTS_OWNER_PASSWORD is set. A blank
+// Owner auth is on exactly when MUNINN_OWNER_PASSWORD is set. A blank
 // value is refused rather than read as "off", so a half-written secret
 // cannot silently leave an instance open. A short one is refused because the
 // login limits bound guesses, not their success.
 export function resolveOwnerPassword(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const password = env.ARTIFACTS_OWNER_PASSWORD;
+  const password = env.MUNINN_OWNER_PASSWORD;
   if (password === undefined) {
     return undefined;
   }
   if (password.trim() === '') {
-    throw new Error('ARTIFACTS_OWNER_PASSWORD must not be blank; unset it to turn auth off');
+    throw new Error('MUNINN_OWNER_PASSWORD must not be blank; unset it to turn auth off');
   }
   // Characters as a reader sees them, so an emoji counts once.
   if ([...new Intl.Segmenter().segment(password)].length < OWNER_PASSWORD_MIN_LENGTH) {
     throw new Error(
-      `ARTIFACTS_OWNER_PASSWORD must be at least ${String(OWNER_PASSWORD_MIN_LENGTH)} characters; use a long, random password`,
+      `MUNINN_OWNER_PASSWORD must be at least ${String(OWNER_PASSWORD_MIN_LENGTH)} characters; use a long, random password`,
     );
   }
   return password;
@@ -87,24 +87,24 @@ export function resolveOwnerPassword(env: NodeJS.ProcessEnv = process.env): stri
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
 
 // The header that a trusted proxy sets to the client's address, such as
-// `CF-Connecting-IP`, from ARTIFACTS_CLIENT_ADDRESS_HEADER. Only the operator
+// `CF-Connecting-IP`, from MUNINN_CLIENT_ADDRESS_HEADER. Only the operator
 // can name it: a header that is not named is never read, because any client
 // can send one.
 export function resolveClientAddressHeader(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
-  const header = env.ARTIFACTS_CLIENT_ADDRESS_HEADER;
+  const header = env.MUNINN_CLIENT_ADDRESS_HEADER;
   if (header === undefined) {
     return undefined;
   }
   if (header.trim() === '') {
     throw new Error(
-      'ARTIFACTS_CLIENT_ADDRESS_HEADER must not be blank; unset it to use the connection address',
+      'MUNINN_CLIENT_ADDRESS_HEADER must not be blank; unset it to use the connection address',
     );
   }
   if (!HEADER_NAME.test(header)) {
     throw new Error(
-      `ARTIFACTS_CLIENT_ADDRESS_HEADER must be an HTTP header name, got ${JSON.stringify(header)}`,
+      `MUNINN_CLIENT_ADDRESS_HEADER must be an HTTP header name, got ${JSON.stringify(header)}`,
     );
   }
   return header;

@@ -12,7 +12,7 @@ type LoginPageProps = {
 export const LoginPage: FC<LoginPageProps> = ({ error, next }) => (
   <main class="mx-auto max-w-sm pt-16">
     <h1 class="text-lg font-bold tracking-tight text-stone-900 dark:text-ink-100">
-      a<span class="text-amber-600 dark:text-accent">.</span> Artifacts
+      a<span class="text-amber-600 dark:text-accent">.</span> Muninn
     </h1>
     <form method="post" action="/login" class="mt-6 flex flex-col gap-3">
       <input type="hidden" name="next" value={next} />

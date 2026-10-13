@@ -44,7 +44,7 @@ describe('bare Docker command construction', () => {
       'run',
       '--detach',
       '--name',
-      'artifacts',
+      'muninn',
       '--init',
       '--restart',
       'unless-stopped',
@@ -53,25 +53,25 @@ describe('bare Docker command construction', () => {
       '--env',
       'NODE_ENV=production',
       '--env',
-      'ARTIFACTS_PORT=4242',
+      'MUNINN_PORT=4242',
       '--env',
-      'ARTIFACTS_PUBLIC_BASE_URL=http://localhost:4242',
+      'MUNINN_PUBLIC_BASE_URL=http://localhost:4242',
       '--mount',
       'type=volume,source=artifacts-files,target=/app/data/files',
       '--mount',
       'type=volume,source=artifacts-database,target=/app/data/database',
       '--mount',
       'type=volume,source=artifacts-thumbs,target=/app/data/thumbs',
-      'artifacts:local',
+      'muninn:local',
     ]);
   });
 
   it('maps explicit ports and absolute host paths without changing container storage paths', () => {
     const config = resolveDockerConfig({
-      ARTIFACTS_DATABASE_MOUNT: '/srv/artifacts/database',
-      ARTIFACTS_FILES_MOUNT: '/srv/artifacts/files',
-      ARTIFACTS_PORT: '5050',
-      ARTIFACTS_PUBLIC_BASE_URL: 'https://artifacts.example',
+      MUNINN_DATABASE_MOUNT: '/srv/artifacts/database',
+      MUNINN_FILES_MOUNT: '/srv/artifacts/files',
+      MUNINN_PORT: '5050',
+      MUNINN_PUBLIC_BASE_URL: 'https://artifacts.example',
     });
 
     expect(buildBareRunArgs(config)).toContain('127.0.0.1:5050:5050');
@@ -84,97 +84,99 @@ describe('bare Docker command construction', () => {
   });
 
   it.each(['', '0', '65536', 'abc'])(
-    'rejects invalid Docker ARTIFACTS_PORT value %j before command construction',
+    'rejects invalid Docker MUNINN_PORT value %j before command construction',
     (value) => {
-      expect(() => resolveDockerConfig({ ARTIFACTS_PORT: value })).toThrow(
-        /ARTIFACTS_PORT must be an integer between 1 and 65535/u,
+      expect(() => resolveDockerConfig({ MUNINN_PORT: value })).toThrow(
+        /MUNINN_PORT must be an integer between 1 and 65535/u,
       );
     },
   );
 
   it('rejects blank or shared persistence mounts before starting', () => {
-    expect(() => resolveDockerConfig({ ARTIFACTS_FILES_MOUNT: ' ' })).toThrow(
-      /ARTIFACTS_FILES_MOUNT/u,
-    );
-    expect(() => resolveDockerConfig({ ARTIFACTS_DATABASE_MOUNT: '' })).toThrow(
-      /ARTIFACTS_DATABASE_MOUNT/u,
+    expect(() => resolveDockerConfig({ MUNINN_FILES_MOUNT: ' ' })).toThrow(/MUNINN_FILES_MOUNT/u);
+    expect(() => resolveDockerConfig({ MUNINN_DATABASE_MOUNT: '' })).toThrow(
+      /MUNINN_DATABASE_MOUNT/u,
     );
     expect(() =>
       resolveDockerConfig({
-        ARTIFACTS_DATABASE_MOUNT: 'shared-data',
-        ARTIFACTS_FILES_MOUNT: 'shared-data',
+        MUNINN_DATABASE_MOUNT: 'shared-data',
+        MUNINN_FILES_MOUNT: 'shared-data',
       }),
     ).toThrow(/must use different sources/u);
-    expect(() => resolveDockerConfig({ ARTIFACTS_THUMBS_MOUNT: ' ' })).toThrow(
-      /ARTIFACTS_THUMBS_MOUNT/u,
-    );
+    expect(() => resolveDockerConfig({ MUNINN_THUMBS_MOUNT: ' ' })).toThrow(/MUNINN_THUMBS_MOUNT/u);
     expect(() =>
       resolveDockerConfig({
-        ARTIFACTS_FILES_MOUNT: 'shared-data',
-        ARTIFACTS_THUMBS_MOUNT: 'shared-data',
+        MUNINN_FILES_MOUNT: 'shared-data',
+        MUNINN_THUMBS_MOUNT: 'shared-data',
       }),
-    ).toThrow(/ARTIFACTS_FILES_MOUNT and ARTIFACTS_THUMBS_MOUNT must use different sources/u);
+    ).toThrow(/MUNINN_FILES_MOUNT and MUNINN_THUMBS_MOUNT must use different sources/u);
   });
 
   it('passes a configured owner password by name only, so its value stays off the command line', () => {
     const args = buildBareRunArgs(
-      resolveDockerConfig({ ARTIFACTS_OWNER_PASSWORD: 'hunter2 is far too famous' }),
+      resolveDockerConfig({ MUNINN_OWNER_PASSWORD: 'hunter2 is far too famous' }),
     );
 
-    expect(args.slice(args.indexOf('ARTIFACTS_OWNER_PASSWORD') - 1).slice(0, 2)).toEqual([
+    expect(args.slice(args.indexOf('MUNINN_OWNER_PASSWORD') - 1).slice(0, 2)).toEqual([
       '--env',
-      'ARTIFACTS_OWNER_PASSWORD',
+      'MUNINN_OWNER_PASSWORD',
     ]);
     expect(args.join(' ')).not.toContain('hunter2');
   });
 
   it('rejects a blank owner password instead of starting without auth', () => {
-    expect(() => resolveDockerConfig({ ARTIFACTS_OWNER_PASSWORD: ' ' })).toThrow(
-      /ARTIFACTS_OWNER_PASSWORD must not be blank/u,
+    expect(() => resolveDockerConfig({ MUNINN_OWNER_PASSWORD: ' ' })).toThrow(
+      /MUNINN_OWNER_PASSWORD must not be blank/u,
     );
   });
 
+  it('rejects a legacy owner password instead of starting without auth', () => {
+    expect(() =>
+      resolveDockerConfig({ ARTIFACTS_OWNER_PASSWORD: 'a long random password' }),
+    ).toThrow(/rename it to MUNINN_OWNER_PASSWORD/u);
+  });
+
   it('rejects a short owner password before replacing the container', () => {
-    expect(() => resolveDockerConfig({ ARTIFACTS_OWNER_PASSWORD: 'hunter2' })).toThrow(
-      /ARTIFACTS_OWNER_PASSWORD must be at least 16 characters/u,
+    expect(() => resolveDockerConfig({ MUNINN_OWNER_PASSWORD: 'hunter2' })).toThrow(
+      /MUNINN_OWNER_PASSWORD must be at least 16 characters/u,
     );
   });
 
   it('passes a configured client address header to the container', () => {
     const args = buildBareRunArgs(
       resolveDockerConfig({
-        ARTIFACTS_CLIENT_ADDRESS_HEADER: 'CF-Connecting-IP',
-        ARTIFACTS_OWNER_PASSWORD: 'a long random owner password',
+        MUNINN_CLIENT_ADDRESS_HEADER: 'CF-Connecting-IP',
+        MUNINN_OWNER_PASSWORD: 'a long random owner password',
       }),
     );
 
-    const setting = args.indexOf('ARTIFACTS_CLIENT_ADDRESS_HEADER=CF-Connecting-IP');
+    const setting = args.indexOf('MUNINN_CLIENT_ADDRESS_HEADER=CF-Connecting-IP');
 
     expect(args.slice(setting - 1, setting + 1)).toEqual([
       '--env',
-      'ARTIFACTS_CLIENT_ADDRESS_HEADER=CF-Connecting-IP',
+      'MUNINN_CLIENT_ADDRESS_HEADER=CF-Connecting-IP',
     ]);
   });
 
   it('rejects a client address header that is not a header name', () => {
     expect(() =>
       resolveDockerConfig({
-        ARTIFACTS_CLIENT_ADDRESS_HEADER: 'CF Connecting IP',
-        ARTIFACTS_OWNER_PASSWORD: 'a long random owner password',
+        MUNINN_CLIENT_ADDRESS_HEADER: 'CF Connecting IP',
+        MUNINN_OWNER_PASSWORD: 'a long random owner password',
       }),
-    ).toThrow(/ARTIFACTS_CLIENT_ADDRESS_HEADER must be an HTTP header name/u);
+    ).toThrow(/MUNINN_CLIENT_ADDRESS_HEADER must be an HTTP header name/u);
   });
 
   it('ignores the client address header without an owner password, as the server does', () => {
     const args = buildBareRunArgs(
-      resolveDockerConfig({ ARTIFACTS_CLIENT_ADDRESS_HEADER: 'CF Connecting IP' }),
+      resolveDockerConfig({ MUNINN_CLIENT_ADDRESS_HEADER: 'CF Connecting IP' }),
     );
 
-    expect(args.join(' ')).not.toContain('ARTIFACTS_CLIENT_ADDRESS_HEADER');
+    expect(args.join(' ')).not.toContain('MUNINN_CLIENT_ADDRESS_HEADER');
   });
 
   it('mounts an absolute thumbnails directory as a bind mount at the container thumbs path', () => {
-    const config = resolveDockerConfig({ ARTIFACTS_THUMBS_MOUNT: '/srv/artifacts/thumbs' });
+    const config = resolveDockerConfig({ MUNINN_THUMBS_MOUNT: '/srv/artifacts/thumbs' });
 
     expect(buildBareRunArgs(config)).toContain(
       'type=bind,source=/srv/artifacts/thumbs,target=/app/data/thumbs',
@@ -184,15 +186,15 @@ describe('bare Docker command construction', () => {
   it.each(['relative/path', 'volume:/unexpected-target', 'x'])(
     'rejects invalid mount source %j before starting',
     (value) => {
-      expect(() => resolveDockerConfig({ ARTIFACTS_FILES_MOUNT: value })).toThrow(
-        /ARTIFACTS_FILES_MOUNT must be a Docker volume name or an absolute host path/u,
+      expect(() => resolveDockerConfig({ MUNINN_FILES_MOUNT: value })).toThrow(
+        /MUNINN_FILES_MOUNT must be a Docker volume name or an absolute host path/u,
       );
     },
   );
 
   it('rejects mount sources that cannot be represented safely by Docker --mount', () => {
-    expect(() => resolveDockerConfig({ ARTIFACTS_FILES_MOUNT: '/tmp/files,old' })).toThrow(
-      /ARTIFACTS_FILES_MOUNT must not contain a comma/u,
+    expect(() => resolveDockerConfig({ MUNINN_FILES_MOUNT: '/tmp/files,old' })).toThrow(
+      /MUNINN_FILES_MOUNT must not contain a comma/u,
     );
   });
 
@@ -203,18 +205,16 @@ describe('bare Docker command construction', () => {
 
     try {
       await expect(
-        validateBindMounts(
-          resolveDockerConfig({ ARTIFACTS_FILES_MOUNT: join(directory, 'missing') }),
-        ),
-      ).rejects.toThrow(/ARTIFACTS_FILES_MOUNT path does not exist/u);
+        validateBindMounts(resolveDockerConfig({ MUNINN_FILES_MOUNT: join(directory, 'missing') })),
+      ).rejects.toThrow(/MUNINN_FILES_MOUNT path does not exist/u);
       await expect(
-        validateBindMounts(resolveDockerConfig({ ARTIFACTS_DATABASE_MOUNT: file })),
-      ).rejects.toThrow(/ARTIFACTS_DATABASE_MOUNT must be a directory/u);
+        validateBindMounts(resolveDockerConfig({ MUNINN_DATABASE_MOUNT: file })),
+      ).rejects.toThrow(/MUNINN_DATABASE_MOUNT must be a directory/u);
       await expect(
         validateBindMounts(
-          resolveDockerConfig({ ARTIFACTS_THUMBS_MOUNT: join(directory, 'missing-thumbs') }),
+          resolveDockerConfig({ MUNINN_THUMBS_MOUNT: join(directory, 'missing-thumbs') }),
         ),
-      ).rejects.toThrow(/ARTIFACTS_THUMBS_MOUNT path does not exist/u);
+      ).rejects.toThrow(/MUNINN_THUMBS_MOUNT path does not exist/u);
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
@@ -223,15 +223,15 @@ describe('bare Docker command construction', () => {
 
 describe('Docker operator output', () => {
   it('does not resolve or report bare-only configuration after a Compose start', () => {
-    expect(formatStartMessage(true, { ARTIFACTS_FILES_MOUNT: ' ' })).toBe(
-      'Artifacts is running through docker-compose.yaml.\n',
+    expect(formatStartMessage(true, { MUNINN_FILES_MOUNT: ' ' })).toBe(
+      'Muninn is running through docker-compose.yaml.\n',
     );
   });
 
   it('reports the configured URL after a bare Docker start', () => {
-    expect(
-      formatStartMessage(false, { ARTIFACTS_PUBLIC_BASE_URL: 'https://artifacts.example' }),
-    ).toBe('Artifacts is running at https://artifacts.example\n');
+    expect(formatStartMessage(false, { MUNINN_PUBLIC_BASE_URL: 'https://artifacts.example' })).toBe(
+      'Muninn is running at https://artifacts.example\n',
+    );
   });
 });
 
@@ -301,7 +301,7 @@ describe('Docker operator actions', () => {
       }
       if (args[0] === 'container' && args[1] === 'inspect') {
         const name = args.at(-1);
-        if (!['artifacts', 'fresh-container-id'].includes(name ?? '') || !containerExists) {
+        if (!['muninn', 'fresh-container-id'].includes(name ?? '') || !containerExists) {
           return { exitCode: 1, output: '' };
         }
         if (
@@ -338,7 +338,7 @@ describe('Docker operator actions', () => {
     let rivalCreated = false;
     const run: DockerRun = async (args) => {
       calls.push(args);
-      if (args[0] === 'run' && args.includes('--name') && args.includes('artifacts')) {
+      if (args[0] === 'run' && args.includes('--name') && args.includes('muninn')) {
         rivalCreated = true;
         return { exitCode: 1, output: 'Conflict. The container name is already in use.' };
       }
@@ -355,7 +355,7 @@ describe('Docker operator actions', () => {
       executeDockerAction('start', { composeFileExists: false, env: {}, run }),
     ).rejects.toThrow(/container name is already in use/u);
 
-    expect(calls).not.toContainEqual(['container', 'rm', 'artifacts']);
+    expect(calls).not.toContainEqual(['container', 'rm', 'muninn']);
   });
 
   it('rejects bind mounts the container user cannot write before replacing a container', async () => {
@@ -377,8 +377,8 @@ describe('Docker operator actions', () => {
         executeDockerAction('start', {
           composeFileExists: false,
           env: {
-            ARTIFACTS_DATABASE_MOUNT: database,
-            ARTIFACTS_FILES_MOUNT: files,
+            MUNINN_DATABASE_MOUNT: database,
+            MUNINN_FILES_MOUNT: files,
           },
           run,
         }),
@@ -398,12 +398,12 @@ describe('Docker operator actions', () => {
         '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}',
       );
       let output = '';
-      if (args[0] === 'container' && args[1] === 'inspect' && inspectedName === 'artifacts') {
+      if (args[0] === 'container' && args[1] === 'inspect' && inspectedName === 'muninn') {
         output = isHealthInspection ? 'running healthy\n' : 'true\n';
       }
       return {
         exitCode:
-          args[0] === 'container' && args[1] === 'inspect' && inspectedName !== 'artifacts' ? 1 : 0,
+          args[0] === 'container' && args[1] === 'inspect' && inspectedName !== 'muninn' ? 1 : 0,
         output,
       };
     };
@@ -417,17 +417,17 @@ describe('Docker operator actions', () => {
     expect(calls).toEqual([
       ['--version'],
       ['info'],
-      ['build', '--tag', 'artifacts:local', '.'],
-      ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts'],
-      ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts-previous'],
-      ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts-replacement'],
-      ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts'],
-      ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts-previous'],
-      ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts-replacement'],
+      ['build', '--tag', 'muninn:local', '.'],
+      ['container', 'inspect', '--format', '{{.State.Running}}', 'muninn'],
+      ['container', 'inspect', '--format', '{{.State.Running}}', 'muninn-previous'],
+      ['container', 'inspect', '--format', '{{.State.Running}}', 'muninn-replacement'],
+      ['container', 'inspect', '--format', '{{.State.Running}}', 'muninn'],
+      ['container', 'inspect', '--format', '{{.State.Running}}', 'muninn-previous'],
+      ['container', 'inspect', '--format', '{{.State.Running}}', 'muninn-replacement'],
       [
         'create',
         '--name',
-        'artifacts-replacement',
+        'muninn-replacement',
         '--init',
         '--restart',
         'unless-stopped',
@@ -436,29 +436,29 @@ describe('Docker operator actions', () => {
         '--env',
         'NODE_ENV=production',
         '--env',
-        'ARTIFACTS_PORT=4242',
+        'MUNINN_PORT=4242',
         '--env',
-        'ARTIFACTS_PUBLIC_BASE_URL=http://localhost:4242',
+        'MUNINN_PUBLIC_BASE_URL=http://localhost:4242',
         '--mount',
         'type=volume,source=artifacts-files,target=/app/data/files',
         '--mount',
         'type=volume,source=artifacts-database,target=/app/data/database',
         '--mount',
         'type=volume,source=artifacts-thumbs,target=/app/data/thumbs',
-        'artifacts:local',
+        'muninn:local',
       ],
-      ['stop', 'artifacts'],
-      ['rename', 'artifacts', 'artifacts-previous'],
-      ['rename', 'artifacts-replacement', 'artifacts'],
-      ['start', 'artifacts'],
+      ['stop', 'muninn'],
+      ['rename', 'muninn', 'muninn-previous'],
+      ['rename', 'muninn-replacement', 'muninn'],
+      ['start', 'muninn'],
       [
         'container',
         'inspect',
         '--format',
         '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}',
-        'artifacts',
+        'muninn',
       ],
-      ['container', 'rm', 'artifacts-previous'],
+      ['container', 'rm', 'muninn-previous'],
     ]);
   });
 
@@ -467,7 +467,7 @@ describe('Docker operator actions', () => {
     let replacementStartAttempts = 0;
     const run: DockerRun = async (args) => {
       calls.push(args);
-      if (args[0] === 'start' && args[1] === 'artifacts') {
+      if (args[0] === 'start' && args[1] === 'muninn') {
         replacementStartAttempts += 1;
         if (replacementStartAttempts === 1) {
           return { exitCode: 1, output: 'replacement failed' };
@@ -475,7 +475,7 @@ describe('Docker operator actions', () => {
       }
       if (args[0] === 'container' && args[1] === 'inspect') {
         const name = args.at(-1);
-        if (name === 'artifacts-previous' || name === 'artifacts-replacement') {
+        if (name === 'muninn-previous' || name === 'muninn-replacement') {
           return { exitCode: 1, output: '' };
         }
         if (
@@ -496,14 +496,14 @@ describe('Docker operator actions', () => {
       }),
     ).rejects.toThrow(/replacement failed/u);
 
-    expect(calls).toContainEqual(['rename', 'artifacts', 'artifacts-previous']);
-    expect(calls).toContainEqual(['rename', 'artifacts-previous', 'artifacts']);
+    expect(calls).toContainEqual(['rename', 'muninn', 'muninn-previous']);
+    expect(calls).toContainEqual(['rename', 'muninn-previous', 'muninn']);
     expect(calls.at(-1)).toEqual([
       'container',
       'inspect',
       '--format',
       '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}',
-      'artifacts',
+      'muninn',
     ]);
     expect(replacementStartAttempts).toBe(2);
   });
@@ -513,7 +513,7 @@ describe('Docker operator actions', () => {
     const run: DockerRun = async (args) => {
       if (args[0] === 'container' && args[1] === 'inspect') {
         const name = args.at(-1);
-        if (name === 'artifacts-previous' || name === 'artifacts-replacement') {
+        if (name === 'muninn-previous' || name === 'muninn-replacement') {
           return { exitCode: 1, output: '' };
         }
         if (
@@ -532,7 +532,7 @@ describe('Docker operator actions', () => {
 
     await expect(
       executeDockerAction('start', { composeFileExists: false, env: {}, run }),
-    ).rejects.toThrow(/previous artifacts container was restored/u);
+    ).rejects.toThrow(/previous muninn container was restored/u);
 
     expect(healthInspections).toBe(2);
   });
@@ -540,8 +540,8 @@ describe('Docker operator actions', () => {
   it('recovers an interrupted replacement before attempting another one', async () => {
     const calls: string[][] = [];
     const containers = new Map([
-      ['artifacts-previous', { health: 'healthy', running: false }],
-      ['artifacts-replacement', { health: 'starting', running: false }],
+      ['muninn-previous', { health: 'healthy', running: false }],
+      ['muninn-replacement', { health: 'starting', running: false }],
     ]);
     const run: DockerRun = async (args) => {
       calls.push(args);
@@ -587,16 +587,16 @@ describe('Docker operator actions', () => {
       executeDockerAction('start', { composeFileExists: false, env: {}, run }),
     ).rejects.toThrow(/create failed after recovery/u);
 
-    expect(containers.get('artifacts')).toEqual({ health: 'healthy', running: true });
-    expect(containers.has('artifacts-previous')).toBe(false);
-    expect(containers.has('artifacts-replacement')).toBe(false);
-    expect(calls).toContainEqual(['rename', 'artifacts-previous', 'artifacts']);
+    expect(containers.get('muninn')).toEqual({ health: 'healthy', running: true });
+    expect(containers.has('muninn-previous')).toBe(false);
+    expect(containers.has('muninn-replacement')).toBe(false);
+    expect(calls).toContainEqual(['rename', 'muninn-previous', 'muninn']);
     expect(calls).toContainEqual([
       'container',
       'inspect',
       '--format',
       '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}',
-      'artifacts',
+      'muninn',
     ]);
   });
 
@@ -615,7 +615,7 @@ describe('Docker operator actions', () => {
     expect(calls).toEqual([
       ['--version'],
       ['info'],
-      ['container', 'inspect', '--format', '{{.State.Running}}', 'artifacts'],
+      ['container', 'inspect', '--format', '{{.State.Running}}', 'muninn'],
     ]);
   });
 
@@ -632,17 +632,17 @@ describe('Docker operator actions', () => {
     expect(calls).toEqual([
       ['--version'],
       ['info'],
-      ['build', '--tag', 'artifacts:local', '.'],
+      ['build', '--tag', 'muninn:local', '.'],
       ['--version'],
       ['info'],
-      ['container', 'inspect', 'artifacts'],
-      ['logs', '--follow', 'artifacts'],
+      ['container', 'inspect', 'muninn'],
+      ['logs', '--follow', 'muninn'],
     ]);
   });
 
   it('stops, builds, and follows logs even when the start configuration is invalid', async () => {
     const calls: string[][] = [];
-    const env = { ARTIFACTS_OWNER_PASSWORD: 'hunter2' };
+    const env = { MUNINN_OWNER_PASSWORD: 'hunter2' };
     const run: DockerRun = async (args) => {
       calls.push(args);
       return { exitCode: 0, output: args[0] === 'container' ? 'true' : '' };
@@ -652,8 +652,8 @@ describe('Docker operator actions', () => {
     await executeDockerAction('build', { composeFileExists: false, env, run });
     await executeDockerAction('logs', { composeFileExists: false, env, run });
 
-    expect(calls).toContainEqual(['stop', 'artifacts']);
-    expect(calls).toContainEqual(['build', '--tag', 'artifacts:local', '.']);
-    expect(calls).toContainEqual(['logs', '--follow', 'artifacts']);
+    expect(calls).toContainEqual(['stop', 'muninn']);
+    expect(calls).toContainEqual(['build', '--tag', 'muninn:local', '.']);
+    expect(calls).toContainEqual(['logs', '--follow', 'muninn']);
   });
 });

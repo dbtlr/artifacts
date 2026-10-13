@@ -47,7 +47,7 @@ let store: ArtifactStore;
 let mcpService: ArtifactService;
 let server: ServerType;
 let client: Client;
-const originalPublicBaseUrl = process.env.ARTIFACTS_PUBLIC_BASE_URL;
+const originalPublicBaseUrl = process.env.MUNINN_PUBLIC_BASE_URL;
 
 type ToolCallResult = z.infer<typeof CallToolResultSchema>;
 
@@ -85,7 +85,7 @@ async function callTool<T>(
 }
 
 beforeAll(async () => {
-  delete process.env.ARTIFACTS_PUBLIC_BASE_URL;
+  delete process.env.MUNINN_PUBLIC_BASE_URL;
   dataDir = await mkdtemp(join(tmpdir(), 'artifacts-mcp-'));
   store = await createArtifactStore({
     databasePath: join(dataDir, 'artifacts.db'),
@@ -114,9 +114,9 @@ afterAll(async () => {
   await promisify(server.close.bind(server))();
   await rm(dataDir, { force: true, recursive: true });
   if (originalPublicBaseUrl === undefined) {
-    delete process.env.ARTIFACTS_PUBLIC_BASE_URL;
+    delete process.env.MUNINN_PUBLIC_BASE_URL;
   } else {
-    process.env.ARTIFACTS_PUBLIC_BASE_URL = originalPublicBaseUrl;
+    process.env.MUNINN_PUBLIC_BASE_URL = originalPublicBaseUrl;
   }
 });
 
@@ -401,11 +401,11 @@ describe('error paths', () => {
 
 describe('public base url override', () => {
   afterEach(() => {
-    delete process.env.ARTIFACTS_PUBLIC_BASE_URL;
+    delete process.env.MUNINN_PUBLIC_BASE_URL;
   });
 
-  it('builds returned URLs from ARTIFACTS_PUBLIC_BASE_URL, trimming a trailing slash', async () => {
-    process.env.ARTIFACTS_PUBLIC_BASE_URL = 'https://artifacts.example/';
+  it('builds returned URLs from MUNINN_PUBLIC_BASE_URL, trimming a trailing slash', async () => {
+    process.env.MUNINN_PUBLIC_BASE_URL = 'https://artifacts.example/';
 
     const added = await callTool(
       'add_artifact',

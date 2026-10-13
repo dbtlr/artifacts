@@ -29,32 +29,32 @@ describe('resolveOwnerPassword', () => {
   });
 
   it('refuses a blank password rather than turning auth off', () => {
-    expect(() => resolveOwnerPassword({ ARTIFACTS_OWNER_PASSWORD: '  ' })).toThrow(
-      /ARTIFACTS_OWNER_PASSWORD must not be blank/u,
+    expect(() => resolveOwnerPassword({ MUNINN_OWNER_PASSWORD: '  ' })).toThrow(
+      /MUNINN_OWNER_PASSWORD must not be blank/u,
     );
   });
 
   it('returns the configured password verbatim', () => {
-    expect(resolveOwnerPassword({ ARTIFACTS_OWNER_PASSWORD: ' a long secret phrase ' })).toBe(
+    expect(resolveOwnerPassword({ MUNINN_OWNER_PASSWORD: ' a long secret phrase ' })).toBe(
       ' a long secret phrase ',
     );
   });
 
   it('refuses a password shorter than the minimum', () => {
     expect(() =>
-      resolveOwnerPassword({ ARTIFACTS_OWNER_PASSWORD: 'x'.repeat(OWNER_PASSWORD_MIN_LENGTH - 1) }),
-    ).toThrow(/ARTIFACTS_OWNER_PASSWORD must be at least 16 characters/u);
+      resolveOwnerPassword({ MUNINN_OWNER_PASSWORD: 'x'.repeat(OWNER_PASSWORD_MIN_LENGTH - 1) }),
+    ).toThrow(/MUNINN_OWNER_PASSWORD must be at least 16 characters/u);
   });
 
   it('accepts a password of exactly the minimum length', () => {
     const password = 'x'.repeat(OWNER_PASSWORD_MIN_LENGTH);
 
-    expect(resolveOwnerPassword({ ARTIFACTS_OWNER_PASSWORD: password })).toBe(password);
+    expect(resolveOwnerPassword({ MUNINN_OWNER_PASSWORD: password })).toBe(password);
   });
 
   it('counts characters, not UTF-16 code units', () => {
     // Eight emoji are 16 code units but only 8 characters.
-    expect(() => resolveOwnerPassword({ ARTIFACTS_OWNER_PASSWORD: '🔑'.repeat(8) })).toThrow(
+    expect(() => resolveOwnerPassword({ MUNINN_OWNER_PASSWORD: '🔑'.repeat(8) })).toThrow(
       /at least 16 characters/u,
     );
   });
@@ -66,21 +66,21 @@ describe('resolveClientAddressHeader', () => {
   });
 
   it('returns the configured header name', () => {
-    expect(
-      resolveClientAddressHeader({ ARTIFACTS_CLIENT_ADDRESS_HEADER: 'CF-Connecting-IP' }),
-    ).toBe('CF-Connecting-IP');
+    expect(resolveClientAddressHeader({ MUNINN_CLIENT_ADDRESS_HEADER: 'CF-Connecting-IP' })).toBe(
+      'CF-Connecting-IP',
+    );
   });
 
   it('refuses a blank header name', () => {
-    expect(() => resolveClientAddressHeader({ ARTIFACTS_CLIENT_ADDRESS_HEADER: ' ' })).toThrow(
-      /ARTIFACTS_CLIENT_ADDRESS_HEADER must not be blank/u,
+    expect(() => resolveClientAddressHeader({ MUNINN_CLIENT_ADDRESS_HEADER: ' ' })).toThrow(
+      /MUNINN_CLIENT_ADDRESS_HEADER must not be blank/u,
     );
   });
 
   it('refuses a value that is not a header name', () => {
     expect(() =>
-      resolveClientAddressHeader({ ARTIFACTS_CLIENT_ADDRESS_HEADER: 'CF-Connecting-IP: 1.2.3.4' }),
-    ).toThrow(/ARTIFACTS_CLIENT_ADDRESS_HEADER must be an HTTP header name/u);
+      resolveClientAddressHeader({ MUNINN_CLIENT_ADDRESS_HEADER: 'CF-Connecting-IP: 1.2.3.4' }),
+    ).toThrow(/MUNINN_CLIENT_ADDRESS_HEADER must be an HTTP header name/u);
   });
 });
 

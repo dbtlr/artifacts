@@ -6,14 +6,15 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 import { resolveClientAddressHeader, resolveOwnerPassword } from '../src/auth/owner-auth.js';
+import { assertNoLegacyEnv } from '../src/legacy-env.js';
 
 export type DockerConfig = {
-  // ARTIFACTS_CLIENT_ADDRESS_HEADER, the header a proxy in front of the
+  // MUNINN_CLIENT_ADDRESS_HEADER, the header a proxy in front of the
   // container sets to the client's address.
   clientAddressHeader?: string;
   databaseMount: string;
   filesMount: string;
-  // Whether ARTIFACTS_OWNER_PASSWORD is set. The value itself never enters
+  // Whether MUNINN_OWNER_PASSWORD is set. The value itself never enters
   // the config or the docker command line: `--env NAME` makes the Docker CLI
   // copy it from its own environment.
   ownerPassword: boolean;
@@ -25,10 +26,7 @@ export type DockerConfig = {
   thumbsMount: string;
 };
 
-type MountVariable =
-  | 'ARTIFACTS_DATABASE_MOUNT'
-  | 'ARTIFACTS_FILES_MOUNT'
-  | 'ARTIFACTS_THUMBS_MOUNT';
+type MountVariable = 'MUNINN_DATABASE_MOUNT' | 'MUNINN_FILES_MOUNT' | 'MUNINN_THUMBS_MOUNT';
 
 // Every persistence mount with its variable name and container path, in one
 // place, so argument building and both validations cannot disagree.
@@ -36,9 +34,9 @@ function persistenceMounts(
   config: DockerConfig,
 ): readonly (readonly [MountVariable, string, string])[] {
   return [
-    ['ARTIFACTS_FILES_MOUNT', config.filesMount, '/app/data/files'],
-    ['ARTIFACTS_DATABASE_MOUNT', config.databaseMount, '/app/data/database'],
-    ['ARTIFACTS_THUMBS_MOUNT', config.thumbsMount, '/app/data/thumbs'],
+    ['MUNINN_FILES_MOUNT', config.filesMount, '/app/data/files'],
+    ['MUNINN_DATABASE_MOUNT', config.databaseMount, '/app/data/database'],
+    ['MUNINN_THUMBS_MOUNT', config.thumbsMount, '/app/data/thumbs'],
   ];
 }
 
@@ -60,10 +58,10 @@ type DockerActionOptions = {
   run: DockerRun;
 };
 
-const CONTAINER_NAME = 'artifacts';
-const PREVIOUS_CONTAINER_NAME = 'artifacts-previous';
-const REPLACEMENT_CONTAINER_NAME = 'artifacts-replacement';
-const IMAGE_NAME = 'artifacts:local';
+const CONTAINER_NAME = 'muninn';
+const PREVIOUS_CONTAINER_NAME = 'muninn-previous';
+const REPLACEMENT_CONTAINER_NAME = 'muninn-replacement';
+const IMAGE_NAME = 'muninn:local';
 const DEFAULT_PORT = 4242;
 
 function resolveDockerPort(raw: string | undefined): number {
@@ -72,13 +70,13 @@ function resolveDockerPort(raw: string | undefined): number {
   }
   if (!/^\d+$/u.test(raw.trim())) {
     throw new Error(
-      `ARTIFACTS_PORT must be an integer between 1 and 65535, got ${JSON.stringify(raw)}`,
+      `MUNINN_PORT must be an integer between 1 and 65535, got ${JSON.stringify(raw)}`,
     );
   }
   const port = Number(raw.trim());
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
     throw new Error(
-      `ARTIFACTS_PORT must be an integer between 1 and 65535, got ${JSON.stringify(raw)}`,
+      `MUNINN_PORT must be an integer between 1 and 65535, got ${JSON.stringify(raw)}`,
     );
   }
   return port;
@@ -101,20 +99,17 @@ function resolveMount(name: string, raw: string | undefined, fallback: string): 
 }
 
 export function resolveDockerConfig(env: NodeJS.ProcessEnv): DockerConfig {
-  const port = resolveDockerPort(env.ARTIFACTS_PORT);
+  assertNoLegacyEnv(env);
+  const port = resolveDockerPort(env.MUNINN_PORT);
   const databaseMount = resolveMount(
-    'ARTIFACTS_DATABASE_MOUNT',
-    env.ARTIFACTS_DATABASE_MOUNT,
+    'MUNINN_DATABASE_MOUNT',
+    env.MUNINN_DATABASE_MOUNT,
     'artifacts-database',
   );
-  const filesMount = resolveMount(
-    'ARTIFACTS_FILES_MOUNT',
-    env.ARTIFACTS_FILES_MOUNT,
-    'artifacts-files',
-  );
+  const filesMount = resolveMount('MUNINN_FILES_MOUNT', env.MUNINN_FILES_MOUNT, 'artifacts-files');
   const thumbsMount = resolveMount(
-    'ARTIFACTS_THUMBS_MOUNT',
-    env.ARTIFACTS_THUMBS_MOUNT,
+    'MUNINN_THUMBS_MOUNT',
+    env.MUNINN_THUMBS_MOUNT,
     'artifacts-thumbs',
   );
   // The server refuses a blank or short password and a malformed header name
@@ -128,7 +123,7 @@ export function resolveDockerConfig(env: NodeJS.ProcessEnv): DockerConfig {
     filesMount,
     ownerPassword,
     port,
-    publicBaseUrl: env.ARTIFACTS_PUBLIC_BASE_URL ?? `http://localhost:${String(port)}`,
+    publicBaseUrl: env.MUNINN_PUBLIC_BASE_URL ?? `http://localhost:${String(port)}`,
     thumbsMount,
   };
   const mounts = persistenceMounts(config);
@@ -160,13 +155,13 @@ export function buildBareRunArgs(config: DockerConfig): string[] {
     '--env',
     'NODE_ENV=production',
     '--env',
-    `ARTIFACTS_PORT=${String(config.port)}`,
+    `MUNINN_PORT=${String(config.port)}`,
     '--env',
-    `ARTIFACTS_PUBLIC_BASE_URL=${config.publicBaseUrl}`,
-    ...(config.ownerPassword ? ['--env', 'ARTIFACTS_OWNER_PASSWORD'] : []),
+    `MUNINN_PUBLIC_BASE_URL=${config.publicBaseUrl}`,
+    ...(config.ownerPassword ? ['--env', 'MUNINN_OWNER_PASSWORD'] : []),
     ...(config.clientAddressHeader === undefined
       ? []
-      : ['--env', `ARTIFACTS_CLIENT_ADDRESS_HEADER=${config.clientAddressHeader}`]),
+      : ['--env', `MUNINN_CLIENT_ADDRESS_HEADER=${config.clientAddressHeader}`]),
     ...persistenceMounts(config).flatMap(([, source, target]) => [
       '--mount',
       mountArgument(source, target),
@@ -238,9 +233,9 @@ async function validateBindMountWritability(config: DockerConfig, run: DockerRun
 
 export function formatStartMessage(composeFileExists: boolean, env: NodeJS.ProcessEnv): string {
   if (composeFileExists) {
-    return 'Artifacts is running through docker-compose.yaml.\n';
+    return 'Muninn is running through docker-compose.yaml.\n';
   }
-  return `Artifacts is running at ${resolveDockerConfig(env).publicBaseUrl}\n`;
+  return `Muninn is running at ${resolveDockerConfig(env).publicBaseUrl}\n`;
 }
 
 async function runRequired(

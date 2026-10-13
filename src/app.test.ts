@@ -39,7 +39,7 @@ describe('app', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/html');
     const body = await res.text();
-    expect(body).toContain('Artifacts');
+    expect(body).toContain('Muninn');
     expect(body).toContain('/assets/app.css');
   });
 
@@ -859,7 +859,7 @@ describe('mcp add_artifact -> display round-trip', () => {
   let server: ServerType;
   let client: Client;
   let baseOrigin: string;
-  const originalPublicBaseUrl = process.env.ARTIFACTS_PUBLIC_BASE_URL;
+  const originalPublicBaseUrl = process.env.MUNINN_PUBLIC_BASE_URL;
 
   beforeAll(async () => {
     dataDir = await mkdtemp(join(tmpdir(), 'artifacts-round-trip-'));
@@ -876,7 +876,7 @@ describe('mcp add_artifact -> display round-trip', () => {
       throw new Error('expected serve() to bind a network address');
     }
     baseOrigin = `http://localhost:${String(address.port)}`;
-    process.env.ARTIFACTS_PUBLIC_BASE_URL = baseOrigin;
+    process.env.MUNINN_PUBLIC_BASE_URL = baseOrigin;
 
     client = new Client({ name: 'artifacts-round-trip-client', version: '0.0.0' });
     await client.connect(new StreamableHTTPClientTransport(new URL(`${baseOrigin}/mcp`)));
@@ -887,9 +887,9 @@ describe('mcp add_artifact -> display round-trip', () => {
     await promisify(server.close.bind(server))();
     await rm(dataDir, { force: true, recursive: true });
     if (originalPublicBaseUrl === undefined) {
-      delete process.env.ARTIFACTS_PUBLIC_BASE_URL;
+      delete process.env.MUNINN_PUBLIC_BASE_URL;
     } else {
-      process.env.ARTIFACTS_PUBLIC_BASE_URL = originalPublicBaseUrl;
+      process.env.MUNINN_PUBLIC_BASE_URL = originalPublicBaseUrl;
     }
   });
 
@@ -990,8 +990,8 @@ describe('post /mcp from a web page', () => {
   // instance, so only a configured base URL is trusted.
   it('rejects the default base URL origin when none is configured', async () => {
     const victim = await createVictim();
-    const configured = process.env.ARTIFACTS_PUBLIC_BASE_URL;
-    delete process.env.ARTIFACTS_PUBLIC_BASE_URL;
+    const configured = process.env.MUNINN_PUBLIC_BASE_URL;
+    delete process.env.MUNINN_PUBLIC_BASE_URL;
 
     try {
       const res = await testApp.request(
@@ -1002,7 +1002,7 @@ describe('post /mcp from a web page', () => {
       expect(res.status).toBe(403);
     } finally {
       if (configured !== undefined) {
-        process.env.ARTIFACTS_PUBLIC_BASE_URL = configured;
+        process.env.MUNINN_PUBLIC_BASE_URL = configured;
       }
     }
     await expect(store.getArtifact(victim.id)).resolves.not.toBeNull();

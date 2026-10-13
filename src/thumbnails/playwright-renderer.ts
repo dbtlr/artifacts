@@ -13,7 +13,7 @@ const VIEWPORT = { height: 800, width: 1280 };
 const DEVICE_SCALE_FACTOR = 0.5;
 const JPEG_QUALITY = 80;
 
-// Where a Chromium may already be, when ARTIFACTS_CHROMIUM_PATH is not set:
+// Where a Chromium may already be, when MUNINN_CHROMIUM_PATH is not set:
 // the Alpine `chromium` package (the Docker image), common Linux desktops,
 // and macOS. Any hit is fine; playwright-core drives it over CDP.
 const CHROMIUM_CANDIDATES = [
@@ -34,7 +34,7 @@ async function exists(path: string): Promise<boolean> {
 }
 
 export async function resolveChromiumPath(env: NodeJS.ProcessEnv): Promise<string | undefined> {
-  const override = env.ARTIFACTS_CHROMIUM_PATH?.trim();
+  const override = env.MUNINN_CHROMIUM_PATH?.trim();
   if (override !== undefined && override !== '') {
     return override;
   }
@@ -44,7 +44,7 @@ export async function resolveChromiumPath(env: NodeJS.ProcessEnv): Promise<strin
 
 type RendererOptions = {
   executablePath?: string | undefined;
-  // This instance's public base URL (ARTIFACTS_PUBLIC_BASE_URL). Artifacts
+  // This instance's public base URL (MUNINN_PUBLIC_BASE_URL). Artifacts
   // embed each other by the full URL add_artifact returns; a render loads
   // those from its own origin instead (see confineToOrigin).
   publicBaseUrl?: string | undefined;
