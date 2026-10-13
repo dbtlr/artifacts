@@ -1,6 +1,6 @@
 # Muninn
 
-[![CI](https://github.com/dbtlr/artifacts/actions/workflows/verify.yml/badge.svg)](https://github.com/dbtlr/artifacts/actions/workflows/verify.yml)
+[![CI](https://github.com/dbtlr/muninn/actions/workflows/verify.yml/badge.svg)](https://github.com/dbtlr/muninn/actions/workflows/verify.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Muninn turns agent-generated Markdown, HTML, and text into persistent links. Its byte-native
