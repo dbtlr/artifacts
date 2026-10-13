@@ -94,11 +94,18 @@ export function adaptLegacyArtifactStore(store: ArtifactStore): ArtifactService 
       return { ...fromLegacyArtifact(metadata), content: new TextEncoder().encode(content) };
     },
     // A caller-supplied store has nowhere to keep derived data, so an HTML
-    // artifact's references are extracted on every view.
+    // artifact's references, or a Markdown rendering's, are extracted on
+    // every view.
     getEmbedReferences: async (id) => {
       const artifact = await store.getArtifact(id);
-      return artifact?.type === 'html'
-        ? extractEmbedReferences(artifact.content, resolvePublicBaseUrl())
+      if (artifact?.type === 'html') {
+        return extractEmbedReferences(artifact.content, resolvePublicBaseUrl());
+      }
+      return artifact?.type === 'md'
+        ? extractEmbedReferences(
+            renderMarkdownToHtml(artifact.content).html,
+            resolvePublicBaseUrl(),
+          )
         : null;
     },
     // A caller-supplied store has nowhere to keep derived data, so its

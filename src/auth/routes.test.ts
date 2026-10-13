@@ -112,6 +112,16 @@ function createHtml(content: string) {
   });
 }
 
+function createMarkdown(content: string) {
+  return service.createArtifact({
+    content: new TextEncoder().encode(content),
+    description: 'Notes with embeds',
+    mediaType: 'text/markdown',
+    project: 'auth',
+    title: 'Notes',
+  });
+}
+
 // The src attribute values of a page, as the browser reads them.
 function sources(html: string): string[] {
   return [...html.matchAll(/src="([^"]*)"/gu)].map(([, value]) => value!.replaceAll('&amp;', '&'));
@@ -178,6 +188,15 @@ describe('with no owner password', () => {
     const res = await testApp.request(`/a/${html.id}`);
 
     await expect(res.text()).resolves.toBe(page);
+  });
+
+  it('serves a Markdown artifact’s embedded image URLs unchanged', async () => {
+    const image = await createImage();
+    const notes = await createMarkdown(`![chart](/a/${image.id})`);
+
+    const res = await testApp.request(`/a/${notes.id}`);
+
+    expect(sources(await res.text())).toContain(`/a/${image.id}`);
   });
 
   it('serves /mcp without a key', async () => {
@@ -897,6 +916,30 @@ describe('with an owner password', () => {
 
     expect(responses.map((res) => res.status)).toEqual([403, 403]);
     await expect(responses[0]!.text()).resolves.not.toContain('not embedded anywhere');
+  });
+
+  it('signs a Markdown artifact’s embedded images, so a frame or preview shows them', async () => {
+    const image = await createImage();
+    const secret = await createText('not embedded anywhere');
+    const notes = await createMarkdown(
+      `![absolute](${buildArtifactUrl(image.id)})\n\n![relative](/a/${image.id}#x)`,
+    );
+
+    // A frame or the preview renderer reads the page with no session.
+    const page = await testApp.request(await auth.artifactUrls.signedPath(notes.id));
+
+    expect(page.status).toBe(200);
+    const [absolute, relative] = sources(await page.text()).filter((url) => url.includes(image.id));
+    expect(absolute).toMatch(new RegExp(`^${buildArtifactUrl(image.id)}${SIGNED_EMBED}$`, 'u'));
+    expect(relative).toMatch(new RegExp(`^/a/${image.id}${SIGNED_EMBED}#x$`, 'u'));
+    const loaded = await Promise.all(
+      [absolute!, relative!].map(async (url) => testApp.request(pathOf(url))),
+    );
+    expect(loaded.map((embed) => embed.status)).toEqual([200, 200]);
+    const bodies = await Promise.all(loaded.map(async (embed) => embed.arrayBuffer()));
+    expect(bodies.map((body) => new Uint8Array(body))).toEqual([PNG, PNG]);
+    const stolen = await testApp.request(`/a/${secret.id}${new URL(relative!, ORIGIN).search}`);
+    expect(stolen.status).toBe(403);
   });
 
   it('signs the embeds of an HTML artifact that is itself read through a signed URL', async () => {

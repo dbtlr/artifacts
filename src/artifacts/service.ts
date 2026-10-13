@@ -96,12 +96,15 @@ function assertValidContent(mediaType: MediaType, bytes: Uint8Array): void {
   }
 }
 
-function extractTemplate(bytes: Uint8Array): EmbedTemplate {
-  const html = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+function extractTemplate(html: string): EmbedTemplate {
   return {
     extractorVersion: EMBED_EXTRACTOR_VERSION,
     references: extractEmbedReferences(html, resolvePublicBaseUrl()),
   };
+}
+
+function decode(bytes: Uint8Array): string {
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 }
 
 // Reports a failed side step that must not change the operation's result.
@@ -129,10 +132,12 @@ function reportFailure(step: string, error: unknown): void {
 //
 // An HTML artifact's embed template is extracted once, when it is created,
 // and stored beside its metadata, so a view signs its embedded URLs without
-// parsing HTML. The template is derived data: a failure to store or read it
-// never fails the create or the view, and a view extracts and stores it
-// again when it is missing, unreadable, or was made by another extractor
-// version.
+// parsing HTML. A Markdown artifact's template is extracted from its
+// rendering and saved whenever the rendering is, so its positions index the
+// stored rendering's `html`. The template is derived data: a failure to
+// store or read it never fails the create or the view, and a view extracts
+// and stores it again when it is missing, unreadable, or was made by another
+// extractor version.
 //
 // A Markdown artifact is rendered once, when it is created, and the
 // rendering is stored beside its metadata, so viewing it parses nothing.
@@ -163,8 +168,7 @@ export function createArtifactService(
   }
 
   function render(bytes: Uint8Array): StoredMarkdownRendering {
-    const markdown = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    return { ...renderer.render(markdown), rendererVersion: renderer.version };
+    return { ...renderer.render(decode(bytes)), rendererVersion: renderer.version };
   }
 
   // A stored rendering that cannot be read is treated as missing.
@@ -177,7 +181,10 @@ export function createArtifactService(
     }
   }
 
+  // Saves the rendering's embed template with it, so a rendering made again
+  // by another renderer version does not keep the old one's positions.
   async function saveRendering(id: string, rendering: StoredMarkdownRendering): Promise<void> {
+    await saveTemplate(id, extractTemplate(rendering.html));
     try {
       await metadata.saveRendering(id, rendering);
     } catch (error) {
@@ -243,7 +250,7 @@ export function createArtifactService(
     }
     assertValidFilename(input.mediaType, input.filename);
     assertValidContent(input.mediaType, input.content);
-    const template = input.mediaType === HTML ? extractTemplate(input.content) : undefined;
+    const template = input.mediaType === HTML ? extractTemplate(decode(input.content)) : undefined;
     const rendering = input.mediaType === MARKDOWN ? render(input.content) : undefined;
     const created = await storeNew(input);
     if (template !== undefined) {
@@ -271,20 +278,30 @@ export function createArtifactService(
     throw new Error(`Artifact ${JSON.stringify(id)} content is missing`);
   }
 
+  // The HTML a template indexes: an HTML artifact's text, or a Markdown
+  // artifact's rendering. Null when it was removed meanwhile.
+  async function templateSource(id: string, mediaType: MediaType): Promise<string | null> {
+    if (mediaType === MARKDOWN) {
+      return (await getRenderedMarkdown(id))?.html ?? null;
+    }
+    const source = await getArtifact(id);
+    return source === null ? null : decode(source.content);
+  }
+
   async function getEmbedReferences(id: string): Promise<EmbedReference[] | null> {
     const artifact = await metadata.find(id);
-    if (artifact?.mediaType !== HTML) {
+    if (artifact?.mediaType !== HTML && artifact?.mediaType !== MARKDOWN) {
       return null;
     }
     const stored = await findTemplate(id);
     if (stored?.extractorVersion === EMBED_EXTRACTOR_VERSION) {
       return stored.references;
     }
-    const source = await getArtifact(id);
-    if (source === null) {
+    const html = await templateSource(id, artifact.mediaType);
+    if (html === null) {
       return null;
     }
-    const template = extractTemplate(source.content);
+    const template = extractTemplate(html);
     await saveTemplate(id, template);
     return template.references;
   }

@@ -220,14 +220,25 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
   // embedded /a/:id URL its template records is signed for this view; a
   // request that got here was already allowed to read the page, by session
   // or by signature. md/txt render inside the standard Layout instead, md
-  // from its stored rendering. A row whose content file is missing makes
-  // getArtifact reject (see artifacts/service.ts) — that's deliberately left
-  // unguarded here too, so it surfaces as a 500 rather than masquerading as
-  // an ordinary 404. An md view reads its content only when the rendering
+  // from its stored rendering, whose embeds are signed the same way: a frame
+  // in a sandboxed page and the preview renderer read it with no session. A
+  // row whose content file is missing makes getArtifact reject (see
+  // artifacts/service.ts) — that's deliberately left unguarded here too, so
+  // it surfaces as a 500 rather than masquerading as an ordinary 404. An md view reads its content only when the rendering
   // must be made again.
   app.on(['GET', 'HEAD'], '/a/:id', async (c) => {
     const id = c.req.param('id');
     const { artifacts, auth } = await resolveServices();
+    // With owner auth on, each /a/:id URL that this artifact's template
+    // records in `html` is replaced with one signed for this view.
+    const signEmbeds = async (html: string): Promise<string> =>
+      auth === undefined
+        ? html
+        : substituteEmbedReferences(
+            html,
+            (await artifacts.getEmbedReferences(id)) ?? [],
+            (embedded) => auth.artifactUrls.signedPath(embedded, EMBED_URL_EXPIRY),
+          );
     const notFound = () =>
       c.html(
         <Layout title="Artifact not found">
@@ -246,9 +257,10 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
       if (rendered === null) {
         return notFound();
       }
+      const html = await signEmbeds(rendered.html);
       return c.html(
         <Layout title={found.title}>
-          <ArtifactPage artifact={found} rendered={rendered} />
+          <ArtifactPage artifact={found} rendered={{ ...rendered, html }} />
         </Layout>,
       );
     }
@@ -284,14 +296,7 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
     }
     const legacy = legacyArtifact(artifact);
     if (legacy.type === 'html') {
-      const html =
-        auth === undefined
-          ? legacy.content
-          : await substituteEmbedReferences(
-              legacy.content,
-              (await artifacts.getEmbedReferences(id)) ?? [],
-              (embedded) => auth.artifactUrls.signedPath(embedded, EMBED_URL_EXPIRY),
-            );
+      const html = await signEmbeds(legacy.content);
       return c.html(html, 200, { 'Content-Security-Policy': HTML_ARTIFACT_CSP });
     }
     return c.html(
