@@ -217,8 +217,9 @@ describe.skipIf(chromiumPath === undefined)(
         publicBaseUrl: PUBLIC_BASE_URL,
       });
       // Pay for the cold Chromium launch here, with a generous hook budget,
-      // rather than inside whichever test happens to run first: on a loaded
-      // CI runner the launch alone has exceeded a test's timeout.
+      // rather than inside whichever test happens to run first: a launch that
+      // reads Chromium from a cold disk takes tens of seconds, which is why
+      // CI reads it into the page cache before the tests (see verify.yml).
       await renderer.render({ id: 'warm', mediaType: 'text/html', url: `${baseUrl}/a/page` });
     }, WARM_UP_TIMEOUT_MS);
 
