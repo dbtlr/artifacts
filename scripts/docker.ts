@@ -62,6 +62,8 @@ const CONTAINER_NAME = 'muninn';
 const PREVIOUS_CONTAINER_NAME = 'muninn-previous';
 const REPLACEMENT_CONTAINER_NAME = 'muninn-replacement';
 const IMAGE_NAME = 'muninn:local';
+// Matches the Dockerfile's ENV MUNINN_PORT; apart from the direct-run default
+// in src/port.ts so a dev server and a container on one host do not collide.
 const DEFAULT_PORT = 4242;
 
 function resolveDockerPort(raw: string | undefined): number {

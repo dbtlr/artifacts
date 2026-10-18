@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,6 +12,7 @@ import {
   validateBindMounts,
 } from '../scripts/docker.js';
 import type { DockerRun, DockerRunResult } from '../scripts/docker.js';
+import { DEFAULT_PORT } from '../src/port.js';
 
 function successfulRunner(calls: string[][]): DockerRun {
   return async (args): Promise<DockerRunResult> => {
@@ -64,6 +65,18 @@ describe('bare Docker command construction', () => {
       'type=volume,source=artifacts-thumbs,target=/app/data/thumbs',
       'muninn:local',
     ]);
+  });
+
+  // 4242, not the direct-run default (4243), so a dev server and a container
+  // on one host do not collide; the Dockerfile's ENV MUNINN_PORT matches.
+  it('defaults to port 4242, apart from the direct-run default', async () => {
+    const config = resolveDockerConfig({});
+    const dockerfile = await readFile(new URL('../Dockerfile', import.meta.url), 'utf8');
+
+    expect(config.port).toBe(4242);
+    expect(config.publicBaseUrl).toBe('http://localhost:4242');
+    expect(config.port).not.toBe(DEFAULT_PORT);
+    expect(dockerfile).toContain(`ENV MUNINN_PORT=${String(config.port)}`);
   });
 
   it('maps explicit ports and absolute host paths without changing container storage paths', () => {

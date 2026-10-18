@@ -48,6 +48,7 @@ let mcpService: ArtifactService;
 let server: ServerType;
 let client: Client;
 const originalPublicBaseUrl = process.env.MUNINN_PUBLIC_BASE_URL;
+const originalPort = process.env.MUNINN_PORT;
 
 type ToolCallResult = z.infer<typeof CallToolResultSchema>;
 
@@ -86,6 +87,7 @@ async function callTool<T>(
 
 beforeAll(async () => {
   delete process.env.MUNINN_PUBLIC_BASE_URL;
+  delete process.env.MUNINN_PORT;
   dataDir = await mkdtemp(join(tmpdir(), 'artifacts-mcp-'));
   store = await createArtifactStore({
     databasePath: join(dataDir, 'artifacts.db'),
@@ -117,6 +119,11 @@ afterAll(async () => {
     delete process.env.MUNINN_PUBLIC_BASE_URL;
   } else {
     process.env.MUNINN_PUBLIC_BASE_URL = originalPublicBaseUrl;
+  }
+  if (originalPort === undefined) {
+    delete process.env.MUNINN_PORT;
+  } else {
+    process.env.MUNINN_PORT = originalPort;
   }
 });
 
@@ -152,7 +159,7 @@ describe('add -> get -> remove', () => {
       artifactSchema,
     );
     expect(added.id).toHaveLength(10);
-    expect(added.url).toBe(`http://localhost:3000/a/${added.id}`);
+    expect(added.url).toBe(`http://localhost:4243/a/${added.id}`);
 
     expect(added.mediaType).toBe('text/markdown');
 
