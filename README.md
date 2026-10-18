@@ -200,8 +200,8 @@ instead. Pre-migration builds cannot safely read an upgraded database. The down 
 programmatic recovery primitive, not an operator CLI command; no supported `pnpm` command invokes
 it.
 
-Direct development uses `.env.development` and an intentionally separate port and paths, so a dev
-server can run beside a Docker instance on the same host:
+Direct development uses `.env.development` and an intentionally separate port and paths, so
+`pnpm dev` can run beside a Docker instance on the same host:
 
 | Variable | Default |
 | --- | --- |

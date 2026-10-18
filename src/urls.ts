@@ -36,9 +36,9 @@ export function resolvePublicBaseUrl(): string {
 
 // Whether an Origin header names this server, as the request reached it
 // (`requestUrl`) or as a configured public base URL names it (they differ
-// behind a proxy). The default base URL is not trusted: it names wherever a
-// local dev server may run, not this instance. `null`, from sandboxed
-// artifacts, never matches.
+// behind a proxy). The default base URL is not trusted: it is a guess from
+// MUNINN_PORT that knows nothing of the real host or a container's port
+// mapping. `null`, from sandboxed artifacts, never matches.
 export function isOwnOrigin(origin: string, requestUrl: string): boolean {
   return (
     origin === new URL(requestUrl).origin ||
