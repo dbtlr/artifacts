@@ -45,7 +45,7 @@ RUN apk add --no-cache chromium nss freetype harfbuzz ca-certificates font-inter
     > /etc/fonts/conf.d/51-muninn-generics.conf
 
 ENV NODE_ENV=production
-ENV MUNINN_PORT=3000
+ENV MUNINN_PORT=4242
 ENV MUNINN_DATABASE_PATH=/app/data/database/artifacts.db
 ENV MUNINN_FILES_DIR=/app/data/files
 ENV MUNINN_THUMBS_DIR=/app/data/thumbs

@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vite-plus/test';
 
-import { resolvePort } from './port.js';
+import { DEFAULT_PORT, resolvePort } from './port.js';
 
 describe('resolvePort', () => {
+  it('uses 4243 as the direct-run default port', () => {
+    expect(DEFAULT_PORT).toBe(4243);
+  });
+
   it('defaults when unset', () => {
-    expect(resolvePort(undefined)).toBe(3000);
+    expect(resolvePort(undefined)).toBe(4243);
   });
 
   it('defaults when blank or whitespace-only', () => {
-    expect(resolvePort('')).toBe(3000);
-    expect(resolvePort('   ')).toBe(3000);
+    expect(resolvePort('')).toBe(4243);
+    expect(resolvePort('   ')).toBe(4243);
   });
 
   it('honors 0 for an OS-assigned port', () => {

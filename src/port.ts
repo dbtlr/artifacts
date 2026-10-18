@@ -1,4 +1,9 @@
-const DEFAULT_PORT = 3000;
+// The direct-run default for MUNINN_PORT (`pnpm dev`, `node dist/server.js`),
+// like the development storage paths in data-dir.ts. The Docker image and
+// helper set 4242 instead, so a dev server and a container on one host do not
+// collide. Either way MUNINN_PORT is the one setting: the default public base
+// URL follows it.
+export const DEFAULT_PORT = 4243;
 const MAX_PORT = 65_535;
 
 // Strict MUNINN_PORT parsing: unset or blank falls back

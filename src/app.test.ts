@@ -991,18 +991,23 @@ describe('post /mcp from a web page', () => {
   it('rejects the default base URL origin when none is configured', async () => {
     const victim = await createVictim();
     const configured = process.env.MUNINN_PUBLIC_BASE_URL;
+    const configuredPort = process.env.MUNINN_PORT;
     delete process.env.MUNINN_PUBLIC_BASE_URL;
+    delete process.env.MUNINN_PORT;
 
     try {
       const res = await testApp.request(
         '/mcp',
-        removeRequest(victim.id, { Origin: 'http://localhost:3000' }),
+        removeRequest(victim.id, { Origin: 'http://localhost:4243' }),
       );
 
       expect(res.status).toBe(403);
     } finally {
       if (configured !== undefined) {
         process.env.MUNINN_PUBLIC_BASE_URL = configured;
+      }
+      if (configuredPort !== undefined) {
+        process.env.MUNINN_PORT = configuredPort;
       }
     }
     await expect(store.getArtifact(victim.id)).resolves.not.toBeNull();

@@ -161,7 +161,7 @@ override Docker defaults.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `MUNINN_PORT` | `4242` | Loopback host and container port used by the Docker helper. |
-| `MUNINN_PUBLIC_BASE_URL` | `http://localhost:4242` | Base URL returned for artifacts; must be an absolute HTTP(S) URL without credentials, query, or fragment. |
+| `MUNINN_PUBLIC_BASE_URL` | `http://localhost:<MUNINN_PORT>` | Base URL returned for artifacts; must be an absolute HTTP(S) URL without credentials, query, or fragment. |
 | `MUNINN_FILES_MOUNT` | `artifacts-files` | Docker volume name or existing absolute host directory for document bodies. |
 | `MUNINN_DATABASE_MOUNT` | `artifacts-database` | Separate Docker volume name or existing absolute host directory for SQLite. |
 | `MUNINN_THUMBS_MOUNT` | `artifacts-thumbs` | Separate Docker volume name or existing absolute host directory for rendered gallery previews. |
@@ -200,12 +200,13 @@ instead. Pre-migration builds cannot safely read an upgraded database. The down 
 programmatic recovery primitive, not an operator CLI command; no supported `pnpm` command invokes
 it.
 
-Direct development uses `.env.development` and intentionally separate paths:
+Direct development uses `.env.development` and an intentionally separate port and paths, so a dev
+server can run beside a Docker instance on the same host:
 
 | Variable | Default |
 | --- | --- |
-| `MUNINN_PORT` | `3000` |
-| `MUNINN_PUBLIC_BASE_URL` | `http://localhost:3000` |
+| `MUNINN_PORT` | `4243` |
+| `MUNINN_PUBLIC_BASE_URL` | `http://localhost:<MUNINN_PORT>` |
 | `MUNINN_FILES_DIR` | `data/development/files` |
 | `MUNINN_DATABASE_PATH` | `data/development/database/artifacts.db` |
 | `MUNINN_THUMBS_DIR` | `data/development/thumbs` |
@@ -213,8 +214,10 @@ Direct development uses `.env.development` and intentionally separate paths:
 | `MUNINN_OWNER_PASSWORD` | unset: no login |
 | `MUNINN_CLIENT_ADDRESS_HEADER` | unset: the connection's address |
 
-See `.env.development.example` for copyable overrides. Docker mount variables and direct-runtime
-path variables are deliberately different; one is not an alias for the other.
+`MUNINN_PORT` is the one setting to change to move Muninn; the public base URL follows it unless
+`MUNINN_PUBLIC_BASE_URL` is set. See `.env.development.example` for copyable overrides. Docker
+mount variables and direct-runtime path variables are deliberately different; one is not an alias
+for the other.
 
 ### Owner login
 
@@ -314,7 +317,8 @@ files first.
   database directories first. Commas are not supported in mount sources.
 - Returned links point at the wrong host: set `MUNINN_PUBLIC_BASE_URL` to the externally reachable
   base URL and restart.
-- Port 4242 is occupied: set `MUNINN_PORT` and the matching `MUNINN_PUBLIC_BASE_URL` in `.env`.
+- Port 4242 is occupied: set `MUNINN_PORT` in `.env`. The public base URL follows it unless
+  `MUNINN_PUBLIC_BASE_URL` is set.
 
 ## Architecture
 

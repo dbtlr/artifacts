@@ -1,13 +1,15 @@
-const DEFAULT_BASE_URL = 'http://localhost:3000';
+import { resolvePort } from './port.js';
 
 // Read lazily on every call (not cached at module scope) so tests can flip the
 // public base URL between cases without a module reset. Owner auth also reads
 // it: its origin is an allowed form Origin, and https makes cookies Secure.
+// Unset, the base URL follows MUNINN_PORT and goes through the same
+// normalization, so one setting moves the listener and the links together. An
+// invalid MUNINN_PORT throws the same error as startup.
 export function resolvePublicBaseUrl(): string {
-  const raw = process.env.MUNINN_PUBLIC_BASE_URL;
-  if (raw === undefined) {
-    return DEFAULT_BASE_URL;
-  }
+  const raw =
+    process.env.MUNINN_PUBLIC_BASE_URL ??
+    `http://localhost:${String(resolvePort(process.env.MUNINN_PORT))}`;
   const base = raw.trim();
   let url: URL;
   try {
