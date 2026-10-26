@@ -1,6 +1,6 @@
 ---
 name: artifact
-description: Share documents, images, and PDFs with a human as persistent links via the Muninn MCP server. Use when the user asks to publish or share an artifact, document, diagram, generated image, or PDF with a link.
+description: Share documents, images, and PDFs with a human as persistent links via the Muninn MCP server, and send the owner one-time secrets. Use when the user asks to publish or share an artifact, document, diagram, generated image, or PDF with a link, or to send them a token, password, or key file.
 ---
 
 # Artifact — Share Documents and Files via Persistent Links
@@ -80,6 +80,21 @@ embeds the new URL. The earlier document keeps showing the earlier image.
 ### Step 6: Share the link
 
 `add_artifact` returns the artifact's `id` and resolved `url`. Hand the `url` to the user directly rather than the id alone.
+
+## Sending a Secret to the Owner
+
+Use this when the owner needs a token, password, or key file that you hold or can produce. The secret must never enter your transcript: do not pass it to any tool, and never print, echo, or log it.
+
+1. Call `create_secret_upload` with a `label` that says what the secret is. Add `filename` for a file, and `ttlSeconds` to change how long it waits unread (default 24 hours).
+2. Pipe the secret straight into the returned `uploadUrl`:
+
+   ```bash
+   <command that prints the secret> | curl -sS --data-binary @- "$uploadUrl"
+   ```
+
+   For a file, use `curl -sS --data-binary @path/to/file "$uploadUrl"`. The upload URL works once and expires after 15 minutes.
+3. The command prints only a view link. Give that link to the owner; it reveals the secret once.
+4. To see whether the owner has read it, call `secret_status` with the link or its id.
 
 ## Important Behaviors
 
