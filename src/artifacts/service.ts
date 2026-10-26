@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 
+import { isSafeFilename } from '../filenames.js';
 import { markdownRenderer } from '../markdown.js';
 import type { MarkdownRenderer, RenderedMarkdown } from '../markdown.js';
 import { resolvePublicBaseUrl } from '../urls.js';
@@ -21,19 +22,8 @@ import type {
 
 const ID_LENGTH = 10;
 const MAX_ID_ATTEMPTS = 5;
-const SAFE_FILENAME = /^[^/\\]+$/u;
 const HTML: MediaType = 'text/html';
 const MARKDOWN: MediaType = 'text/markdown';
-
-function hasControlCharacter(value: string): boolean {
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code <= 31 || code === 127) {
-      return true;
-    }
-  }
-  return false;
-}
 
 function assertValidMediaType(mediaType: MediaType): void {
   if (!isMediaType(mediaType)) {
@@ -57,14 +47,7 @@ function assertValidFilename(mediaType: MediaType, filename: string | undefined)
   if (filename === undefined) {
     return;
   }
-  if (
-    filename !== filename.trim() ||
-    filename === '.' ||
-    filename === '..' ||
-    filename.length > 255 ||
-    !SAFE_FILENAME.test(filename) ||
-    hasControlCharacter(filename)
-  ) {
+  if (!isSafeFilename(filename)) {
     throw new Error(
       `Invalid artifact filename ${JSON.stringify(filename)}: must be a safe filename`,
     );

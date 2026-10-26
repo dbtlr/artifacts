@@ -62,6 +62,10 @@ describe('byte-native artifact service', () => {
   it.each([
     ['missing filename', { filename: undefined }, 'filename is required'],
     ['unsafe filename', { filename: '../preview.png' }, 'safe filename'],
+    ['C1 control in filename', { filename: 'a\u0085b.png' }, 'safe filename'],
+    ['bidi override in filename', { filename: 'a\u202Egnp.exe.png' }, 'safe filename'],
+    ['line separator in filename', { filename: 'a\u2028b.png' }, 'safe filename'],
+    ['paragraph separator in filename', { filename: 'a\u2029b.png' }, 'safe filename'],
     ['mismatched filename', { filename: 'preview.jpg' }, 'does not match'],
     ['empty bytes', { content: new Uint8Array() }, 'must not be empty'],
     ['bad signature', { content: Uint8Array.from([1, 2, 3]) }, 'signature does not match'],
