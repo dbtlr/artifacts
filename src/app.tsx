@@ -25,6 +25,7 @@ import type {
 import { adaptLegacyArtifactStore } from './data/store.js';
 import { buildIndexView, kindOf } from './index-view.js';
 import { createMcpServer } from './mcp/server.js';
+import { installSecretRoutes } from './secrets/routes.js';
 import type { AppServices } from './services.js';
 import { getDefaultAppServices } from './services.js';
 import { placeholderSvg } from './thumbnails/placeholder.js';
@@ -145,6 +146,8 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
 
   // With an owner password configured, every route below needs a session.
   installOwnerAuth(app, async () => (await resolveServices()).auth);
+
+  installSecretRoutes(app, async () => (await resolveServices()).secrets);
 
   // `?kind=html` narrows either gallery to one file kind; an unknown kind is
   // ignored rather than 404ed, for the same reason an unknown project is.
@@ -334,7 +337,8 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
     if (c.req.method === 'GET') {
       return c.body(null, 405, { Allow: 'POST' });
     }
-    const server = createMcpServer((await resolveServices()).mcp);
+    const services = await resolveServices();
+    const server = createMcpServer(services.mcp, services.secrets);
     const transport = new StreamableHTTPTransport({ enableJsonResponse: true });
     try {
       await server.connect(transport);

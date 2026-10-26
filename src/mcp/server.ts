@@ -11,7 +11,9 @@ import {
   mediaTypeFromLegacyType,
 } from '../artifacts/media.js';
 import type { Artifact, ArtifactService, ArtifactType, MediaType } from '../artifacts/types.js';
-import { buildArtifactUrl } from '../urls.js';
+import { parseHandle } from '../secrets/handle.js';
+import type { SecretService } from '../secrets/types.js';
+import { buildArtifactUrl, buildSecretUploadUrl } from '../urls.js';
 
 const ARTIFACT_TYPE = z.enum(['html', 'md', 'txt']);
 const MEDIA_TYPE = z.enum([
@@ -134,8 +136,95 @@ function artifactWithContentResult(
   };
 }
 
-export function createMcpServer(service: ArtifactService): McpServer {
+const VIEW_LINK_PATH = /^\/s\/([^/]+)$/u;
+
+// The secret id a reference names: a handle's id, a view link's id, or the
+// reference itself. The fragment is dropped first, so a key is never echoed.
+function secretIdOf(ref: string): string {
+  const [withoutFragment = ''] = ref.trim().split('#');
+  const handle = parseHandle(withoutFragment);
+  if (handle !== null) {
+    return handle.id;
+  }
+  if (URL.canParse(withoutFragment)) {
+    const id = VIEW_LINK_PATH.exec(new URL(withoutFragment).pathname)?.[1];
+    if (id !== undefined) {
+      return id;
+    }
+  }
+  return withoutFragment;
+}
+
+const SECRET_UPLOAD_RECIPE =
+  '<command that prints the secret> | curl -sS --data-binary @- "$uploadUrl"';
+
+// One-time secret tools (ADR-0008). None accepts or returns secret contents:
+// the agent moves the bytes with curl, outside its transcript.
+function registerSecretTools(server: McpServer, secrets: SecretService): void {
+  server.registerTool(
+    'create_secret_upload',
+    {
+      description:
+        'Start sending a one-time secret (a token, password, or key file) to the owner. Returns a ' +
+        'single-use uploadUrl that expires in 15 minutes. Never pass the secret to a tool, and ' +
+        'never print, echo, or log it: pipe it straight into the upload URL with ' +
+        `\`${SECRET_UPLOAD_RECIPE}\`. That command prints only the view link; give the link to ` +
+        'the owner, who can reveal the secret once. Use secret_status to see whether it was read.',
+      inputSchema: {
+        filename: z
+          .string()
+          .optional()
+          .describe('Name to save the secret under, for a file; omit for text'),
+        label: z
+          .string()
+          .describe('What the secret is, shown to the owner, e.g. "Staging DB password"'),
+        ttlSeconds: z
+          .number()
+          .optional()
+          .describe('How long the unread secret lives: 3600 to 604800 seconds, default 86400'),
+      },
+    },
+    async ({ filename, label, ttlSeconds }) => {
+      try {
+        const { expiresAt, uploadToken } = await secrets.createUpload({
+          ...(filename === undefined ? {} : { filename }),
+          label,
+          ...(ttlSeconds === undefined ? {} : { ttlSeconds }),
+        });
+        return jsonResult({ expiresAt, uploadUrl: buildSecretUploadUrl(uploadToken) });
+      } catch (error) {
+        return toolError(errorMessage(error));
+      }
+    },
+  );
+
+  server.registerTool(
+    'secret_status',
+    {
+      description:
+        'Report whether a one-time secret is pending, read, expired, or unknown. Never returns ' +
+        'its contents.',
+      inputSchema: {
+        ref: z.string().describe('The secret id, its view link, or its sec_ handle'),
+      },
+    },
+    async ({ ref }) => {
+      try {
+        const id = secretIdOf(ref);
+        return jsonResult({ id, status: await secrets.status(id) });
+      } catch (error) {
+        return toolError(errorMessage(error));
+      }
+    },
+  );
+}
+
+// The secret tools are registered only when a secret service is supplied.
+export function createMcpServer(service: ArtifactService, secrets?: SecretService): McpServer {
   const server = new McpServer({ name: 'muninn', version: '0.1.0' });
+  if (secrets !== undefined) {
+    registerSecretTools(server, secrets);
+  }
 
   server.registerTool(
     'add_artifact',

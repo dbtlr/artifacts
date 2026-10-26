@@ -29,6 +29,28 @@ function isPublicPath(path: string): boolean {
   return path === '/login' || path.startsWith('/assets/') || ICON_PATHS.has(path);
 }
 
+// One-time secrets travel by capability, not session (ADR-0008). An upload
+// URL's token authorizes its POST, and curl sends no Origin, so it skips the
+// Origin rule too. A view link's key, which only the page's script holds,
+// authorizes a reveal; the page and its Reveal POST need no session, but the
+// POST keeps the Origin rule. Each exemption is one method on one path shape,
+// with segments of the base64url alphabet only, so nothing else that routing
+// could match is let through.
+const SECRET_UPLOAD_PATH = /^\/s\/upload\/[\w-]+$/u;
+const SECRET_VIEW_PATH = /^\/s\/[\w-]+$/u;
+const SECRET_REVEAL_PATH = /^\/s\/[\w-]+\/reveal$/u;
+
+function isSecretUpload(method: string, path: string): boolean {
+  return method === 'POST' && SECRET_UPLOAD_PATH.test(path);
+}
+
+function isSecretViewOrReveal(method: string, path: string): boolean {
+  return (
+    (method === 'GET' && SECRET_VIEW_PATH.test(path)) ||
+    (method === 'POST' && SECRET_REVEAL_PATH.test(path))
+  );
+}
+
 // A path that browsers read as this server: one slash, then not `/` or `\`
 // (`//host` and `/\host` name another host).
 const LOCAL_PATH = /^\/(?![/\\])/u;
@@ -94,10 +116,14 @@ function markPrivate(res: Response): void {
 // App pages refuse every frame. A same-site page on another port or a
 // sibling subdomain gets the SameSite=Lax cookie, so it could otherwise frame
 // the key or logout forms and steer the owner's clicks. Artifacts under /a/
-// stay frameable, because sandboxed HTML artifacts embed them.
+// stay frameable, because sandboxed HTML artifacts embed them. A page with
+// its own policy that already refuses every frame, such as a secret page,
+// keeps that policy.
 function denyFraming(path: string, res: Response): void {
   if (!path.startsWith('/a/')) {
-    res.headers.set('Content-Security-Policy', "frame-ancestors 'none'");
+    if (!res.headers.get('Content-Security-Policy')?.includes("frame-ancestors 'none'")) {
+      res.headers.set('Content-Security-Policy', "frame-ancestors 'none'");
+    }
     res.headers.set('X-Frame-Options', 'DENY');
   }
 }
@@ -198,10 +224,17 @@ async function refuseWithoutSession(c: Context, auth: OwnerAuth): Promise<Respon
           'WWW-Authenticate': 'Bearer',
         });
   }
+  if (isSecretUpload(c.req.method, path)) {
+    return undefined;
+  }
   if (!SAFE_METHODS.has(c.req.method) && !hasAllowedOrigin(c)) {
     return c.text('Forbidden', 403);
   }
-  if (isPublicPath(path) || (await auth.hasSession(getCookie(c, SESSION_COOKIE)))) {
+  if (
+    isPublicPath(path) ||
+    isSecretViewOrReveal(c.req.method, path) ||
+    (await auth.hasSession(getCookie(c, SESSION_COOKIE)))
+  ) {
     return undefined;
   }
   // A request that carries a signature is judged by it rather than sent to

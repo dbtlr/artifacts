@@ -8,9 +8,9 @@ type LayoutProps = PropsWithChildren<{ title: string; wide?: boolean }>;
 
 // Shared server-rendered shell. hono/jsx renders to a string on the server —
 // there is no hydration, and no client-side script here in the shell itself.
-// (ArtifactPage conditionally adds the app's only script tags — the
-// locally-bundled highlight and mermaid entries — only on md pages whose
-// content actually needs them.)
+// (ArtifactPage conditionally adds the locally-bundled highlight and mermaid
+// entries, only on md pages whose content actually needs them, and
+// SecretPage adds the one-time secret page's script.)
 // Dark mode uses the Ink palette (see the @theme block in client/styles.css):
 // a near-black page with off-white text, never pure black on pure white.
 export const Layout: FC<LayoutProps> = ({ title, wide = false, children }) => (

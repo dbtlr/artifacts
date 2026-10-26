@@ -8,7 +8,10 @@ import type { OwnerAuth } from './auth/owner-auth.js';
 import { resolveStoragePaths } from './data-dir.js';
 import { FilesystemThumbnailStore } from './data/filesystem-thumbnail-store.js';
 import { SqliteOwnerAuthStore } from './data/sqlite-owner-auth-store.js';
+import { SqliteSecretStore } from './data/sqlite-secret-store.js';
 import { getDefaultByteNativeArtifactService } from './data/store.js';
+import { createSecretService } from './secrets/service.js';
+import type { SecretService } from './secrets/types.js';
 import { createThumbnailQueue } from './thumbnails/queue.js';
 import type { ThumbnailQueue } from './thumbnails/queue.js';
 import type { ThumbnailStore } from './thumbnails/types.js';
@@ -17,15 +20,18 @@ import { withThumbnails } from './thumbnails/with-thumbnails.js';
 // What createApp needs. `thumbnails` is optional so an embedding caller (or a
 // test) that has no preview store still gets placeholder images. `auth` is
 // present only when an owner password is configured; without it the app has
-// no login and serves every route to anyone who can reach it.
+// no login and serves every route to anyone who can reach it. Without
+// `secrets` the one-time secret routes are 404s and MCP has no secret tools.
 export type AppServices = {
   artifacts: ArtifactService;
   auth?: OwnerAuth;
   mcp: ArtifactService;
+  secrets?: SecretService;
   thumbnails?: ThumbnailStore;
 };
 
 export type DefaultAppServices = AppServices & {
+  secrets: SecretService;
   thumbnailQueue: ThumbnailQueue;
   thumbnails: ThumbnailStore;
 };
@@ -48,6 +54,9 @@ async function createDefaultAppServices(): Promise<DefaultAppServices> {
             password,
             store: await SqliteOwnerAuthStore.open(paths.databasePath),
           });
+    const secrets = createSecretService({
+      store: await SqliteSecretStore.open(paths.databasePath),
+    });
     const thumbnails = new FilesystemThumbnailStore(paths.thumbsDir);
     // With auth on, the renderer has no session, so it reads each artifact
     // through a signed URL made for that render.
@@ -64,6 +73,7 @@ async function createDefaultAppServices(): Promise<DefaultAppServices> {
       artifacts,
       ...(auth === undefined ? {} : { auth }),
       mcp: artifacts,
+      secrets,
       thumbnailQueue,
       thumbnails,
     };
@@ -74,7 +84,8 @@ async function createDefaultAppServices(): Promise<DefaultAppServices> {
 }
 
 // The one composition root for the process: the sqlite-backed artifact
-// service wrapped with preview bookkeeping. server.ts awaits this up front,
+// service wrapped with preview bookkeeping, and the one-time secret service
+// on the same database file. server.ts awaits this up front,
 // passes it to createApp, and starts the queue once the port is known. The
 // memo exists for app.tsx's argument-less `createApp()` (the embedding and
 // test default), which resolves the same services lazily; a caller on that
