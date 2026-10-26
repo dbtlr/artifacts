@@ -55,7 +55,7 @@ export function installSecretRoutes(
   resolveSecrets: () => Promise<SecretService | undefined>,
 ): void {
   // The upload URL an agent pipes a secret into with
-  // `curl -sS --data-binary @- "$uploadUrl"`. The raw body is the secret. The
+  // `curl -fsS --data-binary @- "$uploadUrl"`. The raw body is the secret. The
   // response body is only the view link and a newline, so curl prints
   // nothing else. Registered before the reveal route, which `/s/upload/reveal`
   // also matches.

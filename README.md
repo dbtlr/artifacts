@@ -139,10 +139,12 @@ through MCP. The agent calls `create_secret_upload` with a `label` (and an optio
 `ttlSeconds`), then pipes the secret into the returned upload URL:
 
 ```sh
-<command that prints the secret> | curl -sS --data-binary @- "$uploadUrl"
+<command that prints the secret> | curl -fsS --data-binary @- "$uploadUrl"
 ```
 
-The command prints only a view link, `/s/<id>#<key>`. The upload URL works once and expires after 15
+The command prints only a view link, `/s/<id>#<key>`. If it prints no link, the upload failed: call
+`create_secret_upload` again. Do not inspect or echo the input. The secret is stored exactly as
+piped, so use a command that adds no trailing newline, such as `printf %s "$TOKEN"`. The upload URL works once and expires after 15
 minutes; the secret is at most 64 KiB and expires unread after 24 hours by default (1 hour to 7
 days). Opening the link shows the label and a **Reveal once** button. Revealing needs JavaScript,
 shows text for copying or offers a file for download, and deletes the secret from Muninn. A read,

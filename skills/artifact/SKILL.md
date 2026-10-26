@@ -89,11 +89,11 @@ Use this when the owner needs a token, password, or key file that you hold or ca
 2. Pipe the secret straight into the returned `uploadUrl`:
 
    ```bash
-   <command that prints the secret> | curl -sS --data-binary @- "$uploadUrl"
+   <command that prints the secret> | curl -fsS --data-binary @- "$uploadUrl"
    ```
 
-   For a file, use `curl -sS --data-binary @path/to/file "$uploadUrl"`. The upload URL works once and expires after 15 minutes.
-3. The command prints only a view link. Give that link to the owner; it reveals the secret once.
+   The secret is stored exactly as piped, so prefer a command that adds no trailing newline, such as `printf %s "$TOKEN"` rather than `echo`. For a file, use `curl -fsS --data-binary @path/to/file "$uploadUrl"`. The upload URL works once and expires after 15 minutes.
+3. The command prints only a view link. Give that link to the owner; it reveals the secret once. If it prints no link, the upload failed: call `create_secret_upload` again. Do not inspect or echo the input.
 4. To see whether the owner has read it, call `secret_status` with the link or its id.
 
 ## Important Behaviors
