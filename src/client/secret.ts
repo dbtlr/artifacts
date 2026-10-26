@@ -1,11 +1,16 @@
 // The one-time secret page's script (see components/secret-page.tsx). The key
-// lives in the view link's fragment, which the browser never sends. It is
-// read once and removed from the address bar and history, then sent in the
-// Reveal POST body, which burns the secret and returns its bytes. A text
-// secret is shown for copying; a file, or bytes that are not UTF-8, is
-// offered as a download. Any failure shows the unavailable view.
+// lives in the view link's fragment, which the browser never sends. It stays
+// in the address bar until Reveal is clicked, so a reload before then still
+// works; the click removes it from the address bar and this tab's history
+// entry, then sends it in the Reveal POST body, which burns the secret and
+// returns its bytes. secret-reveal.ts decides how the bytes are shown and
+// what each response means. Every page text is written with textContent.
 
-const FALLBACK_FILENAME = 'secret.bin';
+import { classifyReveal, copyText, keyFromFragment, presentSecret } from './secret-reveal.js';
+import type { RevealOutcome } from './secret-reveal.js';
+
+const MISSING_KEY = 'This link is missing its key. Open the full link again.';
+const UNREACHABLE = 'Couldn’t reach Muninn. Try again.';
 
 function element(id: string): HTMLElement {
   const found = document.querySelector<HTMLElement>(`#${id}`);
@@ -21,16 +26,15 @@ function show(id: string): void {
   }
 }
 
-function formatSize(bytes: number): string {
-  return bytes < 1024 ? `${String(bytes)} bytes` : `${(bytes / 1024).toFixed(1)} KiB`;
+// Shows `message` under the Reveal button, or hides it when null.
+function notify(message: string | null): void {
+  const notice = element('secret-notice');
+  notice.textContent = message ?? '';
+  notice.hidden = message === null;
 }
 
-function decodeText(bytes: Uint8Array): string | null {
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-  } catch {
-    return null;
-  }
+function formatSize(bytes: number): string {
+  return bytes < 1024 ? `${String(bytes)} bytes` : `${(bytes / 1024).toFixed(1)} KiB`;
 }
 
 function showText(text: string): void {
@@ -38,7 +42,7 @@ function showText(text: string): void {
   const copy = element('secret-copy');
   copy.addEventListener('click', async () => {
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(copyText(text));
       copy.textContent = 'Copied';
     } catch {
       copy.textContent = 'Select the text to copy it';
@@ -60,31 +64,34 @@ function showFile(bytes: Uint8Array<ArrayBuffer>, filename: string): void {
   show('secret-file');
 }
 
-// The secret's bytes, or null when the server refuses or cannot be reached.
-async function reveal(id: string, key: string): Promise<Uint8Array<ArrayBuffer> | null> {
+type RevealResult =
+  | { bytes: Uint8Array<ArrayBuffer>; outcome: 'revealed' }
+  | { outcome: Exclude<RevealOutcome, 'revealed'> };
+
+// What the reveal returned. A request that never got an answer is worth a
+// retry, like a server error.
+async function reveal(id: string, key: string): Promise<RevealResult> {
   try {
     const response = await fetch(`/s/${encodeURIComponent(id)}/reveal`, {
       body: new URLSearchParams({ key }),
       cache: 'no-store',
       method: 'POST',
     });
-    return response.ok ? new Uint8Array(await response.arrayBuffer()) : null;
+    const outcome = classifyReveal(response.status);
+    return outcome === 'revealed'
+      ? { bytes: new Uint8Array(await response.arrayBuffer()), outcome }
+      : { outcome };
   } catch {
-    return null;
+    return { outcome: 'retry' };
   }
 }
 
-// Shows what the reveal returned, by the rules at the top of this file.
-function showRevealed(bytes: Uint8Array<ArrayBuffer> | null, filename: string | undefined): void {
-  if (bytes === null) {
-    show('secret-unavailable');
-    return;
-  }
-  const text = filename === undefined ? decodeText(bytes) : null;
-  if (text === null) {
-    showFile(bytes, filename ?? FALLBACK_FILENAME);
+function showRevealed(bytes: Uint8Array<ArrayBuffer>, filename: string | undefined): void {
+  const presentation = presentSecret(bytes, filename);
+  if (presentation.kind === 'text') {
+    showText(presentation.text);
   } else {
-    showText(text);
+    showFile(bytes, presentation.filename);
   }
 }
 
@@ -94,17 +101,27 @@ function start(): void {
   if (main === null || button === null) {
     return;
   }
-  const key = location.hash.slice(1);
-  history.replaceState(null, '', `${location.pathname}${location.search}`);
-  if (key === '') {
-    show('secret-unavailable');
+  const key = keyFromFragment(location.hash);
+  if (key === null) {
+    button.disabled = true;
+    notify(MISSING_KEY);
     return;
   }
   const id = location.pathname.split('/').at(-1) ?? '';
   const filename = main.dataset.filename;
   button.addEventListener('click', async () => {
     button.disabled = true;
-    showRevealed(await reveal(id, key), filename);
+    notify(null);
+    history.replaceState(null, '', `${location.pathname}${location.search}`);
+    const result = await reveal(id, key);
+    if (result.outcome === 'revealed') {
+      showRevealed(result.bytes, filename);
+    } else if (result.outcome === 'gone') {
+      show('secret-unavailable');
+    } else {
+      notify(UNREACHABLE);
+      button.disabled = false;
+    }
   });
 }
 

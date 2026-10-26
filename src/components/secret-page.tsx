@@ -99,6 +99,7 @@ export const SecretPage: FC<SecretPageProps> = ({ expiresIn, filename, label }) 
       <button id="secret-reveal" type="button" class={button}>
         Reveal once
       </button>
+      <p id="secret-notice" class={`${fine} text-red-700 dark:text-red-400`} role="alert" hidden />
       <p class={fine}>Revealing deletes it from Muninn.</p>
       <noscript>
         <p class={`${fine} text-red-700 dark:text-red-400`}>

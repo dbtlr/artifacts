@@ -241,6 +241,8 @@ describe.each(modes)('secret routes $name', ({ authOn }) => {
       expect(body).toContain('staging.env');
       expect(body).toContain('From an agent · expires in 23 h');
       expect(body).toContain('Reveal once');
+      // Where the script says the link lost its key or Muninn was unreachable.
+      expect(body).toMatch(/<p id="secret-notice"[^>]*\shidden[^>]*><\/p>/u);
       expect(body).toContain('<noscript>');
       expect(body).toContain('src="/assets/secret.js"');
       expect(body).not.toContain(key);
