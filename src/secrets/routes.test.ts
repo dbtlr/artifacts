@@ -20,6 +20,18 @@ const BASE_URL = 'https://muninn.example';
 const SECRET = 'hunter2-staging-db-password';
 // A well-formed key that opens nothing.
 const WRONG_KEY = 'B'.repeat(43);
+// The whole policy on both secret pages, pinned so that loosening any
+// directive fails a test.
+const SECRET_PAGE_CSP =
+  "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; " +
+  "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+// A form body the browser would never send for a reveal: multipart with a
+// boundary that never appears.
+const MALFORMED_MULTIPART: RequestInit = {
+  body: 'not multipart at all',
+  headers: { 'Content-Type': 'multipart/form-data; boundary=x', Origin: ORIGIN },
+  method: 'POST',
+};
 
 let dataDir: string;
 let artifacts: ArtifactService;
@@ -87,6 +99,11 @@ function parseViewLink(link: string): { id: string; key: string } {
 }
 
 type TestApp = ReturnType<typeof createApp>;
+
+// Stands in for any secret service call when the store is down.
+async function failStore(): Promise<never> {
+  throw new Error('store unavailable');
+}
 
 async function uploadSecret(
   app: TestApp,
@@ -181,7 +198,20 @@ describe.each(modes)('secret routes $name', ({ authOn }) => {
       await expect(empty.text()).resolves.toBe('');
       expect(overByOne.status).toBe(404);
       expect(huge.status).toBe(413);
+      expect(huge.headers.get('cache-control')).toContain('no-store');
+      await expect(huge.text()).resolves.toBe('');
       expect(atLimit.status).toBe(201);
+    });
+
+    it('stores a body with a multipart type as raw bytes, without parsing it', async () => {
+      const { uploadToken } = await secrets.createUpload({ label: 'Multipart' });
+
+      const res = await app.request(`/s/upload/${uploadToken}`, MALFORMED_MULTIPART);
+
+      expect(res.status).toBe(201);
+      const { id, key } = parseViewLink((await res.text()).trimEnd());
+      const revealed = await secrets.reveal(id, key);
+      expect(new TextDecoder().decode(revealed?.content)).toBe('not multipart at all');
     });
 
     it('accepts an upload with no Origin and with a foreign Origin, needing no cookie', async () => {
@@ -228,8 +258,7 @@ describe.each(modes)('secret routes $name', ({ authOn }) => {
         expect(res.headers.get('cache-control')).toContain('no-store');
         expect(res.headers.get('referrer-policy')).toBe('no-referrer');
         expect(res.headers.get('x-frame-options')).toBe('DENY');
-        expect(res.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
-        expect(res.headers.get('content-security-policy')).toContain("script-src 'self'");
+        expect(res.headers.get('content-security-policy')).toBe(SECRET_PAGE_CSP);
       }
     });
 
@@ -271,6 +300,7 @@ describe.each(modes)('secret routes $name', ({ authOn }) => {
 
       expect(first.status).toBe(200);
       expect(first.headers.get('content-type')).toBe('application/octet-stream');
+      expect(first.headers.get('x-content-type-options')).toBe('nosniff');
       expect(first.headers.get('cache-control')).toContain('no-store');
       await expect(first.text()).resolves.toBe(SECRET);
       expect(second.status).toBe(404);
@@ -304,6 +334,53 @@ describe.each(modes)('secret routes $name', ({ authOn }) => {
 
       expect([unknown.status, malformed.status]).toEqual([404, 404]);
     });
+
+    it('reads a body of up to 1024 bytes and refuses a longer one, keeping the secret', async () => {
+      const { id, key } = await uploadSecret(app);
+      // A form of exactly `size` bytes whose `key` field is the right key.
+      const paddedTo = (size: number): RequestInit => {
+        const fields = `key=${key}&pad=`;
+        return { ...revealRequest(key), body: fields + 'x'.repeat(size - fields.length) };
+      };
+
+      const over = await app.request(`/s/${id}/reveal`, paddedTo(1025));
+      const atLimit = await app.request(`/s/${id}/reveal`, paddedTo(1024));
+
+      expect(over.status).toBe(404);
+      expect(over.headers.get('cache-control')).toContain('no-store');
+      await expect(over.text()).resolves.toBe('');
+      expect(atLimit.status).toBe(200);
+      await expect(atLimit.text()).resolves.toBe(SECRET);
+    });
+
+    it('answers a malformed body with the bare refusal and keeps the secret', async () => {
+      const { id, key } = await uploadSecret(app);
+
+      const malformed = await app.request(`/s/${id}/reveal`, MALFORMED_MULTIPART);
+
+      expect(malformed.status).toBe(404);
+      expect(malformed.headers.get('cache-control')).toContain('no-store');
+      await expect(malformed.text()).resolves.toBe('');
+      expect((await app.request(`/s/${id}/reveal`, revealRequest(key))).status).toBe(200);
+    });
+  });
+
+  it('marks even a failed response from every secret route as no-store', async () => {
+    const { id, key } = await uploadSecret(app);
+    const { uploadToken } = await secrets.createUpload({ label: 'Broken' });
+    const broken = { ...secrets, find: failStore, reveal: failStore, upload: failStore };
+    const brokenApp = createApp({ artifacts, mcp: artifacts, secrets: broken });
+
+    const responses = await Promise.all([
+      brokenApp.request(`/s/upload/${uploadToken}`, uploadRequest(SECRET)),
+      brokenApp.request(`/s/${id}`),
+      brokenApp.request(`/s/${id}/reveal`, revealRequest(key)),
+    ]);
+
+    expect(responses.map((res) => res.status)).toEqual([500, 500, 500]);
+    for (const res of responses) {
+      expect(res.headers.get('cache-control')).toContain('no-store');
+    }
   });
 });
 
@@ -330,6 +407,67 @@ describe('secret routes with an owner password', () => {
 
     expect([foreign.status, sandboxed.status, none.status]).toEqual([403, 403, 403]);
     expect((await app.request(`/s/${id}/reveal`, revealRequest(key))).status).toBe(200);
+  });
+
+  it('answers HEAD for a view link without a session, as it does GET', async () => {
+    const { id } = await uploadSecret(app);
+
+    const pending = await app.request(`/s/${id}`, { method: 'HEAD' });
+    const unknown = await app.request('/s/AAAAAAAAAAAAAAAAAAAAAA', { method: 'HEAD' });
+
+    expect([pending.status, unknown.status]).toEqual([200, 404]);
+    expect(pending.headers.get('content-security-policy')).toBe(SECRET_PAGE_CSP);
+  });
+
+  it('applies the usual refusal to other methods on the exempt paths', async () => {
+    const { id } = await uploadSecret(app);
+    const { uploadToken } = await secrets.createUpload({ label: 'Probe' });
+    const upload = `/s/upload/${uploadToken}`;
+    const view = `/s/${id}`;
+    const withOrigin = { headers: { Origin: ORIGIN } };
+
+    const probes: [string, string, RequestInit, number][] = [
+      // No Origin: refused before anything else.
+      [upload, 'PUT', {}, 403],
+      [upload, 'DELETE', {}, 403],
+      [upload, 'PATCH', {}, 403],
+      [view, 'PUT', {}, 403],
+      [view, 'DELETE', {}, 403],
+      // Own Origin: still needs a session.
+      [upload, 'PUT', withOrigin, 401],
+      [upload, 'DELETE', withOrigin, 401],
+      [upload, 'PATCH', withOrigin, 401],
+      [view, 'PUT', withOrigin, 401],
+      [view, 'DELETE', withOrigin, 401],
+    ];
+    const responses = await Promise.all(
+      probes.map(async ([path, method, init]) => app.request(path, { ...init, method })),
+    );
+
+    expect(
+      responses.map((res, index) => `${probes[index]![1]} ${probes[index]![0]} ${res.status}`),
+    ).toEqual(probes.map(([path, method, , status]) => `${method} ${path} ${status}`));
+    expect((await app.request(upload, uploadRequest(SECRET))).status).toBe(201);
+  });
+
+  it('keeps a secret page’s own policy while other pages refuse only frames', async () => {
+    const { id } = await uploadSecret(app);
+    const login = await app.request('/login', {
+      body: new URLSearchParams({ password: PASSWORD }).toString(),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: ORIGIN },
+      method: 'POST',
+    });
+    const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0]!;
+
+    const home = await app.request('/', { headers: { Cookie: cookie } });
+    const secretPage = await app.request(`/s/${id}`, { headers: { Cookie: cookie } });
+
+    expect(home.status).toBe(200);
+    expect(home.headers.get('content-security-policy')).toBe("frame-ancestors 'none'");
+    expect(home.headers.get('x-frame-options')).toBe('DENY');
+    expect(secretPage.status).toBe(200);
+    expect(secretPage.headers.get('content-security-policy')).toBe(SECRET_PAGE_CSP);
+    expect(secretPage.headers.get('x-frame-options')).toBe('DENY');
   });
 
   it('opens no other route to a request without a session', async () => {

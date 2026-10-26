@@ -39,6 +39,10 @@ const PAGE_HEADERS = {
   'X-Frame-Options': 'DENY',
 };
 
+function markNoStore(res: Response): void {
+  res.headers.set('Cache-Control', 'no-store');
+}
+
 const PAGE_TITLE = 'One-time secret · Muninn';
 
 // Every refusal is the same bare 404, so a caller learns nothing about why.
@@ -54,6 +58,13 @@ export function installSecretRoutes(
   app: Hono,
   resolveSecrets: () => Promise<SecretService | undefined>,
 ): void {
+  // Every response under /s/, including an error a route did not foresee,
+  // is kept by no cache.
+  app.use('/s/*', async (c, runRoute) => {
+    await runRoute();
+    markNoStore(c.res);
+  });
+
   // The upload URL an agent pipes a secret into with
   // `curl -fsS --data-binary @- "$uploadUrl"`. The raw body is the secret. The
   // response body is only the view link and a newline, so curl prints
@@ -119,25 +130,35 @@ export function installSecretRoutes(
   });
 
   // Reveal: a form POST with one field, `key`, the view link's fragment. It
-  // responds with the secret's bytes and burns it. A wrong key burns nothing.
-  app.post('/s/:id/reveal', bodyLimit({ maxSize: MAX_REVEAL_BODY_BYTES }), async (c) => {
-    const secrets = await resolveSecrets();
-    if (secrets === undefined) {
-      return refuse(c);
-    }
-    const form = await c.req.parseBody();
-    const key = typeof form.key === 'string' ? form.key : '';
-    const revealed = await secrets.reveal(c.req.param('id'), key);
-    if (revealed === null) {
-      return refuse(c);
-    }
-    return new Response(new Uint8Array(revealed.content).buffer, {
-      headers: {
-        ...NO_STORE,
-        'Content-Type': 'application/octet-stream',
-        'X-Content-Type-Options': 'nosniff',
-      },
-      status: 200,
-    });
-  });
+  // responds with the secret's bytes and burns it. A wrong key burns nothing,
+  // and neither does a body that is too large or cannot be parsed.
+  app.post(
+    '/s/:id/reveal',
+    bodyLimit({ maxSize: MAX_REVEAL_BODY_BYTES, onError: refuse }),
+    async (c) => {
+      const secrets = await resolveSecrets();
+      if (secrets === undefined) {
+        return refuse(c);
+      }
+      let form;
+      try {
+        form = await c.req.parseBody();
+      } catch {
+        return refuse(c);
+      }
+      const key = typeof form.key === 'string' ? form.key : '';
+      const revealed = await secrets.reveal(c.req.param('id'), key);
+      if (revealed === null) {
+        return refuse(c);
+      }
+      return new Response(new Uint8Array(revealed.content).buffer, {
+        headers: {
+          ...NO_STORE,
+          'Content-Type': 'application/octet-stream',
+          'X-Content-Type-Options': 'nosniff',
+        },
+        status: 200,
+      });
+    },
+  );
 }
