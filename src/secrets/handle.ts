@@ -1,12 +1,14 @@
-import { decodeKey } from './crypto.js';
+import { decodeKey, fromBase64Url } from './crypto.js';
 
 // Secret ids are 128 random bits in base64url: the safe-id alphabet (see
 // data/safe-id.ts), which has no `.`, so a handle splits in one place.
-const SECRET_ID = /^[A-Za-z0-9_-]{22}$/u;
+const ID_BYTES = 16;
 const HANDLE = /^sec_([A-Za-z0-9_-]{22})\.([A-Za-z0-9_-]{43})$/u;
 
+// Whether `id` is the canonical base64url spelling of 128 bits, so each
+// secret has exactly one id text.
 export function isSecretId(id: string): boolean {
-  return SECRET_ID.test(id);
+  return fromBase64Url(id)?.length === ID_BYTES;
 }
 
 // The owner's handle for a secret, `sec_<id>.<key>`, which the agent redeems
@@ -22,5 +24,7 @@ export function formatHandle(id: string, key: string): string {
 export function parseHandle(handle: string): { id: string; key: string } | null {
   const match = HANDLE.exec(handle);
   const [, id, key] = match ?? [];
-  return id === undefined || key === undefined || decodeKey(key) === null ? null : { id, key };
+  return id === undefined || key === undefined || !isSecretId(id) || decodeKey(key) === null
+    ? null
+    : { id, key };
 }

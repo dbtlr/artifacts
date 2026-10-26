@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test';
 
-import { formatHandle, parseHandle } from './handle.js';
+import { formatHandle, isSecretId, parseHandle } from './handle.js';
 
 const id = 'AAECAwQFBgcICQoLDA0ODw';
 const key = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
@@ -19,6 +19,7 @@ describe('secret handles', () => {
     ['no separator', `sec_${id}${key}`],
     ['a second separator', `sec_${id}.${key}.extra`],
     ['a short id', `sec_${id.slice(1)}.${key}`],
+    ['an id that is not canonical base64url', `sec_${id.slice(0, -1)}x.${key}`],
     ['a long key', `sec_${id}.${key}A`],
     ['a key that is not canonical base64url', `sec_${id}.${key.slice(0, -1)}B`],
     ['a character outside base64url', `sec_${id.slice(1)}+.${key}`],
@@ -26,6 +27,16 @@ describe('secret handles', () => {
     ['nothing', ''],
   ])('rejects a handle with %s', (_case, handle) => {
     expect(parseHandle(handle)).toBeNull();
+  });
+
+  it.each([
+    ['a canonical 128-bit id', id, true],
+    ['an id that is not canonical base64url', 'AAAAAAAAAAAAAAAAAAAAAB', false],
+    ['a short id', id.slice(1), false],
+    ['a long id', `${id}A`, false],
+    ['an id outside base64url', `${id.slice(1)}+`, false],
+  ])('treats %s as a secret id: %s', (_case, value, expected) => {
+    expect(isSecretId(value)).toBe(expected);
   });
 
   it('refuses to format an id or key that is not one', () => {

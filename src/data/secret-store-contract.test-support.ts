@@ -34,9 +34,21 @@ function slotNamed(tokenHash: string, expiresAt = at(1)): StoredUploadSlot {
   return { expiresAt, filename: 'key.pem', label: 'Signing key', tokenHash, ttlSeconds: 3600 };
 }
 
-function claimNamed(tokenHash: string, expiresAt = at(1)): StoredClaim {
-  return { expiresAt, nonce: 'claim-nonce', secretId: secret.id, tokenHash, wrappedKey: 'wrapped' };
+function claimNamed(tokenHash: string, expiresAt = at(1), secretId = secret.id): StoredClaim {
+  return { expiresAt, nonce: 'claim-nonce', secretId, tokenHash, wrappedKey: 'wrapped' };
 }
+
+// One millisecond either side of an ISO time, as the ISO text the store
+// compares.
+function justBefore(time: string): string {
+  return new Date(Date.parse(time) - 1).toISOString();
+}
+
+function justAfter(time: string): string {
+  return new Date(Date.parse(time) + 1).toISOString();
+}
+
+const claimAdmission = { limit: 9, now: at(0) };
 
 export function secretStoreContract(
   name: string,
@@ -85,6 +97,19 @@ export function secretStoreContract(
       await expect(store.findSecretState(secret.id)).resolves.toMatchObject({ readAt: null });
     });
 
+    // A request whose clock runs just behind the sweep's still sees the row
+    // unexpired, but its ciphertext is gone.
+    it('does not find or consume a secret whose ciphertext a sweep dropped', async () => {
+      const { store } = await createHarness();
+      const behind = justBefore(at(2));
+      await store.createSecret(secretNamed('swept', at(2)));
+      await store.sweep(at(2), at(-24));
+
+      await expect(store.findPendingSecret('swept', behind)).resolves.toBeNull();
+      await expect(store.consumeSecret('swept', behind)).resolves.toBe(false);
+      await expect(store.findSecretState('swept')).resolves.toMatchObject({ readAt: null });
+    });
+
     it('rejects a secret under a taken id and keeps the stored row', async () => {
       const { rows, store } = await createHarness();
       await store.createSecret(secret);
@@ -122,8 +147,8 @@ export function secretStoreContract(
       ).resolves.toBe(false);
     });
 
-    // An upload turns a slot, which already holds its place under the limit,
-    // into a secret.
+    // An upload stores its secret while its used slot still holds the place,
+    // so its insert needs no admission of its own.
     it('stores a secret without an admission whatever the count', async () => {
       const { store } = await createHarness();
       await store.createSecret(secretNamed('first'));
@@ -145,8 +170,29 @@ export function secretStoreContract(
       ]);
 
       expect(taken.filter((value) => value !== null)).toEqual([slot]);
-      expect(await rows('secret_upload_slots')).toEqual([]);
+      expect(await rows('secret_upload_slots')).toMatchObject([{ used_at: at(0) }]);
       await expect(store.takeUploadSlot('missing', at(0))).resolves.toBeNull();
+    });
+
+    it('counts a taken upload slot against the limit until it is removed', async () => {
+      const { rows, store } = await createHarness();
+      const slot = slotNamed('slot-hash');
+      await store.createUploadSlot(slot, { limit: 1, now: at(0) });
+      await store.takeUploadSlot(slot.tokenHash, at(0));
+
+      await expect(
+        store.createSecret(secretNamed('early'), { limit: 1, now: at(0) }),
+      ).resolves.toBe(false);
+      await expect(
+        store.createSecret(secretNamed('after-expiry'), { limit: 1, now: slot.expiresAt }),
+      ).resolves.toBe(false);
+
+      await store.removeUploadSlot(slot.tokenHash);
+
+      expect(await rows('secret_upload_slots')).toEqual([]);
+      await expect(store.createSecret(secretNamed('late'), { limit: 1, now: at(0) })).resolves.toBe(
+        true,
+      );
     });
 
     it('does not give out an expired upload slot', async () => {
@@ -160,7 +206,7 @@ export function secretStoreContract(
     it('gives a claim to only one taker', async () => {
       const { rows, store } = await createHarness();
       const claim = claimNamed('claim-hash');
-      await store.createClaim(claim);
+      await store.createClaim(claim, claimAdmission);
 
       const taken = await Promise.all([
         store.takeClaim(claim.tokenHash, at(0)),
@@ -175,9 +221,60 @@ export function secretStoreContract(
     it('does not give out an expired claim', async () => {
       const { store } = await createHarness();
       const claim = claimNamed('claim-hash');
-      await store.createClaim(claim);
+      await store.createClaim(claim, claimAdmission);
 
       await expect(store.takeClaim(claim.tokenHash, claim.expiresAt)).resolves.toBeNull();
+    });
+
+    it('admits live claims on a secret up to the limit', async () => {
+      const { rows, store } = await createHarness();
+      const admission = { limit: 2, now: at(0) };
+      await store.createClaim(claimNamed('expired', at(0)), claimAdmission);
+      await store.createClaim(claimNamed('other-secret', at(1), 'other'), claimAdmission);
+
+      await expect(store.createClaim(claimNamed('first'), admission)).resolves.toBe(true);
+      await expect(store.createClaim(claimNamed('second'), admission)).resolves.toBe(true);
+      await expect(store.createClaim(claimNamed('third'), admission)).resolves.toBe(false);
+      const forOther = claimNamed('for-other', at(1), 'other');
+      await expect(store.createClaim(forOther, admission)).resolves.toBe(true);
+
+      expect(await rows('secret_claims')).toHaveLength(5);
+    });
+
+    it('sweeps rows that expire or were read exactly at the sweep time', async () => {
+      const { rows, store } = await createHarness();
+      const admission = { limit: 9, now: at(0) };
+      const later = justAfter(at(2));
+      const tombstoneTime = at(-22);
+      const afterTombstoneTime = justAfter(tombstoneTime);
+      await store.createUploadSlot(slotNamed('slot-at', at(2)), admission);
+      await store.createUploadSlot(slotNamed('slot-after', later), admission);
+      await store.createClaim(claimNamed('claim-at', at(2)), claimAdmission);
+      await store.createClaim(claimNamed('claim-after', later), claimAdmission);
+      await store.createSecret(secretNamed('secret-at', at(2)));
+      await store.createSecret(secretNamed('secret-after', later));
+      await store.createSecret(secretNamed('expired-at', tombstoneTime));
+      await store.createSecret(secretNamed('expired-after', afterTombstoneTime));
+      await store.createSecret(secretNamed('read-at'));
+      await store.consumeSecret('read-at', tombstoneTime);
+      await store.createSecret(secretNamed('read-after'));
+      await store.consumeSecret('read-after', afterTombstoneTime);
+
+      await store.sweep(at(2), tombstoneTime);
+
+      expect((await rows('secret_upload_slots')).map((row) => row.token_hash)).toEqual([
+        'slot-after',
+      ]);
+      expect((await rows('secret_claims')).map((row) => row.token_hash)).toEqual(['claim-after']);
+      const secrets = (await rows('secrets')).map(({ ciphertext, id }) => ({ ciphertext, id }));
+      expect(
+        secrets.toSorted((left, right) => String(left.id).localeCompare(String(right.id))),
+      ).toEqual([
+        { ciphertext: null, id: 'expired-after' },
+        { ciphertext: null, id: 'read-after' },
+        { ciphertext: 'ciphertext-of-secret-after', id: 'secret-after' },
+        { ciphertext: null, id: 'secret-at' },
+      ]);
     });
 
     it('sweeps expired slots, claims, and ciphertext, and old tombstones', async () => {
@@ -185,8 +282,8 @@ export function secretStoreContract(
       const admission = { limit: 9, now: at(0) };
       await store.createUploadSlot(slotNamed('slot-expired', at(1)), admission);
       await store.createUploadSlot(slotNamed('slot-live', at(3)), admission);
-      await store.createClaim(claimNamed('claim-expired', at(1)));
-      await store.createClaim(claimNamed('claim-live', at(3)));
+      await store.createClaim(claimNamed('claim-expired', at(1)), claimAdmission);
+      await store.createClaim(claimNamed('claim-live', at(3)), claimAdmission);
       await store.createSecret(secretNamed('pending', at(30)));
       await store.createSecret(secretNamed('expired-recently', at(2)));
       await store.createSecret(secretNamed('expired-long-ago', at(-30)));

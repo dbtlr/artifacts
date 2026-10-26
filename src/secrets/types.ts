@@ -38,8 +38,8 @@ export type StoredClaim = {
 // What any secret row, read or not, still says about itself.
 export type SecretState = { expiresAt: string; readAt: string | null };
 
-// The cap on unread, unexpired secrets and unused, unexpired upload slots
-// together, counted at `now`.
+// A cap counted at `now`: on unread, unexpired secrets and upload slots
+// together, or on one secret's unexpired claims.
 export type SecretAdmission = { limit: number; now: string };
 
 // Persistence for one-time secrets. Async for the same reason as the artifact
@@ -50,27 +50,35 @@ export type SecretStore = {
   // Stores the slot when fewer than `admission.limit` secrets and slots are
   // live. Resolves whether it was stored.
   createUploadSlot: (slot: StoredUploadSlot, admission: SecretAdmission) => Promise<boolean>;
-  // Removes and resolves the slot with this hash when it is unexpired at
-  // `now`, or resolves null. Only one caller ever gets a slot.
+  // Marks the slot with this hash used and resolves it when it is unused and
+  // unexpired at `now`, or resolves null. Only one caller ever gets a slot. A
+  // used slot still counts against the limit until it is removed.
   takeUploadSlot: (tokenHash: string, now: string) => Promise<StoredUploadSlot | null>;
+  // Removes the slot with this hash, once its upload's secret is stored.
+  removeUploadSlot: (tokenHash: string) => Promise<void>;
   // Stores the secret, and with `admission` only when fewer than its limit of
   // secrets and slots are live. Resolves whether it was stored. Rejects when
-  // the id is taken.
+  // the id is taken. An upload passes no admission: its used slot keeps the
+  // place until the upload removes it.
   createSecret: (secret: StoredSecret, admission?: SecretAdmission) => Promise<boolean>;
-  // The secret when it is unread and unexpired at `now`, or null.
+  // The secret when it is unread, unexpired at `now`, and still holds its
+  // ciphertext, or null.
   findPendingSecret: (id: string, now: string) => Promise<StoredSecret | null>;
-  // Marks the secret read at `now` and drops its ciphertext, when it is unread
-  // and unexpired. Resolves whether this call consumed it.
+  // Marks the secret read at `now` and drops its ciphertext, when it is
+  // pending as findPendingSecret means it. Resolves whether this call
+  // consumed it.
   consumeSecret: (id: string, now: string) => Promise<boolean>;
   // The secret's state, or null when no row has this id.
   findSecretState: (id: string) => Promise<SecretState | null>;
-  createClaim: (claim: StoredClaim) => Promise<void>;
+  // Stores the claim when fewer than `admission.limit` claims on its secret
+  // are unexpired. Resolves whether it was stored.
+  createClaim: (claim: StoredClaim, admission: SecretAdmission) => Promise<boolean>;
   // Removes and resolves the claim with this hash when it is unexpired at
   // `now`, or resolves null. Only one caller ever gets a claim.
   takeClaim: (tokenHash: string, now: string) => Promise<StoredClaim | null>;
-  // Removes slots and claims expired at `now`, drops the ciphertext of
-  // secrets expired at `now`, and removes secrets that were read or expired
-  // at or before `tombstonesBefore`.
+  // Removes slots, used or not, and claims expired at `now`, drops the
+  // ciphertext of secrets expired at `now`, and removes secrets that were
+  // read or expired at or before `tombstonesBefore`.
   sweep: (now: string, tombstonesBefore: string) => Promise<void>;
 };
 
@@ -95,8 +103,9 @@ export type SecretStatus = 'expired' | 'pending' | 'read' | 'unknown';
 // One-time secrets, knowing nothing about HTTP or MCP. Invalid input rejects
 // with InvalidSecretInputError and a full store with SecretLimitError (see
 // secrets/errors.ts). Every read that fails resolves null, whether the secret
-// is unknown, read, expired, or the key is wrong, so callers cannot tell
-// those apart.
+// is unknown, read, expired, or the key is wrong, so a read's caller cannot
+// tell those apart. `status` distinguishes them by design: it is for MCP and
+// the owner only and never backs a public page.
 export type SecretService = {
   // An upload slot that lives 15 minutes and creates one secret.
   createUpload: (input: SecretUploadInput) => Promise<CreatedUpload>;
@@ -110,11 +119,12 @@ export type SecretService = {
   // Decrypts the secret and burns it. A wrong key leaves it unread.
   reveal: (id: string, key: string) => Promise<RevealedSecret | null>;
   // Checks the key without burning the secret and returns a download token
-  // that lives 5 minutes and works once.
+  // that lives 5 minutes and works once. Resolves null when the secret
+  // already has 5 unexpired claims.
   claim: (id: string, key: string) => Promise<CreatedClaim | null>;
   // Uses the claim to reveal its secret.
   download: (claimToken: string) => Promise<RevealedSecret | null>;
   status: (id: string) => Promise<SecretStatus>;
-  // Removes expired rows. `now` defaults to the service's clock.
-  sweep: (now?: Date) => Promise<void>;
+  // Removes expired rows as of the service's clock.
+  sweep: () => Promise<void>;
 };

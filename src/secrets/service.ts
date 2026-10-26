@@ -1,3 +1,4 @@
+import { isSafeFilename, MAX_FILENAME_LENGTH } from '../filenames.js';
 import {
   decodeKey,
   decrypt,
@@ -28,10 +29,12 @@ export const MAX_TTL_SECONDS = 7 * 24 * 60 * 60;
 // A read or expired secret's row stays this long, so its status still says
 // what happened to it, before a sweep removes it.
 export const TOMBSTONE_SECONDS = 24 * 60 * 60;
-// Unread, unexpired secrets and unused upload slots together.
+// Unread, unexpired secrets and upload slots together.
 export const SECRET_LIMIT = 1000;
+// Unexpired claims on one secret.
+export const CLAIMS_PER_SECRET = 5;
+// In code points, so combining marks cannot stretch one character.
 export const MAX_LABEL_LENGTH = 100;
-export const MAX_FILENAME_LENGTH = 255;
 export const MAX_SECRET_BYTES = 65_536;
 
 const ID_BYTES = 16;
@@ -56,24 +59,26 @@ function cryptoRandomBytes(length: number): Uint8Array<ArrayBuffer> {
   return crypto.getRandomValues(new Uint8Array(length));
 }
 
-function hasControlCharacter(value: string): boolean {
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code <= 31 || code === 127) {
-      return true;
-    }
+// Control and format characters, which include bidi overrides that can
+// make a label display as something else.
+const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}]/u;
+
+function codePointCount(value: string): number {
+  let count = 0;
+  for (const _codePoint of value) {
+    count += 1;
   }
-  return false;
+  return count;
 }
 
-// The trimmed label. Its length counts characters as a reader sees them.
+// The trimmed label, of 1 to MAX_LABEL_LENGTH code points.
 function validLabel(label: string): string {
   const trimmed = label.trim();
-  const length = [...new Intl.Segmenter().segment(trimmed)].length;
-  if (length < 1 || length > MAX_LABEL_LENGTH) {
+  const length = codePointCount(trimmed);
+  if (length < 1 || length > MAX_LABEL_LENGTH || CONTROL_OR_FORMAT.test(trimmed)) {
     throw new InvalidSecretInputError(
       'label',
-      `A secret label must be 1 to ${String(MAX_LABEL_LENGTH)} characters`,
+      `A secret label must be 1 to ${String(MAX_LABEL_LENGTH)} characters, with no control or format characters`,
     );
   }
   return trimmed;
@@ -84,16 +89,7 @@ function validFilename(filename: string | undefined): string | null {
   if (filename === undefined) {
     return null;
   }
-  if (
-    filename.length === 0 ||
-    filename.length > MAX_FILENAME_LENGTH ||
-    filename !== filename.trim() ||
-    filename === '.' ||
-    filename === '..' ||
-    filename.includes('/') ||
-    filename.includes('\\') ||
-    hasControlCharacter(filename)
-  ) {
+  if (!isSafeFilename(filename)) {
     throw new InvalidSecretInputError(
       'filename',
       `A secret filename must be a safe file name of at most ${String(MAX_FILENAME_LENGTH)} characters`,
@@ -150,8 +146,9 @@ export function createSecretService({
     return { limit: SECRET_LIMIT, now: at.toISOString() };
   }
 
-  // Encrypts and stores a new secret. With `admission`, the store refuses it
-  // past the limit; an upload passes none, since its slot held the place.
+  // Encrypts and stores a new secret. With `admit`, the store refuses it past
+  // the limit; an upload does not admit, since its used slot holds the place
+  // until the upload removes it.
   async function storeSecret(
     { content, filename, label, ttlSeconds }: NewSecret,
     admit: boolean,
@@ -235,18 +232,23 @@ export function createSecretService({
   }
 
   // The content is checked before the slot is taken, so an upload that
-  // breaks a limit can be retried.
+  // breaks a limit can be retried. Taking the slot marks it used, and it
+  // keeps its place under the limit until the secret is stored. A failed
+  // upload leaves the used slot for the sweep.
   async function upload(uploadToken: string, content: Uint8Array) {
     assertValidContent(content);
     if (decodeKey(uploadToken) === null) {
       return null;
     }
-    const slot = await store.takeUploadSlot(await hashToken(uploadToken), now().toISOString());
+    const tokenHash = await hashToken(uploadToken);
+    const slot = await store.takeUploadSlot(tokenHash, now().toISOString());
     if (slot === null) {
       return null;
     }
     const { filename, label, ttlSeconds } = slot;
-    return storeSecret({ content, filename, label, ttlSeconds }, false);
+    const created = await storeSecret({ content, filename, label, ttlSeconds }, false);
+    await store.removeUploadSlot(tokenHash);
+    return created;
   }
 
   async function create(input: CreateSecretInput) {
@@ -273,7 +275,8 @@ export function createSecretService({
   }
 
   // Wraps the data key under a key derived from a fresh claim token, so the
-  // claim row holds nothing usable without the token.
+  // claim row holds nothing usable without the token. A secret has at most
+  // CLAIMS_PER_SECRET unexpired claims.
   async function claim(id: string, key: string) {
     const keyBytes = decodeKey(key);
     if (keyBytes === null || (await open(id, keyBytes)) === null) {
@@ -283,15 +286,19 @@ export function createSecretService({
     const nonce = randomBytes(NONCE_BYTES);
     const wrappedKey = await encrypt(await deriveClaimKey(claimToken), nonce, id, keyBytes);
     const token = toBase64Url(claimToken);
-    const expiresAt = addSeconds(now(), CLAIM_LIFETIME_SECONDS).toISOString();
-    await store.createClaim({
-      expiresAt,
-      nonce: toBase64Url(nonce),
-      secretId: id,
-      tokenHash: await hashToken(token),
-      wrappedKey: toBase64Url(wrappedKey),
-    });
-    return { claimToken: token, expiresAt };
+    const at = now();
+    const expiresAt = addSeconds(at, CLAIM_LIFETIME_SECONDS).toISOString();
+    const stored = await store.createClaim(
+      {
+        expiresAt,
+        nonce: toBase64Url(nonce),
+        secretId: id,
+        tokenHash: await hashToken(token),
+        wrappedKey: toBase64Url(wrappedKey),
+      },
+      { limit: CLAIMS_PER_SECRET, now: at.toISOString() },
+    );
+    return stored ? { claimToken: token, expiresAt } : null;
   }
 
   async function download(claimToken: string) {
@@ -323,7 +330,8 @@ export function createSecretService({
     return state.expiresAt <= now().toISOString() ? ('expired' as const) : ('pending' as const);
   }
 
-  async function sweep(at = now()) {
+  async function sweep() {
+    const at = now();
     await store.sweep(at.toISOString(), addSeconds(at, -TOMBSTONE_SECONDS).toISOString());
   }
 

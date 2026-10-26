@@ -11,6 +11,7 @@ import type { D1DatabaseBinding, D1PreparedStatementBinding } from './d1-databas
 import {
   claimFromRow,
   consumeSecret,
+  deleteUploadSlot,
   findPendingSecret,
   findSecretState,
   insertClaim,
@@ -26,7 +27,9 @@ import {
 
 // One-time secrets in D1, running the same statements as the node:sqlite
 // adapter. A D1 call that fails after its write committed loses at worst a
-// slot, a claim, or a read: each fails closed.
+// slot, a claim, or a read: each fails closed. A create or upload that
+// commits and then fails leaves a secret whose key no one received: it cannot
+// be decrypted, and it holds a place under the limit until it expires.
 export class D1SecretStore implements SecretStore {
   private readonly database: D1DatabaseBinding;
 
@@ -52,6 +55,10 @@ export class D1SecretStore implements SecretStore {
     return record === null ? null : uploadSlotFromRow(record);
   }
 
+  async removeUploadSlot(tokenHash: string): Promise<void> {
+    await this.run(deleteUploadSlot(tokenHash));
+  }
+
   async createSecret(secret: StoredSecret, admission?: SecretAdmission): Promise<boolean> {
     return (await this.run(insertSecret(secret, admission))) > 0;
   }
@@ -70,8 +77,8 @@ export class D1SecretStore implements SecretStore {
     return record === null ? null : secretStateFromRow(record);
   }
 
-  async createClaim(claim: StoredClaim): Promise<void> {
-    await this.run(insertClaim(claim));
+  async createClaim(claim: StoredClaim, admission: SecretAdmission): Promise<boolean> {
+    return (await this.run(insertClaim(claim, admission))) > 0;
   }
 
   async takeClaim(tokenHash: string, now: string): Promise<StoredClaim | null> {

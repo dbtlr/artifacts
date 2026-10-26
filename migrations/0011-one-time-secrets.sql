@@ -16,15 +16,21 @@ CREATE TABLE secrets (
   CHECK (read_at IS NULL OR ciphertext IS NULL)
 );
 
--- An unused upload URL. It names the secret its upload will create. The
--- token is stored as its SHA-256, and the row is deleted when it is used.
+CREATE INDEX idx_secrets_expires_at ON secrets(expires_at);
+
+-- An upload URL. It names the secret its upload will create. The token is
+-- stored as its SHA-256. An upload marks the row used, so it keeps its place
+-- under the limit, and deletes it once the secret is stored.
 CREATE TABLE secret_upload_slots (
   token_hash TEXT PRIMARY KEY,
   label TEXT NOT NULL,
   filename TEXT,
   ttl_seconds INTEGER NOT NULL,
-  expires_at TEXT NOT NULL
+  expires_at TEXT NOT NULL,
+  used_at TEXT
 );
+
+CREATE INDEX idx_secret_upload_slots_expires_at ON secret_upload_slots(expires_at);
 
 -- An unused download URL for a claimed secret. The secret's key is stored
 -- only encrypted under a key derived from the claim token, which is stored
@@ -36,3 +42,5 @@ CREATE TABLE secret_claims (
   nonce TEXT NOT NULL,
   expires_at TEXT NOT NULL
 );
+
+CREATE INDEX idx_secret_claims_expires_at ON secret_claims(expires_at);

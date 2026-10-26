@@ -12,6 +12,7 @@ import type { SqlStatement } from './artifact-metadata-sql.js';
 import {
   claimFromRow,
   consumeSecret,
+  deleteUploadSlot,
   findPendingSecret,
   findSecretState,
   insertClaim,
@@ -65,6 +66,10 @@ export class SqliteSecretStore implements SecretStore {
     return record === undefined ? null : uploadSlotFromRow(record);
   }
 
+  async removeUploadSlot(tokenHash: string): Promise<void> {
+    this.run(deleteUploadSlot(tokenHash));
+  }
+
   async createSecret(secret: StoredSecret, admission?: SecretAdmission): Promise<boolean> {
     return this.run(insertSecret(secret, admission)) > 0;
   }
@@ -83,8 +88,8 @@ export class SqliteSecretStore implements SecretStore {
     return record === undefined ? null : secretStateFromRow(record);
   }
 
-  async createClaim(claim: StoredClaim): Promise<void> {
-    this.run(insertClaim(claim));
+  async createClaim(claim: StoredClaim, admission: SecretAdmission): Promise<boolean> {
+    return this.run(insertClaim(claim, admission)) > 0;
   }
 
   async takeClaim(tokenHash: string, now: string): Promise<StoredClaim | null> {

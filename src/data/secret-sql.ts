@@ -11,10 +11,11 @@ import type { SqlStatement } from './artifact-metadata-sql.js';
 // the node:sqlite and D1 adapters differ only in how they execute them. Each
 // check-and-write is one statement, which SQLite runs atomically.
 
-// Whether fewer than the limit of unread, unexpired secrets and unused,
-// unexpired upload slots exist. Binds `now`, `now`, `limit`.
+// Whether fewer than the limit of unread, unexpired secrets and upload slots
+// exist. A used slot counts even past its expiry, since its upload's secret is
+// not stored until the slot is removed. Binds `now`, `now`, `limit`.
 const ADMITTED = `(SELECT COUNT(*) FROM secrets WHERE read_at IS NULL AND expires_at > ?)
-  + (SELECT COUNT(*) FROM secret_upload_slots WHERE expires_at > ?) < ?`;
+  + (SELECT COUNT(*) FROM secret_upload_slots WHERE expires_at > ? OR used_at IS NOT NULL) < ?`;
 
 function admissionValues({ limit, now }: SecretAdmission): (number | string)[] {
   return [now, now, limit];
@@ -35,11 +36,18 @@ export function insertUploadSlot(slot: StoredUploadSlot, admission: SecretAdmiss
   };
 }
 
+// Marks the slot used rather than deleting it, so it keeps its place under
+// the limit while its upload is encrypted and stored.
 export function takeUploadSlot(tokenHash: string, now: string): SqlStatement {
   return {
-    sql: 'DELETE FROM secret_upload_slots WHERE token_hash = ? AND expires_at > ? RETURNING *',
-    values: [tokenHash, now],
+    sql: `UPDATE secret_upload_slots SET used_at = ?
+     WHERE token_hash = ? AND used_at IS NULL AND expires_at > ? RETURNING *`,
+    values: [now, tokenHash, now],
   };
+}
+
+export function deleteUploadSlot(tokenHash: string): SqlStatement {
+  return { sql: 'DELETE FROM secret_upload_slots WHERE token_hash = ?', values: [tokenHash] };
 }
 
 export function insertSecret(secret: StoredSecret, admission?: SecretAdmission): SqlStatement {
@@ -61,17 +69,17 @@ export function insertSecret(secret: StoredSecret, admission?: SecretAdmission):
       };
 }
 
+// A pending secret is unread, unexpired, and still holds its ciphertext: a
+// sweep on a clock just ahead of `now` may have dropped it already.
+const PENDING = 'read_at IS NULL AND ciphertext IS NOT NULL AND expires_at > ?';
+
 export function findPendingSecret(id: string, now: string): SqlStatement {
-  return {
-    sql: 'SELECT * FROM secrets WHERE id = ? AND read_at IS NULL AND expires_at > ?',
-    values: [id, now],
-  };
+  return { sql: `SELECT * FROM secrets WHERE id = ? AND ${PENDING}`, values: [id, now] };
 }
 
 export function consumeSecret(id: string, now: string): SqlStatement {
   return {
-    sql: `UPDATE secrets SET ciphertext = NULL, read_at = ?
-     WHERE id = ? AND read_at IS NULL AND expires_at > ?`,
+    sql: `UPDATE secrets SET ciphertext = NULL, read_at = ? WHERE id = ? AND ${PENDING}`,
     values: [now, id, now],
   };
 }
@@ -80,11 +88,23 @@ export function findSecretState(id: string): SqlStatement {
   return { sql: 'SELECT expires_at, read_at FROM secrets WHERE id = ?', values: [id] };
 }
 
-export function insertClaim(claim: StoredClaim): SqlStatement {
+// Inserts the claim when fewer than `admission.limit` unexpired claims on
+// its secret exist.
+export function insertClaim(claim: StoredClaim, { limit, now }: SecretAdmission): SqlStatement {
   return {
     sql: `INSERT INTO secret_claims (token_hash, secret_id, wrapped_key, nonce, expires_at)
-     VALUES (?, ?, ?, ?, ?)`,
-    values: [claim.tokenHash, claim.secretId, claim.wrappedKey, claim.nonce, claim.expiresAt],
+     SELECT ?, ?, ?, ?, ?
+     WHERE (SELECT COUNT(*) FROM secret_claims WHERE secret_id = ? AND expires_at > ?) < ?`,
+    values: [
+      claim.tokenHash,
+      claim.secretId,
+      claim.wrappedKey,
+      claim.nonce,
+      claim.expiresAt,
+      claim.secretId,
+      now,
+      limit,
+    ],
   };
 }
 
