@@ -12,8 +12,10 @@ import type { SqlStatement } from './artifact-metadata-sql.js';
 // check-and-write is one statement, which SQLite runs atomically.
 
 // Whether fewer than the limit of unread, unexpired secrets and upload slots
-// exist. A used slot counts even past its expiry, since its upload's secret is
-// not stored until the slot is removed. Binds `now`, `now`, `limit`.
+// exist. A used slot counts even past its expiry, until its upload or a sweep
+// removes it: its upload's secret is stored only while the slot exists, so the
+// place is never free while the secret can still arrive. Binds `now`, `now`,
+// `limit`.
 const ADMITTED = `(SELECT COUNT(*) FROM secrets WHERE read_at IS NULL AND expires_at > ?)
   + (SELECT COUNT(*) FROM secret_upload_slots WHERE expires_at > ? OR used_at IS NOT NULL) < ?`;
 
@@ -50,8 +52,12 @@ export function deleteUploadSlot(tokenHash: string): SqlStatement {
   return { sql: 'DELETE FROM secret_upload_slots WHERE token_hash = ?', values: [tokenHash] };
 }
 
-export function insertSecret(secret: StoredSecret, admission?: SecretAdmission): SqlStatement {
-  const values = [
+const SECRET_INSERT = `INSERT INTO secrets
+     (id, label, filename, ciphertext, nonce, created_at, expires_at)
+     SELECT ?, ?, ?, ?, ?, ?, ?`;
+
+function secretValues(secret: StoredSecret): (string | null)[] {
+  return [
     secret.id,
     secret.label,
     secret.filename,
@@ -60,13 +66,24 @@ export function insertSecret(secret: StoredSecret, admission?: SecretAdmission):
     secret.createdAt,
     secret.expiresAt,
   ];
-  const columns = 'id, label, filename, ciphertext, nonce, created_at, expires_at';
-  return admission === undefined
-    ? { sql: `INSERT INTO secrets (${columns}) VALUES (?, ?, ?, ?, ?, ?, ?)`, values }
-    : {
-        sql: `INSERT INTO secrets (${columns}) SELECT ?, ?, ?, ?, ?, ?, ? WHERE ${ADMITTED}`,
-        values: [...values, ...admissionValues(admission)],
-      };
+}
+
+export function insertSecret(secret: StoredSecret, admission: SecretAdmission): SqlStatement {
+  return {
+    sql: `${SECRET_INSERT} WHERE ${ADMITTED}`,
+    values: [...secretValues(secret), ...admissionValues(admission)],
+  };
+}
+
+// Inserts an upload's secret only while its used slot exists, so a sweep that
+// already removed the slot, and freed its place, leaves the upload nothing to
+// store.
+export function insertUploadedSecret(secret: StoredSecret, tokenHash: string): SqlStatement {
+  return {
+    sql: `${SECRET_INSERT} WHERE EXISTS (SELECT 1 FROM secret_upload_slots
+     WHERE token_hash = ? AND used_at IS NOT NULL)`,
+    values: [...secretValues(secret), tokenHash],
+  };
 }
 
 // A pending secret is unread, unexpired, and still holds its ciphertext: a

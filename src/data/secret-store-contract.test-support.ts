@@ -49,6 +49,8 @@ function justAfter(time: string): string {
 }
 
 const claimAdmission = { limit: 9, now: at(0) };
+// Room for every secret a test stores, so only the store's own checks refuse.
+const room = { limit: 99, now: at(0) };
 
 export function secretStoreContract(
   name: string,
@@ -58,7 +60,7 @@ export function secretStoreContract(
     it('finds a secret while it is unread and unexpired', async () => {
       const { store } = await createHarness();
 
-      await expect(store.createSecret(secret)).resolves.toBe(true);
+      await expect(store.createSecret(secret, room)).resolves.toBe(true);
 
       await expect(store.findPendingSecret(secret.id, at(23))).resolves.toEqual(secret);
       await expect(store.findPendingSecret(secret.id, at(24))).resolves.toBeNull();
@@ -72,7 +74,7 @@ export function secretStoreContract(
 
     it('consumes a secret once and drops its ciphertext', async () => {
       const { rows, store } = await createHarness();
-      await store.createSecret(secret);
+      await store.createSecret(secret, room);
 
       const results = await Promise.all([
         store.consumeSecret(secret.id, at(1)),
@@ -90,7 +92,7 @@ export function secretStoreContract(
 
     it('does not consume an expired secret', async () => {
       const { store } = await createHarness();
-      await store.createSecret(secret);
+      await store.createSecret(secret, room);
 
       await expect(store.consumeSecret(secret.id, secret.expiresAt)).resolves.toBe(false);
       await expect(store.consumeSecret('missing', at(0))).resolves.toBe(false);
@@ -102,7 +104,7 @@ export function secretStoreContract(
     it('does not find or consume a secret whose ciphertext a sweep dropped', async () => {
       const { store } = await createHarness();
       const behind = justBefore(at(2));
-      await store.createSecret(secretNamed('swept', at(2)));
+      await store.createSecret(secretNamed('swept', at(2)), room);
       await store.sweep(at(2), at(-24));
 
       await expect(store.findPendingSecret('swept', behind)).resolves.toBeNull();
@@ -112,9 +114,9 @@ export function secretStoreContract(
 
     it('rejects a secret under a taken id and keeps the stored row', async () => {
       const { rows, store } = await createHarness();
-      await store.createSecret(secret);
+      await store.createSecret(secret, room);
 
-      await expect(store.createSecret({ ...secret, label: 'Other' })).rejects.toThrow();
+      await expect(store.createSecret({ ...secret, label: 'Other' }, room)).rejects.toThrow();
 
       expect(await rows('secrets')).toMatchObject([{ label: secret.label }]);
     });
@@ -134,9 +136,9 @@ export function secretStoreContract(
 
     it('does not count read or expired secrets and slots against the limit', async () => {
       const { store } = await createHarness();
-      await store.createSecret(secretNamed('read'));
+      await store.createSecret(secretNamed('read'), room);
       await store.consumeSecret('read', at(0));
-      await store.createSecret(secretNamed('expired', at(1)));
+      await store.createSecret(secretNamed('expired', at(1)), room);
       await store.createUploadSlot(slotNamed('expired-slot', at(1)), { limit: 9, now: at(0) });
 
       await expect(
@@ -147,16 +149,41 @@ export function secretStoreContract(
       ).resolves.toBe(false);
     });
 
-    // An upload stores its secret while its used slot still holds the place,
-    // so its insert needs no admission of its own.
-    it('stores a secret without an admission whatever the count', async () => {
-      const { store } = await createHarness();
-      await store.createSecret(secretNamed('first'));
+    it("stores an upload's secret only while its used slot exists", async () => {
+      const { rows, store } = await createHarness();
+      const admission = { limit: 9, now: at(0) };
+      await store.createUploadSlot(slotNamed('unused'), admission);
+      await store.createUploadSlot(slotNamed('used'), admission);
+      await store.createUploadSlot(slotNamed('swept'), admission);
+      await store.takeUploadSlot('used', at(0));
+      await store.takeUploadSlot('swept', at(0));
 
-      await expect(store.createSecret(secretNamed('second'))).resolves.toBe(true);
+      await expect(store.createUploadedSecret(secretNamed('from-used'), 'used')).resolves.toBe(
+        true,
+      );
+      await expect(store.createUploadedSecret(secretNamed('from-unused'), 'unused')).resolves.toBe(
+        false,
+      );
       await expect(
-        store.createSecret(secretNamed('third'), { limit: 2, now: at(0) }),
+        store.createUploadedSecret(secretNamed('from-missing'), 'missing'),
       ).resolves.toBe(false);
+
+      // A sweep removes a used slot once it expires, so its upload, still in
+      // flight, can no longer store a secret that the limit did not count.
+      await store.sweep(at(1), at(-24));
+      await expect(store.createUploadedSecret(secretNamed('from-swept'), 'swept')).resolves.toBe(
+        false,
+      );
+
+      expect((await rows('secrets')).map((row) => row.id)).toEqual(['from-used']);
+    });
+
+    it("stores an upload's secret whatever the count", async () => {
+      const { store } = await createHarness();
+      await store.createUploadSlot(slotNamed('used'), { limit: 1, now: at(0) });
+      await store.takeUploadSlot('used', at(0));
+
+      await expect(store.createUploadedSecret(secretNamed('uploaded'), 'used')).resolves.toBe(true);
     });
 
     it('gives an upload slot to only one taker', async () => {
@@ -251,13 +278,13 @@ export function secretStoreContract(
       await store.createUploadSlot(slotNamed('slot-after', later), admission);
       await store.createClaim(claimNamed('claim-at', at(2)), claimAdmission);
       await store.createClaim(claimNamed('claim-after', later), claimAdmission);
-      await store.createSecret(secretNamed('secret-at', at(2)));
-      await store.createSecret(secretNamed('secret-after', later));
-      await store.createSecret(secretNamed('expired-at', tombstoneTime));
-      await store.createSecret(secretNamed('expired-after', afterTombstoneTime));
-      await store.createSecret(secretNamed('read-at'));
+      await store.createSecret(secretNamed('secret-at', at(2)), room);
+      await store.createSecret(secretNamed('secret-after', later), room);
+      await store.createSecret(secretNamed('expired-at', tombstoneTime), room);
+      await store.createSecret(secretNamed('expired-after', afterTombstoneTime), room);
+      await store.createSecret(secretNamed('read-at'), room);
       await store.consumeSecret('read-at', tombstoneTime);
-      await store.createSecret(secretNamed('read-after'));
+      await store.createSecret(secretNamed('read-after'), room);
       await store.consumeSecret('read-after', afterTombstoneTime);
 
       await store.sweep(at(2), tombstoneTime);
@@ -284,12 +311,12 @@ export function secretStoreContract(
       await store.createUploadSlot(slotNamed('slot-live', at(3)), admission);
       await store.createClaim(claimNamed('claim-expired', at(1)), claimAdmission);
       await store.createClaim(claimNamed('claim-live', at(3)), claimAdmission);
-      await store.createSecret(secretNamed('pending', at(30)));
-      await store.createSecret(secretNamed('expired-recently', at(2)));
-      await store.createSecret(secretNamed('expired-long-ago', at(-30)));
-      await store.createSecret(secretNamed('read-recently', at(30)));
+      await store.createSecret(secretNamed('pending', at(30)), room);
+      await store.createSecret(secretNamed('expired-recently', at(2)), room);
+      await store.createSecret(secretNamed('expired-long-ago', at(-30)), room);
+      await store.createSecret(secretNamed('read-recently', at(30)), room);
       await store.consumeSecret('read-recently', at(1));
-      await store.createSecret(secretNamed('read-long-ago', at(30)));
+      await store.createSecret(secretNamed('read-long-ago', at(30)), room);
       await store.consumeSecret('read-long-ago', at(-30));
 
       await store.sweep(at(2), at(-24));

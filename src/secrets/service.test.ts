@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 
 import { SqliteSecretStore } from '../data/sqlite-secret-store.js';
-import { toBase64Url } from './crypto.js';
+import { encrypt, fromBase64Url, toBase64Url } from './crypto.js';
 import { InvalidSecretInputError, SecretLimitError } from './errors.js';
 import { createSecretService } from './service.js';
 import type { CreateSecretInput, SecretService, SecretStore } from './types.js';
@@ -69,6 +69,7 @@ function storeWith(overrides: Partial<SecretStore>): SecretStore {
     createClaim: (...args) => base.createClaim(...args),
     createSecret: (...args) => base.createSecret(...args),
     createUploadSlot: (...args) => base.createUploadSlot(...args),
+    createUploadedSecret: (...args) => base.createUploadedSecret(...args),
     findPendingSecret: (...args) => base.findPendingSecret(...args),
     findSecretState: (...args) => base.findSecretState(...args),
     removeUploadSlot: (...args) => base.removeUploadSlot(...args),
@@ -382,6 +383,34 @@ describe('SecretService claims', () => {
     await expect(service.status(second.id)).resolves.toBe('pending');
   });
 
+  // Only the wrapped key's binding to its secret id stops this: the other
+  // secret opens under the same data key.
+  it('reads nothing from a claim moved to another secret under the same key', async () => {
+    const first = await service.create({ content, label: 'First' });
+    const twinId = toBase64Url(new Uint8Array(16).fill(9));
+    const nonce = new Uint8Array(12).fill(5);
+    const key = fromBase64Url(first.key) ?? new Uint8Array();
+    const ciphertext = await encrypt(key, nonce, twinId, new Uint8Array(content));
+    await store.createSecret(
+      {
+        ciphertext: toBase64Url(ciphertext),
+        createdAt: clock.toISOString(),
+        expiresAt: inSeconds(3600),
+        filename: null,
+        id: twinId,
+        label: 'Twin',
+        nonce: toBase64Url(nonce),
+      },
+      { limit: 1000, now: clock.toISOString() },
+    );
+    const claim = await service.claim(first.id, first.key);
+    tamper('UPDATE secret_claims SET secret_id = ?', twinId);
+
+    await expect(service.download(claim?.claimToken ?? '')).resolves.toBeNull();
+    await expect(service.status(twinId)).resolves.toBe('pending');
+    await expect(service.reveal(twinId, first.key)).resolves.toMatchObject({ content });
+  });
+
   it('refuses an unknown or expired claim and leaves the secret unread', async () => {
     const { id, key } = await service.create({ content, label: 'Late' });
     const claim = await service.claim(id, key);
@@ -507,6 +536,9 @@ describe('SecretService limits', () => {
     ['a zero-width space', 'zero\u200Bwidth'],
     ['a bidi override', 'flipped\u202Etxt'],
     ['a bidi isolate', 'isolate\u2066label'],
+    ['a line separator', 'line\u2028separator'],
+    ['a paragraph separator', 'paragraph\u2029separator'],
+    ['101 astral code points', '\u{1F511}'.repeat(101)],
   ])('refuses a label: %s', async (_case, label) => {
     await expect(rejection({ label })).resolves.toBe('label');
     await expect(service.createUpload({ label })).rejects.toThrow(InvalidSecretInputError);
@@ -516,9 +548,13 @@ describe('SecretService limits', () => {
     const { id } = await service.create({ ...valid, label: `  ${'é'.repeat(100)}  ` });
     const combined = `a${'\u0301'.repeat(99)}`;
     const marked = await service.create({ ...valid, label: combined });
+    // 200 UTF-16 code units.
+    const astral = '\u{1F511}'.repeat(100);
+    const keys = await service.create({ ...valid, label: astral });
 
     await expect(service.find(id)).resolves.toMatchObject({ label: 'é'.repeat(100) });
     await expect(service.find(marked.id)).resolves.toMatchObject({ label: combined });
+    await expect(service.find(keys.id)).resolves.toMatchObject({ label: astral });
   });
 
   it.each([
@@ -534,6 +570,8 @@ describe('SecretService limits', () => {
     'a\u202Etxt.exe',
     'isolate\u2066.txt',
     'zero\u200Bwidth.txt',
+    'line\u2028separator.txt',
+    'paragraph\u2029separator.txt',
     ' padded.txt',
     'x'.repeat(256),
   ])('refuses the filename %j', async (filename) => {
@@ -619,12 +657,44 @@ describe('SecretService limits', () => {
     expect(rows('secrets')).toHaveLength(1);
   });
 
+  // The slot is taken 1 ms before it expires, and the sweep then removes it
+  // while its upload is still in flight.
+  it('stores nothing from an upload whose used slot a sweep removed', async () => {
+    const { uploadToken } = await service.createUpload({ label: 'Swept' });
+    advance(899);
+    await Promise.all(
+      Array.from({ length: 999 }, (_slot, index) =>
+        service.createUpload({ label: `Slot ${String(index)}` }),
+      ),
+    );
+    advance(0.999);
+    let raced: unknown;
+    const racing = createSecretService({
+      now: () => clock,
+      store: storeWith({
+        takeUploadSlot: async (...args) => {
+          const slot = await store.takeUploadSlot(...args);
+          advance(0.001);
+          await service.sweep();
+          raced = await service.create(valid);
+          return slot;
+        },
+      }),
+    });
+
+    await expect(racing.upload(uploadToken, content)).resolves.toBeNull();
+
+    expect(raced).toMatchObject({ id: expect.any(String) });
+    expect(liveCount()).toBe(1000);
+    expect(rows('secrets')).toHaveLength(1);
+  });
+
   it('leaves a used upload slot for the sweep when its upload fails', async () => {
     const { uploadToken } = await service.createUpload({ label: 'Failed' });
     const failing = createSecretService({
       now: () => clock,
       store: storeWith({
-        createSecret: async () => {
+        createUploadedSecret: async () => {
           throw new Error('disk full');
         },
       }),
@@ -664,6 +734,7 @@ describe('SecretService malformed input', () => {
         createClaim: refuse('createClaim'),
         createSecret: refuse('createSecret'),
         createUploadSlot: refuse('createUploadSlot'),
+        createUploadedSecret: refuse('createUploadedSecret'),
         findPendingSecret: refuse('findPendingSecret'),
         findSecretState: refuse('findSecretState'),
         removeUploadSlot: refuse('removeUploadSlot'),

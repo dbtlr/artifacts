@@ -2,8 +2,9 @@
 export const MAX_FILENAME_LENGTH = 255;
 
 // Control and format characters: C0 and C1 controls, zero-width characters,
-// and bidi overrides and isolates, which can make a name display as another.
-const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}]/u;
+// and bidi overrides and isolates, which can make a name display as another,
+// and the line and paragraph separators.
+const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 
 // Whether `filename` is one plain path segment that displays as what it is:
 // not empty, `.`, or `..`, no separator, no surrounding whitespace, and no

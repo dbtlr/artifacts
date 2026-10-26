@@ -52,15 +52,18 @@ export type SecretStore = {
   createUploadSlot: (slot: StoredUploadSlot, admission: SecretAdmission) => Promise<boolean>;
   // Marks the slot with this hash used and resolves it when it is unused and
   // unexpired at `now`, or resolves null. Only one caller ever gets a slot. A
-  // used slot still counts against the limit until it is removed.
+  // used slot still counts against the limit until its upload or a sweep
+  // removes it.
   takeUploadSlot: (tokenHash: string, now: string) => Promise<StoredUploadSlot | null>;
   // Removes the slot with this hash, once its upload's secret is stored.
   removeUploadSlot: (tokenHash: string) => Promise<void>;
-  // Stores the secret, and with `admission` only when fewer than its limit of
-  // secrets and slots are live. Resolves whether it was stored. Rejects when
-  // the id is taken. An upload passes no admission: its used slot keeps the
-  // place until the upload removes it.
-  createSecret: (secret: StoredSecret, admission?: SecretAdmission) => Promise<boolean>;
+  // Stores the secret when fewer than `admission.limit` secrets and slots are
+  // live. Resolves whether it was stored. Rejects when the id is taken.
+  createSecret: (secret: StoredSecret, admission: SecretAdmission) => Promise<boolean>;
+  // Stores an upload's secret, without an admission, only while the used slot
+  // with this hash exists: the slot holds its place under the limit. Resolves
+  // whether it was stored. Rejects when the id is taken.
+  createUploadedSecret: (secret: StoredSecret, tokenHash: string) => Promise<boolean>;
   // The secret when it is unread, unexpired at `now`, and still holds its
   // ciphertext, or null.
   findPendingSecret: (id: string, now: string) => Promise<StoredSecret | null>;

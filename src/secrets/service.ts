@@ -60,8 +60,8 @@ function cryptoRandomBytes(length: number): Uint8Array<ArrayBuffer> {
 }
 
 // Control and format characters, which include bidi overrides that can
-// make a label display as something else.
-const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}]/u;
+// make a label display as something else, and line and paragraph separators.
+const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 
 function codePointCount(value: string): number {
   let count = 0;
@@ -146,20 +146,19 @@ export function createSecretService({
     return { limit: SECRET_LIMIT, now: at.toISOString() };
   }
 
-  // Encrypts and stores a new secret. With `admit`, the store refuses it past
-  // the limit; an upload does not admit, since its used slot holds the place
-  // until the upload removes it.
+  // Encrypts a new secret and stores it with `insert`, which resolves whether
+  // the store took it. Resolves null when it did not.
   async function storeSecret(
     { content, filename, label, ttlSeconds }: NewSecret,
-    admit: boolean,
-  ): Promise<CreatedSecret> {
+    insert: (secret: StoredSecret, at: Date) => Promise<boolean>,
+  ): Promise<CreatedSecret | null> {
     const at = now();
     const id = toBase64Url(randomBytes(ID_BYTES));
     const key = randomBytes(KEY_BYTES);
     const nonce = randomBytes(NONCE_BYTES);
     const ciphertext = await encrypt(key, nonce, id, new Uint8Array(content));
     const expiresAt = addSeconds(at, ttlSeconds).toISOString();
-    const stored = await store.createSecret(
+    const stored = await insert(
       {
         ciphertext: toBase64Url(ciphertext),
         createdAt: at.toISOString(),
@@ -169,12 +168,9 @@ export function createSecretService({
         label,
         nonce: toBase64Url(nonce),
       },
-      admit ? admissionAt(at) : undefined,
+      at,
     );
-    if (!stored) {
-      throw new SecretLimitError(SECRET_LIMIT);
-    }
-    return { expiresAt, id, key: toBase64Url(key) };
+    return stored ? { expiresAt, id, key: toBase64Url(key) } : null;
   }
 
   // The pending secret and its contents when `key` opens it, without
@@ -233,8 +229,9 @@ export function createSecretService({
 
   // The content is checked before the slot is taken, so an upload that
   // breaks a limit can be retried. Taking the slot marks it used, and it
-  // keeps its place under the limit until the secret is stored. A failed
-  // upload leaves the used slot for the sweep.
+  // keeps its place under the limit until the secret is stored. The secret is
+  // stored only while the slot exists, so an upload whose expired slot a sweep
+  // removed resolves null. A failed upload leaves the used slot for the sweep.
   async function upload(uploadToken: string, content: Uint8Array) {
     assertValidContent(content);
     if (decodeKey(uploadToken) === null) {
@@ -246,8 +243,12 @@ export function createSecretService({
       return null;
     }
     const { filename, label, ttlSeconds } = slot;
-    const created = await storeSecret({ content, filename, label, ttlSeconds }, false);
-    await store.removeUploadSlot(tokenHash);
+    const created = await storeSecret({ content, filename, label, ttlSeconds }, (secret) =>
+      store.createUploadedSecret(secret, tokenHash),
+    );
+    if (created !== null) {
+      await store.removeUploadSlot(tokenHash);
+    }
     return created;
   }
 
@@ -256,7 +257,14 @@ export function createSecretService({
     const filename = validFilename(input.filename);
     const ttlSeconds = validTtl(input.ttlSeconds);
     assertValidContent(input.content);
-    return storeSecret({ content: input.content, filename, label, ttlSeconds }, true);
+    const created = await storeSecret(
+      { content: input.content, filename, label, ttlSeconds },
+      (secret, at) => store.createSecret(secret, admissionAt(at)),
+    );
+    if (created === null) {
+      throw new SecretLimitError(SECRET_LIMIT);
+    }
+    return created;
   }
 
   async function find(id: string) {

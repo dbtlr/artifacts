@@ -16,6 +16,7 @@ import {
   findSecretState,
   insertClaim,
   insertSecret,
+  insertUploadedSecret,
   insertUploadSlot,
   secretFromRow,
   secretStateFromRow,
@@ -59,8 +60,12 @@ export class D1SecretStore implements SecretStore {
     await this.run(deleteUploadSlot(tokenHash));
   }
 
-  async createSecret(secret: StoredSecret, admission?: SecretAdmission): Promise<boolean> {
+  async createSecret(secret: StoredSecret, admission: SecretAdmission): Promise<boolean> {
     return (await this.run(insertSecret(secret, admission))) > 0;
+  }
+
+  async createUploadedSecret(secret: StoredSecret, tokenHash: string): Promise<boolean> {
+    return (await this.run(insertUploadedSecret(secret, tokenHash))) > 0;
   }
 
   async findPendingSecret(id: string, now: string): Promise<StoredSecret | null> {
