@@ -65,3 +65,5 @@ person on whatever device they have at hand, often without a session.
   network. That matches the trusted-network boundary.
 - Muninn cannot stop an agent from printing a secret it fetched. Tool descriptions and the skill
   tell agents to pipe, never print.
+- Upload and download URLs carry their token in the path, so it can reach access logs. Each token
+  works once and expires within minutes, so a log reader would have to act before the agent does.
