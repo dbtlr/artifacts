@@ -11,7 +11,7 @@ import {
   mediaTypeFromLegacyType,
 } from '../artifacts/media.js';
 import type { Artifact, ArtifactService, ArtifactType, MediaType } from '../artifacts/types.js';
-import { parseHandle } from '../secrets/handle.js';
+import { isSecretId } from '../secrets/handle.js';
 import type { SecretService } from '../secrets/types.js';
 import { buildArtifactUrl, buildSecretUploadUrl } from '../urls.js';
 
@@ -136,27 +136,26 @@ function artifactWithContentResult(
   };
 }
 
-const VIEW_LINK_PATH = /^\/s\/([^/]+)$/u;
+// Where a reference names a secret id: in a handle, `sec_<id>.`, or in a
+// view link's path, `/s/<id>`, with or without a scheme and host, and
+// whether its fragment follows as `#` or `%23`. Each needs a `.` or `/`
+// next to the id, which a key never holds, so neither matches inside a key.
+const HANDLE_ID = /(?<![\w-])sec_([\w-]{22})\./u;
+const VIEW_LINK_ID = /\/s\/([\w-]{22})(?![\w-])/u;
+// Quotes, backticks, and sentence punctuation around a bare id.
+const BARE_ID = /^["'`<]*([\w-]{22})["'`>.,;:]*$/u;
 
-// The secret id a reference names: a handle's id, a view link's id, or the
-// reference itself. The fragment is dropped first, so a key is never echoed.
-function secretIdOf(ref: string): string {
-  const [withoutFragment = ''] = ref.trim().split('#');
-  const handle = parseHandle(withoutFragment);
-  if (handle !== null) {
-    return handle.id;
-  }
-  if (URL.canParse(withoutFragment)) {
-    const id = VIEW_LINK_PATH.exec(new URL(withoutFragment).pathname)?.[1];
-    if (id !== undefined) {
-      return id;
-    }
-  }
-  return withoutFragment;
+// The secret id a reference names: a bare id, a handle's id, or a view link's
+// id, or undefined. Only a canonical secret id is returned, which is never a
+// key, so whatever surrounds it, a key is never echoed.
+function secretIdOf(ref: string): string | undefined {
+  const trimmed = ref.trim();
+  const id = (HANDLE_ID.exec(trimmed) ?? VIEW_LINK_ID.exec(trimmed) ?? BARE_ID.exec(trimmed))?.[1];
+  return id !== undefined && isSecretId(id) ? id : undefined;
 }
 
 const SECRET_UPLOAD_RECIPE =
-  '<command that prints the secret> | curl -sS --data-binary @- "$uploadUrl"';
+  '<command that prints the secret> | curl -fsS --data-binary @- "$uploadUrl"';
 
 // One-time secret tools (ADR-0008). None accepts or returns secret contents:
 // the agent moves the bytes with curl, outside its transcript.
@@ -169,7 +168,9 @@ function registerSecretTools(server: McpServer, secrets: SecretService): void {
         'single-use uploadUrl that expires in 15 minutes. Never pass the secret to a tool, and ' +
         'never print, echo, or log it: pipe it straight into the upload URL with ' +
         `\`${SECRET_UPLOAD_RECIPE}\`. That command prints only the view link; give the link to ` +
-        'the owner, who can reveal the secret once. Use secret_status to see whether it was read.',
+        'the owner, who can reveal the secret once. If it prints no link, the upload failed: call ' +
+        'create_secret_upload again. Do not inspect or echo the input. Use secret_status to see ' +
+        'whether it was read.',
       inputSchema: {
         filename: z
           .string()
@@ -211,7 +212,9 @@ function registerSecretTools(server: McpServer, secrets: SecretService): void {
     async ({ ref }) => {
       try {
         const id = secretIdOf(ref);
-        return jsonResult({ id, status: await secrets.status(id) });
+        return jsonResult(
+          id === undefined ? { status: 'unknown' } : { id, status: await secrets.status(id) },
+        );
       } catch (error) {
         return toolError(errorMessage(error));
       }

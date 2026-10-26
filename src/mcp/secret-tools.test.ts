@@ -81,7 +81,7 @@ async function call(
 
 const uploadResultSchema = z.strictObject({ expiresAt: z.string(), uploadUrl: z.string() });
 const statusResultSchema = z.strictObject({
-  id: z.string(),
+  id: z.string().optional(),
   status: z.enum(['expired', 'pending', 'read', 'unknown']),
 });
 
@@ -121,8 +121,11 @@ describe('secret tools', () => {
     const byName = new Map(tools.map((tool) => [tool.name, tool]));
 
     const upload = byName.get('create_secret_upload');
-    expect(upload?.description).toContain('curl -sS --data-binary @- "$uploadUrl"');
+    expect(upload?.description).toContain('curl -fsS --data-binary @- "$uploadUrl"');
     expect(upload?.description).toMatch(/never print/iu);
+    expect(upload?.description).toContain(
+      'If it prints no link, the upload failed: call create_secret_upload again. Do not inspect or echo the input.',
+    );
     expect(Object.keys(upload?.inputSchema.properties ?? {}).toSorted()).toEqual([
       'filename',
       'label',
@@ -194,6 +197,70 @@ describe('secret_status', () => {
       id: 'AAAAAAAAAAAAAAAAAAAAAA',
       status: 'unknown',
     });
-    await expect(statusOf('not a ref')).resolves.toEqual({ id: 'not a ref', status: 'unknown' });
+    await expect(statusOf('not a ref')).resolves.toEqual({ status: 'unknown' });
+  });
+
+  it('finds the id in every way a reference may be written, never echoing the key', async () => {
+    const { id, key } = await uploadedSecret();
+    const handle = formatHandle(id, key);
+    const link = `${BASE_URL}/s/${id}#${key}`;
+    const refs = [
+      `  ${id}  `,
+      `${id}.`,
+      `\`${handle}\``,
+      `"${handle}"`,
+      `'${handle}'`,
+      `handle: ${handle}`,
+      `${handle}.`,
+      `\`${link}\``,
+      `${link}.`,
+      `${BASE_URL}/s/${id}%23${key}`,
+      `/s/${id}#${key}`,
+      `/s/${id}%23${key}`,
+      `muninn.example/s/${id}#${key}`,
+      `muninn.example/s/${id}%23${key}`,
+      `<${link}>`,
+    ];
+
+    const results = await Promise.all(refs.map(async (ref) => call('secret_status', { ref })));
+
+    expect(
+      results.map((result, index) => [refs[index], result.isError, JSON.parse(result.text)]),
+    ).toEqual(refs.map((ref) => [ref, false, { id, status: 'pending' }]));
+    for (const result of results) {
+      expect(result.text).not.toContain(key);
+    }
+  });
+
+  it('reports a read secret named by a relative or schemeless link as read', async () => {
+    const { id, key } = await uploadedSecret();
+    await secrets.reveal(id, key);
+
+    await expect(statusOf(`/s/${id}#${key}`)).resolves.toEqual({ id, status: 'read' });
+    await expect(statusOf(`muninn.example/s/${id}#${key}`)).resolves.toEqual({
+      id,
+      status: 'read',
+    });
+  });
+
+  it('reports a reference with no secret id as unknown, with no id and no key', async () => {
+    const { id, key } = await uploadedSecret();
+    const refs = [
+      key,
+      `#${key}`,
+      `sec_.${key}`,
+      `sec_${id.slice(1)}.${key}`,
+      `${BASE_URL}/s/#${key}`,
+      `${BASE_URL}/s/upload/${key}`,
+      `not a ref ${key}`,
+      '',
+    ];
+
+    const results = await Promise.all(refs.map(async (ref) => call('secret_status', { ref })));
+
+    for (const result of results) {
+      expect(result.text).not.toContain(key);
+      expect(JSON.parse(result.text)).toEqual({ status: 'unknown' });
+    }
   });
 });
