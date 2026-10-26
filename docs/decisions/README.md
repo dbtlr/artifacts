@@ -14,3 +14,4 @@ and do not bind anything.
 | [0005](0005-per-client-login-limit.md) | accepted | Logins are limited per client address, read from a header only when the operator names it, under a total ceiling; a password shorter than 16 characters stops startup. |
 | [0006](0006-html-artifact-sandbox.md) | accepted | HTML artifacts run in an opaque-origin CSP sandbox that allows scripts, new windows, and dialogs, but not storage or forms. |
 | [0007](0007-rename-to-muninn.md) | accepted | The product is named Muninn and its variables `MUNINN_*`; any `ARTIFACTS_*` variable stops startup, and an artifact keeps its name. |
+| [0008](0008-one-time-secrets.md) | accepted | One-time secrets are a separate entity, encrypted with a key Muninn never keeps; MCP returns single-use URLs and handles, never contents, and a view link alone reads a secret once. |
