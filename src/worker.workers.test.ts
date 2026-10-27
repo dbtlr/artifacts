@@ -116,7 +116,7 @@ const toolResponseSchema = z.object({
     isError: z.boolean().optional(),
   }),
 });
-const addedArtifactSchema = z.object({ id: z.string() });
+const addedArtifactSchema = z.object({ id: z.string(), url: z.string() });
 
 describe('worker configuration', () => {
   it.each([
@@ -149,7 +149,22 @@ describe('worker configuration', () => {
     for (const body of bodies) {
       expect(body).toContain(setting);
       expect(body).not.toContain('<');
+      expect(body).not.toContain('unset it');
     }
+  });
+
+  it('does not echo an invalid public base URL, which may hold credentials', async () => {
+    const res = await call(
+      '/',
+      {},
+      workerEnv({ MUNINN_PUBLIC_BASE_URL: 'https://user:pass@muninn.example/?token=1' }),
+    );
+
+    expect(res.status).toBe(500);
+    const body = await res.text();
+    expect(body).toContain('MUNINN_PUBLIC_BASE_URL');
+    expect(body).not.toContain('user:pass');
+    expect(body).not.toContain('token');
   });
 
   it('refuses to run the scheduled sweep when misconfigured', async () => {
@@ -209,6 +224,36 @@ describe('worker owner auth', () => {
     expect(limited.status).toBe(429);
     expect(other.status).toBe(303);
   });
+
+  it('ignores MUNINN_CLIENT_ADDRESS_HEADER and still counts by CF-Connecting-IP', async () => {
+    const testEnv = workerEnv({ MUNINN_CLIENT_ADDRESS_HEADER: 'X-Client' });
+    await Promise.all(
+      Array.from({ length: LOGIN_ATTEMPT_LIMIT }, async () =>
+        call(
+          '/login',
+          loginRequest('the wrong password', {
+            'CF-Connecting-IP': '203.0.113.1',
+            'X-Client': 'client-a',
+          }),
+          testEnv,
+        ),
+      ),
+    );
+
+    const sameAddress = await call(
+      '/login',
+      loginRequest(PASSWORD, { 'CF-Connecting-IP': '203.0.113.1', 'X-Client': 'client-b' }),
+      testEnv,
+    );
+    const otherAddress = await call(
+      '/login',
+      loginRequest(PASSWORD, { 'CF-Connecting-IP': '203.0.113.2', 'X-Client': 'client-a' }),
+      testEnv,
+    );
+
+    expect(sameAddress.status).toBe(429);
+    expect(otherAddress.status).toBe(303);
+  });
 });
 
 describe('worker MCP', () => {
@@ -262,7 +307,10 @@ describe('worker MCP', () => {
     expect(added.status).toBe(200);
     const { result } = toolResponseSchema.parse(await added.json());
     expect(result.isError).toBeUndefined();
-    const { id } = addedArtifactSchema.parse(JSON.parse(result.content[0]?.text ?? '{}'));
+    const { id, url } = addedArtifactSchema.parse(JSON.parse(result.content[0]?.text ?? '{}'));
+    // The shared app reads the base URL from process.env, which workerd fills
+    // from the same bindings.
+    expect(url).toBe(`${BASE_URL}/a/${id}`);
 
     const cookie = await logIn(testEnv);
     const page = await call(`/a/${id}`, { headers: { Cookie: cookie } }, testEnv);
@@ -299,6 +347,22 @@ describe('worker static files', () => {
     expect(assets.requested).toEqual([file]);
   });
 
+  it.each(['POST', 'PUT', 'DELETE'])(
+    'falls through to the app for a %s, without asking Static Assets',
+    async (method) => {
+      const assets = stubAssets();
+
+      const res = await call(
+        '/assets/app.css',
+        { headers: { Origin: BASE_URL }, method },
+        workerEnv({ ASSETS: assets }),
+      );
+
+      expect(assets.requested).toEqual([]);
+      expect(res.status).toBe(404);
+    },
+  );
+
   it('falls through to the app when Static Assets has no such file', async () => {
     const assets = stubAssets();
 
@@ -324,5 +388,23 @@ describe('worker scheduled handler', () => {
 
     const { results } = await env.MUNINN_DB.prepare('SELECT id FROM secrets').all();
     expect(results).toEqual([]);
+  });
+
+  it('keeps a live secret and the API keys', async () => {
+    const testEnv = workerEnv();
+    const { id } = await createSecretService({ store: new D1SecretStore(env.MUNINN_DB) }).create({
+      content: new TextEncoder().encode('live'),
+      label: 'Live',
+    });
+    await createWorkerServices(testEnv).auth.createApiKey('kept key');
+    const ctx = createExecutionContext();
+
+    await worker.scheduled(createScheduledController(), testEnv, ctx);
+    await waitOnExecutionContext(ctx);
+
+    const secrets = await env.MUNINN_DB.prepare('SELECT id FROM secrets').all();
+    const keys = await env.MUNINN_DB.prepare('SELECT name FROM api_keys').all();
+    expect(secrets.results).toEqual([{ id }]);
+    expect(keys.results).toEqual([{ name: 'kept key' }]);
   });
 });
