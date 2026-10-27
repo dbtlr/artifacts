@@ -1,8 +1,9 @@
 // The Cloudflare Workers profile (ADR-0009). src/worker.ts is the entry; the
 // Node profile ignores this file. Settings are not committed: the owner
-// password is a secret (`wrangler secret put MUNINN_OWNER_PASSWORD`) and the
-// public base URL a variable set on the Worker, and the Worker serves only an
-// error until both are valid.
+// password and the public base URL are both secrets (`wrangler secret put
+// MUNINN_OWNER_PASSWORD`, `wrangler secret put MUNINN_PUBLIC_BASE_URL`), since
+// `wrangler deploy` drops variables this file does not list, and the Worker
+// serves only an error until both are valid.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "muninn",
