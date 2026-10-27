@@ -261,7 +261,10 @@ export const SecretHandlePage: FC<SecretHandlePageProps> = ({ expiresAt, handle,
     </button>
     <p class={fine}>
       Shown once. Works once, through Muninn’s MCP, until{' '}
-      <time datetime={expiresAt}>{formatTimestamp(expiresAt)}</time>.
+      <time datetime={expiresAt} class="whitespace-nowrap">
+        {formatTimestamp(expiresAt)}
+      </time>
+      .
     </p>
     <p class={fine}>
       <a href="/secrets/new" class="underline underline-offset-2">
