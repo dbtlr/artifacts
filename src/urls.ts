@@ -58,6 +58,11 @@ export function buildSecretUploadUrl(uploadToken: string): string {
   return `${resolvePublicBaseUrl()}/s/upload/${uploadToken}`;
 }
 
+// A one-time secret's single-use download URL, from a claim (ADR-0008).
+export function buildSecretDownloadUrl(claimToken: string): string {
+  return `${resolvePublicBaseUrl()}/s/download/${claimToken}`;
+}
+
 // A one-time secret's view link. The key is in the fragment, so a browser
 // never sends it to the server or puts it in a Referer.
 export function buildSecretViewUrl(id: string, key: string): string {

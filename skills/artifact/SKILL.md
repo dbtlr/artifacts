@@ -1,6 +1,6 @@
 ---
 name: artifact
-description: Share documents, images, and PDFs with a human as persistent links via the Muninn MCP server, and send the owner one-time secrets. Use when the user asks to publish or share an artifact, document, diagram, generated image, or PDF with a link, or to send them a token, password, or key file.
+description: Share documents, images, and PDFs with a human as persistent links via the Muninn MCP server, and pass one-time secrets to and from the owner. Use when the user asks to publish or share an artifact, document, diagram, generated image, or PDF with a link, to send them a token, password, or key file, or gives you a `sec_` secret handle.
 ---
 
 # Artifact — Share Documents and Files via Persistent Links
@@ -95,6 +95,20 @@ Use this when the owner needs a token, password, or key file that you hold or ca
    The secret is stored exactly as piped, so prefer a command that adds no trailing newline, such as `printf %s "$TOKEN"` rather than `echo`. For a file, use `curl -fsS --data-binary @path/to/file "$uploadUrl"`. The upload URL works once and expires after 15 minutes.
 3. The command prints only a view link. Give that link to the owner; it reveals the secret once. If it prints no link, the upload failed: call `create_secret_upload` again. Do not inspect or echo the input.
 4. To see whether the owner has read it, call `secret_status` with the link or its id.
+
+## Receiving a Secret from the Owner
+
+Use this when the owner gives you a handle, `sec_<id>.<key>`, for a secret they created in Muninn. The secret must never enter your transcript: never print, echo, or `cat` it, never pass it to a tool, and never write it to a file you then read.
+
+1. Call `claim_secret` with the handle. It returns a single-use `downloadUrl` that works once, within 5 minutes.
+2. Pipe the download straight into the command that needs the secret:
+
+   ```bash
+   curl -fsS -X POST "$downloadUrl" | <command that consumes it>
+   ```
+
+   For example, `curl -fsS -X POST "$downloadUrl" | gh auth login --with-token`. The download deletes the secret from Muninn.
+3. If the pipe fails, do not retry the download or inspect its output: ask the owner for a new secret. If `claim_secret` reports that no secret can be claimed, the handle is unknown, used up, expired, mistyped, or claimed too many times in the last few minutes: ask the owner for a new one.
 
 ## Important Behaviors
 

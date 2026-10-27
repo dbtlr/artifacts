@@ -8,6 +8,7 @@ import { ApiKeysPage } from '../components/api-keys-page.js';
 import { Layout } from '../components/layout.js';
 import { LoginPage } from '../components/login-page.js';
 import { isOwnOrigin, resolvePublicBaseUrl } from '../urls.js';
+import { showOnceCookieOptions } from './cookies.js';
 import { SESSION_LIFETIME_SECONDS } from './owner-auth.js';
 import type { CreatedApiKey, OwnerAuth } from './owner-auth.js';
 
@@ -30,19 +31,20 @@ function isPublicPath(path: string): boolean {
 }
 
 // One-time secrets travel by capability, not session (ADR-0008). An upload
-// URL's token authorizes its POST, and curl sends no Origin, so it skips the
-// Origin rule too. A view link's key, which only the page's script holds,
-// authorizes a reveal; the page and its Reveal POST need no session, but the
-// POST keeps the Origin rule. Each exemption is named methods on one path
-// shape (the page's GET and HEAD, the others' POST), with segments of the
-// base64url alphabet only, so nothing else that routing could match is let
-// through.
+// or download URL's token authorizes its POST, and curl sends no Origin, so
+// it skips the Origin rule too. A view link's key, which only the page's
+// script holds, authorizes a reveal; the page and its Reveal POST need no
+// session, but the POST keeps the Origin rule. Each exemption is named
+// methods on one path shape (the page's GET and HEAD, the others' POST), with
+// segments of the base64url alphabet only, so nothing else that routing could
+// match is let through.
 const SECRET_UPLOAD_PATH = /^\/s\/upload\/[\w-]+$/u;
+const SECRET_DOWNLOAD_PATH = /^\/s\/download\/[\w-]+$/u;
 const SECRET_VIEW_PATH = /^\/s\/[\w-]+$/u;
 const SECRET_REVEAL_PATH = /^\/s\/[\w-]+\/reveal$/u;
 
-function isSecretUpload(method: string, path: string): boolean {
-  return method === 'POST' && SECRET_UPLOAD_PATH.test(path);
+function isSecretTransfer(method: string, path: string): boolean {
+  return method === 'POST' && (SECRET_UPLOAD_PATH.test(path) || SECRET_DOWNLOAD_PATH.test(path));
 }
 
 function isSecretViewOrReveal(method: string, path: string): boolean {
@@ -88,18 +90,16 @@ function cookieOptions(): CookieOptions {
   };
 }
 
-function newKeyCookieOptions(): CookieOptions {
-  return { ...cookieOptions(), path: '/keys', sameSite: 'Strict' };
-}
-
 // The key a create form's POST left for this page, deleting it so a refresh
-// does not show it again. The id and the key hold no `.`.
+// does not show it again. The id and the key hold no `.`. A replayed cookie
+// shows the key again, but its value is the key, so a replay reveals nothing
+// its sender did not already hold.
 function takeNewKey(c: Context): CreatedApiKey | undefined {
   const value = getCookie(c, NEW_KEY_COOKIE);
   if (value === undefined) {
     return undefined;
   }
-  deleteCookie(c, NEW_KEY_COOKIE, newKeyCookieOptions());
+  deleteCookie(c, NEW_KEY_COOKIE, showOnceCookieOptions('/keys'));
   const [id, key, ...rest] = value.split('.');
   return id === undefined || key === undefined || rest.length > 0 ? undefined : { id, key };
 }
@@ -225,7 +225,7 @@ async function refuseWithoutSession(c: Context, auth: OwnerAuth): Promise<Respon
           'WWW-Authenticate': 'Bearer',
         });
   }
-  if (isSecretUpload(c.req.method, path)) {
+  if (isSecretTransfer(c.req.method, path)) {
     return undefined;
   }
   if (!SAFE_METHODS.has(c.req.method) && !hasAllowedOrigin(c)) {
@@ -354,7 +354,7 @@ export function installOwnerAuth(
     }
     const { id, key } = await auth.createApiKey(name);
     setCookie(c, NEW_KEY_COOKIE, `${id}.${key}`, {
-      ...newKeyCookieOptions(),
+      ...showOnceCookieOptions('/keys'),
       maxAge: NEW_KEY_COOKIE_SECONDS,
     });
     return c.redirect('/keys', 303);

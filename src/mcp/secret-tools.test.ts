@@ -5,14 +5,19 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { z } from 'zod';
 
 import { SqliteSecretStore } from '../data/sqlite-secret-store.js';
 import type { ArtifactService } from '../data/store.js';
 import { createByteNativeArtifactService } from '../data/store.js';
 import { formatHandle } from '../secrets/handle.js';
-import { createSecretService, UPLOAD_SLOT_LIFETIME_SECONDS } from '../secrets/service.js';
+import {
+  CLAIM_LIFETIME_SECONDS,
+  CLAIMS_PER_SECRET,
+  createSecretService,
+  UPLOAD_SLOT_LIFETIME_SECONDS,
+} from '../secrets/service.js';
 import type { SecretService } from '../secrets/types.js';
 import { createMcpServer } from './server.js';
 
@@ -133,6 +138,14 @@ describe('secret tools', () => {
     ]);
     expect(byName.get('secret_status')?.description).toBeTruthy();
     expect(Object.keys(byName.get('secret_status')?.inputSchema.properties ?? {})).toEqual(['ref']);
+
+    const claim = byName.get('claim_secret');
+    expect(claim?.description).toContain('curl -fsS -X POST "$downloadUrl" | <command');
+    expect(claim?.description).toMatch(/never print, echo, or `?cat`?/iu);
+    expect(claim?.description).toMatch(/once/iu);
+    expect(claim?.description).toMatch(/5 minutes/iu);
+    expect(claim?.description).toMatch(/ask the owner for a new secret/iu);
+    expect(Object.keys(claim?.inputSchema.properties ?? {})).toEqual(['handle']);
   });
 
   it('are absent without a secret service', async () => {
@@ -144,6 +157,7 @@ describe('secret tools', () => {
 
     expect(tools.map((tool) => tool.name)).not.toContain('create_secret_upload');
     expect(tools.map((tool) => tool.name)).not.toContain('secret_status');
+    expect(tools.map((tool) => tool.name)).not.toContain('claim_secret');
   });
 });
 
@@ -264,6 +278,158 @@ describe('secret_status', () => {
     for (const result of results) {
       expect(result.text).not.toContain(key);
       expect(JSON.parse(result.text)).toEqual({ status: 'unknown' });
+    }
+  });
+});
+
+const claimResultSchema = z.strictObject({ downloadUrl: z.string(), expiresAt: z.string() });
+
+function downloadTokenOf(downloadUrl: string): string {
+  const match = new RegExp(`^${BASE_URL}/s/download/([\\w-]{43})$`, 'u').exec(downloadUrl);
+  if (match === null) {
+    throw new Error(`not a download URL: ${downloadUrl}`);
+  }
+  return match[1]!;
+}
+
+async function ownerSecret(content = SECRET): Promise<{ id: string; key: string }> {
+  return secrets.create({ content: new TextEncoder().encode(content), label: 'Deploy token' });
+}
+
+describe('claim_secret', () => {
+  it('returns only a single-use download URL and its expiry, without burning the secret', async () => {
+    const { id, key } = await ownerSecret();
+
+    const result = await call('claim_secret', { handle: formatHandle(id, key) });
+
+    expect(result.isError).toBe(false);
+    expect(result.text).not.toContain(key);
+    expect(result.text).not.toContain(SECRET);
+    const { downloadUrl, expiresAt } = claimResultSchema.parse(JSON.parse(result.text));
+    expect(expiresAt).toBe(new Date(clock.getTime() + CLAIM_LIFETIME_SECONDS * 1000).toISOString());
+    await expect(secrets.status(id)).resolves.toBe('pending');
+    const downloaded = await secrets.download(downloadTokenOf(downloadUrl));
+    expect(new TextDecoder().decode(downloaded?.content)).toBe(SECRET);
+    await expect(secrets.download(downloadTokenOf(downloadUrl))).resolves.toBeNull();
+  });
+
+  it('accepts a handle wrapped in whitespace, quotes, backticks, or a sentence', async () => {
+    const wraps = [
+      (handle: string) => `  ${handle}\n`,
+      (handle: string) => `"${handle}"`,
+      (handle: string) => `'${handle}'`,
+      (handle: string) => `\`${handle}\``,
+      (handle: string) => `\`\`\`\n${handle}\n\`\`\``,
+      (handle: string) => `handle: ${handle}`,
+      (handle: string) => `${handle}.`,
+    ];
+    // A secret apiece: each has room for only a few unexpired claims.
+    const owned = await Promise.all(wraps.map(async () => ownerSecret()));
+
+    const results = await Promise.all(
+      wraps.map(async (wrap, index) =>
+        call('claim_secret', { handle: wrap(formatHandle(owned[index]!.id, owned[index]!.key)) }),
+      ),
+    );
+
+    expect(results.map((result) => result.isError)).toEqual(wraps.map(() => false));
+    for (const [index, result] of results.entries()) {
+      expect(result.text).not.toContain(owned[index]!.key);
+      expect(() => claimResultSchema.parse(JSON.parse(result.text))).not.toThrow();
+    }
+  });
+
+  it('refuses unknown, read, expired, malformed, and wrong-key handles with one message that echoes nothing', async () => {
+    const expiring = await ownerSecret();
+    advance(24 * 60 * 60 - 1);
+    const beforeExpiry = await call('claim_secret', {
+      handle: formatHandle(expiring.id, expiring.key),
+    });
+    expect(beforeExpiry.isError).toBe(false);
+    advance(1);
+    const read = await ownerSecret();
+    await secrets.reveal(read.id, read.key);
+    const other = await ownerSecret();
+    const pending = await ownerSecret();
+    const handles = [
+      formatHandle('AAAAAAAAAAAAAAAAAAAAAA', pending.key),
+      formatHandle(read.id, read.key),
+      formatHandle(expiring.id, expiring.key),
+      `sec_${pending.id}.${pending.key.slice(1)}`,
+      `sec_${pending.id}.${pending.key}x`,
+      // Nothing may extend a handle on either side.
+      `x${formatHandle(pending.id, pending.key)}`,
+      `${formatHandle(pending.id, pending.key)}A`,
+      pending.key,
+      `${BASE_URL}/s/${pending.id}#${pending.key}`,
+      'not a handle',
+      '',
+      formatHandle(pending.id, other.key),
+    ];
+
+    const results = await Promise.all(
+      handles.map(async (handle) => call('claim_secret', { handle })),
+    );
+
+    const [first] = results;
+    expect(first?.isError).toBe(true);
+    for (const [index, result] of results.entries()) {
+      expect([handles[index], result]).toEqual([handles[index], first]);
+    }
+    for (const value of [read, other, expiring, pending]) {
+      expect(first?.text).not.toContain(value.key);
+      expect(first?.text).not.toContain(value.id);
+    }
+    expect(first?.text).not.toContain(SECRET);
+    const valid = await call('claim_secret', { handle: formatHandle(pending.id, pending.key) });
+    expect(valid.isError).toBe(false);
+  });
+
+  it('refuses a claim past the per-secret cap with the same message, which says so', async () => {
+    const { id, key } = await ownerSecret();
+    const handle = formatHandle(id, key);
+    const claims = await Promise.all(
+      Array.from({ length: CLAIMS_PER_SECRET }, async () => call('claim_secret', { handle })),
+    );
+    expect(claims.map((claim) => claim.isError)).toEqual(claims.map(() => false));
+
+    const capped = await call('claim_secret', { handle });
+    const unknown = await call('claim_secret', { handle: 'not a handle' });
+
+    expect(capped).toEqual(unknown);
+    expect(capped.isError).toBe(true);
+    expect(capped.text).toMatch(/claimed too many times in the last few minutes/u);
+    await expect(secrets.status(id)).resolves.toBe('pending');
+    advance(CLAIM_LIFETIME_SECONDS);
+    expect((await call('claim_secret', { handle })).isError).toBe(false);
+  });
+
+  it('refuses with the same message when the secret service fails, echoing nothing', async () => {
+    const { id, key } = await ownerSecret();
+    await client.close();
+    await closeServer();
+    await connect({
+      ...secrets,
+      claim: async () => {
+        throw new Error('store unavailable');
+      },
+    });
+    const logged = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+
+    try {
+      const failed = await call('claim_secret', { handle: formatHandle(id, key) });
+      const unknown = await call('claim_secret', { handle: 'not a handle' });
+
+      expect(failed).toEqual(unknown);
+      expect(failed.text).not.toContain(id);
+      expect(failed.text).not.toContain(key);
+      expect(logged).toHaveBeenCalledOnce();
+      const line = logged.mock.calls[0]!.map(String).join(' ');
+      expect(line).toContain('store unavailable');
+      expect(line).not.toContain(id);
+      expect(line).not.toContain(key);
+    } finally {
+      logged.mockRestore();
     }
   });
 });

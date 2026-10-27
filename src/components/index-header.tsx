@@ -12,7 +12,8 @@ type IndexHeaderProps = {
   // Every project with its count, for the selector, regardless of scope.
   projects: CountedProject[];
   // True when owner auth is on, so the page was served to a session: shows
-  // the API keys link and the Log out form.
+  // the API keys link and the Log out form. The New secret link shows
+  // either way.
   showLogOut?: boolean;
   // Kind counts and the active kind come from the page's own (scoped) view.
   view: IndexView;
@@ -91,6 +92,9 @@ export const IndexHeader: FC<IndexHeaderProps> = ({
       <span class="text-[13px] whitespace-nowrap text-stone-500 tabular-nums dark:text-ink-400">
         {artifactsLabel(view.total)}
       </span>
+      <a href="/secrets/new" class={kindLink}>
+        New secret
+      </a>
       {showLogOut ? (
         <a href="/keys" class={kindLink}>
           API keys

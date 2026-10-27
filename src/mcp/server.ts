@@ -11,9 +11,9 @@ import {
   mediaTypeFromLegacyType,
 } from '../artifacts/media.js';
 import type { Artifact, ArtifactService, ArtifactType, MediaType } from '../artifacts/types.js';
-import { isSecretId } from '../secrets/handle.js';
+import { isSecretId, parseHandle } from '../secrets/handle.js';
 import type { SecretService } from '../secrets/types.js';
-import { buildArtifactUrl, buildSecretUploadUrl } from '../urls.js';
+import { buildArtifactUrl, buildSecretDownloadUrl, buildSecretUploadUrl } from '../urls.js';
 
 const ARTIFACT_TYPE = z.enum(['html', 'md', 'txt']);
 const MEDIA_TYPE = z.enum([
@@ -154,8 +154,27 @@ function secretIdOf(ref: string): string | undefined {
   return id !== undefined && isSecretId(id) ? id : undefined;
 }
 
+// A whole handle inside a reference, with nothing that could extend its id
+// or key on either side, so whitespace, quotes, backticks, and sentence
+// punctuation around it are ignored.
+const HANDLE_IN_REF = /(?<![\w-])sec_[\w-]{22}\.[\w-]{43}(?![\w-])/u;
+
+// The id and key of the handle a reference holds, or null.
+function handleOf(ref: string): { id: string; key: string } | null {
+  const handle = HANDLE_IN_REF.exec(ref)?.[0];
+  return handle === undefined ? null : parseHandle(handle);
+}
+
 const SECRET_UPLOAD_RECIPE =
   '<command that prints the secret> | curl -fsS --data-binary @- "$uploadUrl"';
+const SECRET_DOWNLOAD_RECIPE = 'curl -fsS -X POST "$downloadUrl" | <command that consumes it>';
+// One message for every handle that cannot be claimed, whatever the reason,
+// quoting none of it: unknown, read, expired, mistyped, or a pending secret
+// that already has CLAIMS_PER_SECRET unexpired claims. A service failure gets
+// it too, so no refusal says which it was.
+const CLAIM_REFUSED =
+  'No secret can be claimed with that handle: it is unknown, already read, expired, mistyped, ' +
+  'or claimed too many times in the last few minutes. Ask the owner for a new secret.';
 
 // One-time secret tools (ADR-0008). None accepts or returns secret contents:
 // the agent moves the bytes with curl, outside its transcript.
@@ -195,6 +214,39 @@ function registerSecretTools(server: McpServer, secrets: SecretService): void {
         return jsonResult({ expiresAt, uploadUrl: buildSecretUploadUrl(uploadToken) });
       } catch (error) {
         return toolError(errorMessage(error));
+      }
+    },
+  );
+
+  server.registerTool(
+    'claim_secret',
+    {
+      description:
+        'Receive a one-time secret the owner gave you as a handle, sec_<id>.<key>. Returns a ' +
+        'single-use downloadUrl that works once, within 5 minutes. Never print, echo, or `cat` ' +
+        'the secret, never pass it to a tool, and never write it where you will read it: pipe ' +
+        `it straight into the command that consumes it with \`${SECRET_DOWNLOAD_RECIPE}\`. ` +
+        'If the pipe fails, do not retry or inspect the output: ask the owner for a new secret.',
+      inputSchema: {
+        handle: z.string().describe('The sec_ handle the owner gave you'),
+      },
+    },
+    async ({ handle }) => {
+      try {
+        const parsed = handleOf(handle);
+        const claim = parsed === null ? null : await secrets.claim(parsed.id, parsed.key);
+        return claim === null
+          ? toolError(CLAIM_REFUSED)
+          : jsonResult({
+              downloadUrl: buildSecretDownloadUrl(claim.claimToken),
+              expiresAt: claim.expiresAt,
+            });
+      } catch (error) {
+        // The service never puts a handle or key in an error, so the cause
+        // is logged here and the agent gets the one refusal.
+        const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+        process.stderr.write(`claim_secret failed: ${detail}\n`);
+        return toolError(CLAIM_REFUSED);
       }
     },
   );

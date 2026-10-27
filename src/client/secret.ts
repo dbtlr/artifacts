@@ -5,6 +5,9 @@
 // entry, then sends it in the Reveal POST body, which burns the secret and
 // returns its bytes. secret-reveal.ts decides how the bytes are shown and
 // what each response means. Every page text is written with textContent.
+//
+// The owner's new-secret pages load it too, to show and run the form's Show
+// toggle and the handle page's Copy handle button.
 
 import { classifyReveal, copyText, keyFromFragment, presentSecret } from './secret-reveal.js';
 import type { RevealOutcome } from './secret-reveal.js';
@@ -125,4 +128,40 @@ function start(): void {
   });
 }
 
-start();
+// Copies the handle exactly as shown, with no newline, so a pasted handle
+// parses. Without this script the button stays hidden and the handle is
+// selectable text.
+function startHandleCopy(button: HTMLButtonElement): void {
+  const handle = element('secret-handle').textContent?.trim() ?? '';
+  button.hidden = false;
+  button.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(handle);
+      button.textContent = 'Copied';
+    } catch {
+      button.textContent = 'Select the handle to copy it';
+    }
+  });
+}
+
+// Shows the form's secret field in clear, or masks it again. Without this
+// script the toggle stays hidden and the field stays masked.
+function startMaskToggle(button: HTMLButtonElement): void {
+  const field = element('secret-content');
+  button.hidden = false;
+  button.addEventListener('click', () => {
+    const masked = field.toggleAttribute('data-masked');
+    button.textContent = masked ? 'Show' : 'Hide';
+    button.setAttribute('aria-pressed', String(!masked));
+  });
+}
+
+const handleCopy = document.querySelector<HTMLButtonElement>('#secret-handle-copy');
+const maskToggle = document.querySelector<HTMLButtonElement>('#secret-content-toggle');
+if (handleCopy !== null) {
+  startHandleCopy(handleCopy);
+} else if (maskToggle !== null) {
+  startMaskToggle(maskToggle);
+} else {
+  start();
+}

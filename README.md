@@ -89,7 +89,7 @@ no `Origin` and work. A browser-based MCP client sends the origin of its own pag
 For example, MCP Inspector in direct connection mode cannot connect.
 
 The server exposes `add_artifact`, `remove_artifact`, `list_artifacts`, `list_collections`, and
-`get_artifact`, and `create_secret_upload` and `secret_status` for
+`get_artifact`, and `create_secret_upload`, `claim_secret`, and `secret_status` for
 [one-time secrets](#one-time-secrets). Artifacts are immutable: there is no update tool. A revision or variation is a new
 artifact, usually in the same collection, so earlier versions keep their links.
 
@@ -152,6 +152,21 @@ expired, or unknown link shows the same "Nothing to reveal" page. `secret_status
 link, or handle and reports `pending`, `read`, `expired`, or `unknown`. Each secret is encrypted
 under a key that Muninn does not keep; the key travels only in the link's fragment. See
 [ADR-0008](docs/decisions/0008-one-time-secrets.md).
+
+The owner can send an agent a secret the same way. **New secret** in the gallery header opens
+`/secrets/new`, which takes a label, the secret, and an expiry of 1 hour, 24 hours (the default), or
+7 days. **Seal secret** shows the secret's handle, `sec_<id>.<key>`, once; a refresh does not show it
+again. Line breaks typed into the form are stored as LF. Give the handle to the agent, which calls
+`claim_secret` with it and pipes the returned download URL into the command that needs the secret:
+
+```sh
+curl -fsS -X POST "$downloadUrl" | <command that consumes it>
+```
+
+The download URL works once and expires after 5 minutes, and the download deletes the secret from
+Muninn. An unknown, read, expired, or mistyped handle, or one claimed too many times in the last
+few minutes, gets one error that does not say which. A handle works only through MCP, so with owner
+auth on it is useless without an API key.
 
 ### Optional artifact skill
 
@@ -251,8 +266,9 @@ With a password set:
 
 - Every page and every `/a/:id` link redirects to `/login` until the owner logs in. The login form,
   `/assets/*`, and the root icons stay public, so the Docker health check still passes.
-- A secret's upload URL, view page, and Reveal need no session: the upload token and the link's
-  key authorize them ([ADR-0008](docs/decisions/0008-one-time-secrets.md)).
+- A secret's upload URL, download URL, view page, and Reveal need no session: the URL's token and
+  the link's key authorize them ([ADR-0008](docs/decisions/0008-one-time-secrets.md)). The
+  new-secret page needs the owner's session.
 - A login lasts 7 days. **Log out** in the gallery header ends it.
 - Login allows 10 attempts from one client address in any 15-minute window, and 100 from all
   addresses together. After that the form answers `429` with a `Retry-After` header. A successful
