@@ -10,3 +10,6 @@ dist/
 build/
 /backups/
 /data/
+
+.wrangler/
+.dev.vars*

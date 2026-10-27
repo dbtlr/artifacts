@@ -84,6 +84,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      # Builds the Cloudflare Worker without deploying it and fails if the
+      # bundle reaches a Node-only module.
+      - run: pnpm worker:check
 
   docker-build:
     name: Docker build
