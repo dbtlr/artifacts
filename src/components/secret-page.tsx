@@ -1,5 +1,7 @@
 import type { FC, PropsWithChildren } from 'hono/jsx';
 
+import { formatTimestamp } from '../format-date.js';
+
 const SECRET_SCRIPT_SRC = '/assets/secret.js';
 
 const wordmark = 'text-center text-lg font-bold tracking-tight text-stone-900 dark:text-ink-100';
@@ -46,11 +48,23 @@ const Icon: FC<{ accent?: boolean; shape: IconShape }> = ({ accent = false, shap
   </svg>
 );
 
-const Shell: FC<PropsWithChildren<{ data?: Record<string, string> }>> = ({ children, data }) => (
+// `home` makes the wordmark a link to the gallery, for the owner's pages; a
+// view link's reader may have no session, so theirs is plain text.
+const Shell: FC<PropsWithChildren<{ data?: Record<string, string>; home?: boolean }>> = ({
+  children,
+  data,
+  home = false,
+}) => (
   <main class="mx-auto max-w-sm pt-16" {...data}>
-    <p class={wordmark}>
-      a<span class="text-amber-600 dark:text-accent">.</span> Muninn
-    </p>
+    {home ? (
+      <a href="/" class={`block ${wordmark}`}>
+        a<span class="text-amber-600 dark:text-accent">.</span> Muninn
+      </a>
+    ) : (
+      <p class={wordmark}>
+        a<span class="text-amber-600 dark:text-accent">.</span> Muninn
+      </p>
+    )}
     <div class="mt-6">{children}</div>
   </main>
 );
@@ -135,6 +149,125 @@ export const SecretPage: FC<SecretPageProps> = ({ expiresIn, filename, label }) 
       <p class={fine}>Deleted from Muninn. Download it now.</p>
     </section>
     <UnavailableView hidden />
+    <script src={SECRET_SCRIPT_SRC} type="module" />
+  </Shell>
+);
+
+// How long an owner's secret may wait unread, as the form offers it.
+export const EXPIRY_CHOICES = [
+  { label: '1 h', seconds: 3600 },
+  { label: '24 h', seconds: 86_400 },
+  { label: '7 d', seconds: 604_800 },
+] as const;
+
+const fieldLabel = 'mt-3 block text-sm text-stone-700 dark:text-ink-300';
+const field =
+  'mt-1 block w-full border border-stone-300 bg-white px-3 py-2 text-stone-900 dark:border-ink-700 dark:bg-ink-900 dark:text-ink-100';
+// A radio input styled as one segment of a choice, so the choice needs no
+// script.
+const segment =
+  'flex-1 cursor-pointer border-r border-stone-300 py-2 text-center text-sm last:border-r-0 has-checked:bg-stone-900 has-checked:font-semibold has-checked:text-white has-focus-visible:outline-2 has-focus-visible:outline-amber-600 dark:border-ink-700 dark:has-checked:bg-ink-100 dark:has-checked:text-ink-950';
+
+type NewSecretPageProps = {
+  // Shown under the button after a refused create.
+  error?: string;
+  // The checked expiry, in seconds.
+  expires: number;
+  // The label to fill in again after a refused create. The secret itself is
+  // never filled in again.
+  label: string;
+};
+
+// The owner's form for a new secret, which an agent redeems by its handle.
+export const NewSecretPage: FC<NewSecretPageProps> = ({ error, expires, label }) => (
+  <Shell home>
+    <form method="post" action="/secrets/new">
+      <label for="secret-label" class={fieldLabel}>
+        Label
+      </label>
+      <input
+        id="secret-label"
+        name="label"
+        type="text"
+        maxlength={100}
+        required
+        value={label}
+        class={field}
+      />
+      <label for="secret-content" class={fieldLabel}>
+        Secret
+      </label>
+      <textarea
+        id="secret-content"
+        name="secret"
+        rows={4}
+        required
+        autocomplete="off"
+        spellcheck={false}
+        class={`${field} font-mono text-sm`}
+      />
+      <fieldset class="mt-3">
+        <legend class="text-sm text-stone-700 dark:text-ink-300">Expires after</legend>
+        <div class="mt-1 flex border border-stone-300 dark:border-ink-700">
+          {EXPIRY_CHOICES.map((choice) => (
+            <label class={segment}>
+              <input
+                type="radio"
+                name="expires"
+                value={String(choice.seconds)}
+                checked={choice.seconds === expires}
+                class="sr-only"
+              />
+              {choice.label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <button type="submit" class={button}>
+        Seal secret
+      </button>
+      {error === undefined ? null : (
+        <p role="alert" class={`${fine} text-red-700 dark:text-red-400`}>
+          {error}
+        </p>
+      )}
+    </form>
+  </Shell>
+);
+
+type SecretHandlePageProps = {
+  expiresAt: string;
+  // `sec_<id>.<key>`, shown on this one page and never again.
+  handle: string;
+  label: string;
+};
+
+// The handle of the secret the owner just sealed. Without script, the handle
+// is selectable text; src/client/secret.ts shows the Copy handle button.
+export const SecretHandlePage: FC<SecretHandlePageProps> = ({ expiresAt, handle, label }) => (
+  <Shell home>
+    <Seal tone="accent">
+      <Icon accent shape="locked" />
+      <h1 class={title}>{label}</h1>
+      <code
+        id="secret-handle"
+        class="mt-2.5 block border border-stone-200 bg-stone-50 p-2.5 text-left font-mono text-sm break-all text-stone-900 select-all dark:border-ink-800 dark:bg-[#0a0b0d] dark:text-ink-100"
+      >
+        {handle}
+      </code>
+    </Seal>
+    <button id="secret-handle-copy" type="button" class={button} hidden>
+      Copy handle
+    </button>
+    <p class={fine}>
+      Shown once. Works once, through Muninn’s MCP, until{' '}
+      <time datetime={expiresAt}>{formatTimestamp(expiresAt)}</time>.
+    </p>
+    <p class={fine}>
+      <a href="/secrets/new" class="underline underline-offset-2">
+        Create another
+      </a>
+    </p>
     <script src={SECRET_SCRIPT_SRC} type="module" />
   </Shell>
 );

@@ -1,12 +1,21 @@
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
+import type { CookieOptions } from 'hono/utils/cookie';
 
 import { Layout } from '../components/layout.js';
-import { SecretPage, SecretUnavailablePage } from '../components/secret-page.js';
+import {
+  EXPIRY_CHOICES,
+  NewSecretPage,
+  SecretHandlePage,
+  SecretPage,
+  SecretUnavailablePage,
+} from '../components/secret-page.js';
 import { formatTimeLeft } from '../format-date.js';
-import { buildSecretViewUrl } from '../urls.js';
-import { InvalidSecretInputError } from './errors.js';
-import { MAX_SECRET_BYTES } from './service.js';
+import { buildSecretViewUrl, resolvePublicBaseUrl } from '../urls.js';
+import { InvalidSecretInputError, SecretLimitError } from './errors.js';
+import { formatHandle, parseHandle } from './handle.js';
+import { DEFAULT_TTL_SECONDS, MAX_SECRET_BYTES, SECRET_LIMIT } from './service.js';
 import type { SecretService } from './types.js';
 
 // The service enforces the exact size limit, so an upload one byte over it is
@@ -14,6 +23,18 @@ import type { SecretService } from './types.js';
 const MAX_UPLOAD_BODY_BYTES = MAX_SECRET_BYTES + 1;
 // A reveal's form holds only the 43-character key.
 const MAX_REVEAL_BODY_BYTES = 1024;
+// The owner's form holds a secret of up to MAX_SECRET_BYTES, which form
+// encoding can grow sixfold (a line break is sent as `%0D%0A`), and a label
+// and an expiry. The service enforces the exact limit.
+const MAX_NEW_SECRET_BODY_BYTES = 6 * MAX_SECRET_BYTES + 4096;
+
+const NEW_SECRET_PATH = '/secrets/new';
+// Carries a new secret's handle from the form's POST to the GET its redirect
+// asks for, which shows the handle once and deletes the cookie. It is scoped
+// to the page and lasts a minute, so an unfollowed redirect does not leave
+// the handle in the browser for long (the API keys page does the same).
+const NEW_SECRET_COOKIE = 'muninn_new_secret';
+const NEW_SECRET_COOKIE_SECONDS = 60;
 
 // The secret pages load only this server's stylesheet, icons, and script,
 // and refuse every frame, so a page cannot be framed to steer the Reveal
@@ -37,6 +58,29 @@ const PAGE_HEADERS = {
   ...NO_STORE,
   'Content-Security-Policy': SECRET_PAGE_CSP,
   'X-Frame-Options': 'DENY',
+};
+
+// The owner's new-secret pages may submit their own form, and nothing else.
+const NEW_SECRET_PAGE_HEADERS = {
+  ...PAGE_HEADERS,
+  'Content-Security-Policy': SECRET_PAGE_CSP.replace("form-action 'none'", "form-action 'self'"),
+};
+
+// A secret's bytes, and every refusal of a download, are never sniffed into
+// something a browser would render.
+const BYTES_HEADERS = { ...NO_STORE, 'X-Content-Type-Options': 'nosniff' };
+
+const TOO_LARGE = 'Enter a secret of at most 64 KiB.';
+const UNREADABLE_FORM = 'The form could not be read. Try again.';
+const STORE_FULL = `Muninn already holds ${String(SECRET_LIMIT)} unread secrets. Try again once some are read or expire.`;
+
+// What the new-secret form says about input the service refused. The
+// messages never quote the input.
+const INPUT_ERRORS: Record<InvalidSecretInputError['field'], string> = {
+  content: TOO_LARGE,
+  filename: UNREADABLE_FORM,
+  label: 'Give the secret a label of 1 to 100 characters, with no control characters.',
+  ttlSeconds: 'Choose when the secret expires.',
 };
 
 // Keeps a `no-store` the response already has (owner auth sends
@@ -64,10 +108,62 @@ function refuse(c: Context) {
   return c.body(null, 404, NO_STORE);
 }
 
+function refuseDownload(c: Context) {
+  return c.body(null, 404, BYTES_HEADERS);
+}
+
+function secretBytes(content: Uint8Array): Response {
+  return new Response(new Uint8Array(content).buffer, {
+    headers: { ...BYTES_HEADERS, 'Content-Type': 'application/octet-stream' },
+    status: 200,
+  });
+}
+
+function newSecretCookieOptions(): CookieOptions {
+  return {
+    httpOnly: true,
+    path: NEW_SECRET_PATH,
+    sameSite: 'Strict',
+    secure: resolvePublicBaseUrl().startsWith('https:'),
+  };
+}
+
+// The handle a create's POST left for the page, deleting it so a refresh
+// does not show it again.
+function takeNewHandle(c: Context): { id: string; key: string } | null {
+  const value = getCookie(c, NEW_SECRET_COOKIE);
+  if (value === undefined) {
+    return null;
+  }
+  deleteCookie(c, NEW_SECRET_COOKIE, newSecretCookieOptions());
+  return parseHandle(value);
+}
+
+type NewSecretForm = { error?: string; expires?: number; label?: string };
+
+function newSecretForm(c: Context, status: 200 | 400 | 413 | 503, form: NewSecretForm = {}) {
+  return c.html(
+    <Layout title="New secret · Muninn">
+      <NewSecretPage
+        error={form.error}
+        expires={form.expires ?? DEFAULT_TTL_SECONDS}
+        label={form.label ?? ''}
+      />
+    </Layout>,
+    status,
+    NEW_SECRET_PAGE_HEADERS,
+  );
+}
+
+// One of the form's expiry choices in seconds, or undefined.
+function expiryChoice(value: unknown): number | undefined {
+  return EXPIRY_CHOICES.find(({ seconds }) => String(seconds) === value)?.seconds;
+}
+
 // The one-time secret routes (ADR-0008). `resolveSecrets` resolves undefined
 // when the app has no secret service; then every route here is a 404. With
-// owner auth on, these three routes need no session: see the exemptions in
-// auth/routes.tsx.
+// owner auth on, the routes under /s/ need no session: see the exemptions in
+// auth/routes.tsx. The owner's /secrets/new does.
 export function installSecretRoutes(
   app: Hono,
   resolveSecrets: () => Promise<SecretService | undefined>,
@@ -104,6 +200,19 @@ export function installSecretRoutes(
       return c.text(`${buildSecretViewUrl(created.id, created.key)}\n`, 201, NO_STORE);
     },
   );
+
+  // The download URL `claim_secret` returns, which an agent pipes into a
+  // command with `curl -fsS -X POST "$downloadUrl" | <command>`. The token
+  // authorizes it and works once; it responds with the secret's bytes and
+  // burns the secret. Every other method, and every failure, is the same
+  // bare 404. Registered before the reveal route, which
+  // `/s/download/reveal` also matches.
+  app.post('/s/download/:token', async (c) => {
+    const secrets = await resolveSecrets();
+    const revealed = secrets === undefined ? null : await secrets.download(c.req.param('token'));
+    return revealed === null ? refuseDownload(c) : secretBytes(revealed.content);
+  });
+  app.all('/s/download/:token', refuseDownload);
 
   // The view link's page. Only `find` decides what it shows, never `status`,
   // so a pending secret gets the ready page and anything else gets the one
@@ -158,14 +267,92 @@ export function installSecretRoutes(
       if (revealed === null) {
         return refuse(c);
       }
-      return new Response(new Uint8Array(revealed.content).buffer, {
-        headers: {
-          ...NO_STORE,
-          'Content-Type': 'application/octet-stream',
-          'X-Content-Type-Options': 'nosniff',
-        },
-        status: 200,
+      return secretBytes(revealed.content);
+    },
+  );
+
+  installNewSecretRoutes(app, resolveSecrets);
+}
+
+// The owner's form for a new secret (ADR-0008). With owner auth on, it needs
+// the owner's session and the Origin rule like any other page; with auth off
+// it is open, like the rest of a trusted-network Muninn. The POST redirects
+// so a refresh repeats the GET, not the POST, and seals no second secret.
+// The handle travels in a cookie, so it is never in a URL.
+function installNewSecretRoutes(
+  app: Hono,
+  resolveSecrets: () => Promise<SecretService | undefined>,
+): void {
+  app.get(NEW_SECRET_PATH, async (c) => {
+    const secrets = await resolveSecrets();
+    if (secrets === undefined) {
+      return c.notFound();
+    }
+    const handle = takeNewHandle(c);
+    // A secret read or expired before the redirect landed is not offered.
+    const found = handle === null ? null : await secrets.find(handle.id);
+    if (handle === null || found === null) {
+      return newSecretForm(c, 200);
+    }
+    return c.html(
+      <Layout title="New secret · Muninn">
+        <SecretHandlePage
+          expiresAt={found.expiresAt}
+          handle={formatHandle(handle.id, handle.key)}
+          label={found.label}
+        />
+      </Layout>,
+      200,
+      NEW_SECRET_PAGE_HEADERS,
+    );
+  });
+
+  app.post(
+    NEW_SECRET_PATH,
+    bodyLimit({
+      maxSize: MAX_NEW_SECRET_BODY_BYTES,
+      onError: (c) => newSecretForm(c, 413, { error: TOO_LARGE }),
+    }),
+    async (c) => {
+      const secrets = await resolveSecrets();
+      if (secrets === undefined) {
+        return c.notFound();
+      }
+      let body;
+      try {
+        body = await c.req.parseBody();
+      } catch {
+        return newSecretForm(c, 400, { error: UNREADABLE_FORM });
+      }
+      const label = typeof body.label === 'string' ? body.label : '';
+      const expires = expiryChoice(body.expires);
+      if (expires === undefined) {
+        return newSecretForm(c, 400, { error: INPUT_ERRORS.ttlSeconds, label });
+      }
+      // A browser sends a textarea's line breaks as CRLF whatever was typed
+      // or pasted; the secret keeps the LF a file or terminal would hold.
+      const secret = typeof body.secret === 'string' ? body.secret.replaceAll('\r\n', '\n') : '';
+      let created;
+      try {
+        created = await secrets.create({
+          content: new TextEncoder().encode(secret),
+          label,
+          ttlSeconds: expires,
+        });
+      } catch (error) {
+        if (error instanceof InvalidSecretInputError) {
+          return newSecretForm(c, 400, { error: INPUT_ERRORS[error.field], expires, label });
+        }
+        if (error instanceof SecretLimitError) {
+          return newSecretForm(c, 503, { error: STORE_FULL, expires, label });
+        }
+        throw error;
+      }
+      setCookie(c, NEW_SECRET_COOKIE, formatHandle(created.id, created.key), {
+        ...newSecretCookieOptions(),
+        maxAge: NEW_SECRET_COOKIE_SECONDS,
       });
+      return c.redirect(NEW_SECRET_PATH, 303);
     },
   );
 }

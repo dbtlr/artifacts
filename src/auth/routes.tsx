@@ -30,19 +30,20 @@ function isPublicPath(path: string): boolean {
 }
 
 // One-time secrets travel by capability, not session (ADR-0008). An upload
-// URL's token authorizes its POST, and curl sends no Origin, so it skips the
-// Origin rule too. A view link's key, which only the page's script holds,
-// authorizes a reveal; the page and its Reveal POST need no session, but the
-// POST keeps the Origin rule. Each exemption is named methods on one path
-// shape (the page's GET and HEAD, the others' POST), with segments of the
-// base64url alphabet only, so nothing else that routing could match is let
-// through.
+// or download URL's token authorizes its POST, and curl sends no Origin, so
+// it skips the Origin rule too. A view link's key, which only the page's
+// script holds, authorizes a reveal; the page and its Reveal POST need no
+// session, but the POST keeps the Origin rule. Each exemption is named
+// methods on one path shape (the page's GET and HEAD, the others' POST), with
+// segments of the base64url alphabet only, so nothing else that routing could
+// match is let through.
 const SECRET_UPLOAD_PATH = /^\/s\/upload\/[\w-]+$/u;
+const SECRET_DOWNLOAD_PATH = /^\/s\/download\/[\w-]+$/u;
 const SECRET_VIEW_PATH = /^\/s\/[\w-]+$/u;
 const SECRET_REVEAL_PATH = /^\/s\/[\w-]+\/reveal$/u;
 
-function isSecretUpload(method: string, path: string): boolean {
-  return method === 'POST' && SECRET_UPLOAD_PATH.test(path);
+function isSecretTransfer(method: string, path: string): boolean {
+  return method === 'POST' && (SECRET_UPLOAD_PATH.test(path) || SECRET_DOWNLOAD_PATH.test(path));
 }
 
 function isSecretViewOrReveal(method: string, path: string): boolean {
@@ -225,7 +226,7 @@ async function refuseWithoutSession(c: Context, auth: OwnerAuth): Promise<Respon
           'WWW-Authenticate': 'Bearer',
         });
   }
-  if (isSecretUpload(c.req.method, path)) {
+  if (isSecretTransfer(c.req.method, path)) {
     return undefined;
   }
   if (!SAFE_METHODS.has(c.req.method) && !hasAllowedOrigin(c)) {
