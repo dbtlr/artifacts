@@ -123,3 +123,14 @@
   justify-content: center;
   overflow-x: auto;
 }
+
+/*
+ * The new-secret form's secret field (see src/components/secret-page.tsx)
+ * draws each character as a disc until its Show toggle removes
+ * `data-masked`, like a password field that can hold line breaks. Chromium,
+ * Safari, and Firefox 114+ support the property; it changes only how the
+ * text is drawn, never the value the form sends.
+ */
+textarea[data-masked] {
+  -webkit-text-security: disc;
+}

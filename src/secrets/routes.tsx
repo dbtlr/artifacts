@@ -1,8 +1,8 @@
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
-import type { CookieOptions } from 'hono/utils/cookie';
 
+import { showOnceCookieOptions } from '../auth/cookies.js';
 import { Layout } from '../components/layout.js';
 import {
   EXPIRY_CHOICES,
@@ -12,7 +12,7 @@ import {
   SecretUnavailablePage,
 } from '../components/secret-page.js';
 import { formatTimeLeft } from '../format-date.js';
-import { buildSecretViewUrl, resolvePublicBaseUrl } from '../urls.js';
+import { buildSecretViewUrl } from '../urls.js';
 import { InvalidSecretInputError, SecretLimitError } from './errors.js';
 import { formatHandle, parseHandle } from './handle.js';
 import { DEFAULT_TTL_SECONDS, MAX_SECRET_BYTES, SECRET_LIMIT } from './service.js';
@@ -32,23 +32,27 @@ const NEW_SECRET_PATH = '/secrets/new';
 // Carries a new secret's handle from the form's POST to the GET its redirect
 // asks for, which shows the handle once and deletes the cookie. It is scoped
 // to the page and lasts a minute, so an unfollowed redirect does not leave
-// the handle in the browser for long (the API keys page does the same).
+// the handle in the browser for long (the API keys page does the same; see
+// auth/cookies.ts).
 const NEW_SECRET_COOKIE = 'muninn_new_secret';
 const NEW_SECRET_COOKIE_SECONDS = 60;
 
 // The secret pages load only this server's stylesheet, icons, and script,
 // and refuse every frame, so a page cannot be framed to steer the Reveal
 // click. The owner-auth guard keeps a policy that already denies frames.
-const SECRET_PAGE_CSP = [
-  "default-src 'none'",
-  "script-src 'self'",
-  "style-src 'self'",
-  "img-src 'self'",
-  "connect-src 'self'",
-  "base-uri 'none'",
-  "form-action 'none'",
-  "frame-ancestors 'none'",
-].join('; ');
+// `formAction` is where the page's forms may submit.
+function secretPageCsp(formAction: "'none'" | "'self'"): string {
+  return [
+    "default-src 'none'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self'",
+    "connect-src 'self'",
+    "base-uri 'none'",
+    `form-action ${formAction}`,
+    "frame-ancestors 'none'",
+  ].join('; ');
+}
 
 // No cache or history keeps a secret response, and no link on a secret page
 // tells another site where it came from.
@@ -56,32 +60,40 @@ const NO_STORE = { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'
 
 const PAGE_HEADERS = {
   ...NO_STORE,
-  'Content-Security-Policy': SECRET_PAGE_CSP,
+  'Content-Security-Policy': secretPageCsp("'none'"),
   'X-Frame-Options': 'DENY',
 };
 
 // The owner's new-secret pages may submit their own form, and nothing else.
 const NEW_SECRET_PAGE_HEADERS = {
   ...PAGE_HEADERS,
-  'Content-Security-Policy': SECRET_PAGE_CSP.replace("form-action 'none'", "form-action 'self'"),
+  'Content-Security-Policy': secretPageCsp("'self'"),
 };
 
 // A secret's bytes, and every refusal of a download, are never sniffed into
 // something a browser would render.
 const BYTES_HEADERS = { ...NO_STORE, 'X-Content-Type-Options': 'nosniff' };
 
+const NO_SECRET = 'Enter a secret.';
 const TOO_LARGE = 'Enter a secret of at most 64 KiB.';
 const UNREADABLE_FORM = 'The form could not be read. Try again.';
 const STORE_FULL = `Muninn already holds ${String(SECRET_LIMIT)} unread secrets. Try again once some are read or expire.`;
 
 // What the new-secret form says about input the service refused. The
 // messages never quote the input.
-const INPUT_ERRORS: Record<InvalidSecretInputError['field'], string> = {
-  content: TOO_LARGE,
+const INPUT_ERRORS: Record<Exclude<InvalidSecretInputError['field'], 'content'>, string> = {
   filename: UNREADABLE_FORM,
   label: 'Give the secret a label of 1 to 100 characters, with no control characters.',
   ttlSeconds: 'Choose when the secret expires.',
 };
+
+// The message for a refused field, given the content the service refused.
+function inputError(field: InvalidSecretInputError['field'], content: Uint8Array): string {
+  if (field === 'content') {
+    return content.byteLength === 0 ? NO_SECRET : TOO_LARGE;
+  }
+  return INPUT_ERRORS[field];
+}
 
 // Keeps a `no-store` the response already has (owner auth sends
 // `private, no-store`) and adds it to any response that lacks one.
@@ -119,23 +131,17 @@ function secretBytes(content: Uint8Array): Response {
   });
 }
 
-function newSecretCookieOptions(): CookieOptions {
-  return {
-    httpOnly: true,
-    path: NEW_SECRET_PATH,
-    sameSite: 'Strict',
-    secure: resolvePublicBaseUrl().startsWith('https:'),
-  };
-}
-
 // The handle a create's POST left for the page, deleting it so a refresh
-// does not show it again.
+// does not show it again. A replayed cookie, from concurrent GETs or a value
+// resent after the deletion, shows the handle again; the cookie's value is
+// the handle, so a replay reveals nothing its sender did not already hold.
+// The API keys page behaves the same.
 function takeNewHandle(c: Context): { id: string; key: string } | null {
   const value = getCookie(c, NEW_SECRET_COOKIE);
   if (value === undefined) {
     return null;
   }
-  deleteCookie(c, NEW_SECRET_COOKIE, newSecretCookieOptions());
+  deleteCookie(c, NEW_SECRET_COOKIE, showOnceCookieOptions(NEW_SECRET_PATH));
   return parseHandle(value);
 }
 
@@ -283,6 +289,14 @@ function installNewSecretRoutes(
   app: Hono,
   resolveSecrets: () => Promise<SecretService | undefined>,
 ): void {
+  // No cache keeps any response here, including the redirect that carries
+  // the handle's cookie and an error no route foresaw. Owner auth, installed
+  // before this, then adds `private`.
+  app.use(NEW_SECRET_PATH, async (c, runRoute) => {
+    await runRoute();
+    markNoStore(c.res);
+  });
+
   app.get(NEW_SECRET_PATH, async (c) => {
     const secrets = await resolveSecrets();
     if (secrets === undefined) {
@@ -332,16 +346,13 @@ function installNewSecretRoutes(
       // A browser sends a textarea's line breaks as CRLF whatever was typed
       // or pasted; the secret keeps the LF a file or terminal would hold.
       const secret = typeof body.secret === 'string' ? body.secret.replaceAll('\r\n', '\n') : '';
+      const content = new TextEncoder().encode(secret);
       let created;
       try {
-        created = await secrets.create({
-          content: new TextEncoder().encode(secret),
-          label,
-          ttlSeconds: expires,
-        });
+        created = await secrets.create({ content, label, ttlSeconds: expires });
       } catch (error) {
         if (error instanceof InvalidSecretInputError) {
-          return newSecretForm(c, 400, { error: INPUT_ERRORS[error.field], expires, label });
+          return newSecretForm(c, 400, { error: inputError(error.field, content), expires, label });
         }
         if (error instanceof SecretLimitError) {
           return newSecretForm(c, 503, { error: STORE_FULL, expires, label });
@@ -349,7 +360,7 @@ function installNewSecretRoutes(
         throw error;
       }
       setCookie(c, NEW_SECRET_COOKIE, formatHandle(created.id, created.key), {
-        ...newSecretCookieOptions(),
+        ...showOnceCookieOptions(NEW_SECRET_PATH),
         maxAge: NEW_SECRET_COOKIE_SECONDS,
       });
       return c.redirect(NEW_SECRET_PATH, 303);

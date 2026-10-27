@@ -6,8 +6,8 @@
 // returns its bytes. secret-reveal.ts decides how the bytes are shown and
 // what each response means. Every page text is written with textContent.
 //
-// The owner's new-secret page loads it too, to show and run its Copy handle
-// button.
+// The owner's new-secret pages load it too, to show and run the form's Show
+// toggle and the handle page's Copy handle button.
 
 import { classifyReveal, copyText, keyFromFragment, presentSecret } from './secret-reveal.js';
 import type { RevealOutcome } from './secret-reveal.js';
@@ -144,9 +144,24 @@ function startHandleCopy(button: HTMLButtonElement): void {
   });
 }
 
+// Shows the form's secret field in clear, or masks it again. Without this
+// script the toggle stays hidden and the field stays masked.
+function startMaskToggle(button: HTMLButtonElement): void {
+  const field = element('secret-content');
+  button.hidden = false;
+  button.addEventListener('click', () => {
+    const masked = field.toggleAttribute('data-masked');
+    button.textContent = masked ? 'Show' : 'Hide';
+    button.setAttribute('aria-pressed', String(!masked));
+  });
+}
+
 const handleCopy = document.querySelector<HTMLButtonElement>('#secret-handle-copy');
-if (handleCopy === null) {
-  start();
-} else {
+const maskToggle = document.querySelector<HTMLButtonElement>('#secret-content-toggle');
+if (handleCopy !== null) {
   startHandleCopy(handleCopy);
+} else if (maskToggle !== null) {
+  startMaskToggle(maskToggle);
+} else {
+  start();
 }

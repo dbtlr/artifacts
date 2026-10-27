@@ -194,9 +194,24 @@ export const NewSecretPage: FC<NewSecretPageProps> = ({ error, expires, label })
         value={label}
         class={field}
       />
-      <label for="secret-content" class={fieldLabel}>
-        Secret
-      </label>
+      <div class="mt-3 flex items-baseline justify-between">
+        <label for="secret-content" class="text-sm text-stone-700 dark:text-ink-300">
+          Secret
+        </label>
+        <button
+          id="secret-content-toggle"
+          type="button"
+          aria-controls="secret-content"
+          aria-pressed="false"
+          hidden
+          class="cursor-pointer text-sm text-stone-500 underline underline-offset-2 dark:text-ink-400"
+        >
+          Show
+        </button>
+      </div>
+      {/* Masked by styles.css whatever the script does; src/client/secret.ts
+          shows the toggle. Masking changes only how the text is drawn, never
+          the value the form sends. */}
       <textarea
         id="secret-content"
         name="secret"
@@ -204,6 +219,7 @@ export const NewSecretPage: FC<NewSecretPageProps> = ({ error, expires, label })
         required
         autocomplete="off"
         spellcheck={false}
+        data-masked=""
         class={`${field} font-mono text-sm`}
       />
       <fieldset class="mt-3">
@@ -232,6 +248,7 @@ export const NewSecretPage: FC<NewSecretPageProps> = ({ error, expires, label })
         </p>
       )}
     </form>
+    <script src={SECRET_SCRIPT_SRC} type="module" />
   </Shell>
 );
 

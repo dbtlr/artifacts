@@ -33,6 +33,11 @@ const WRONG_KEY = 'B'.repeat(43);
 const SECRET_PAGE_CSP =
   "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; " +
   "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+// The owner's new-secret pages, which may submit their own form and nothing
+// else.
+const NEW_SECRET_PAGE_CSP =
+  "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; " +
+  "connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 // A form body the browser would never send for a reveal: multipart with a
 // boundary that never appears.
 const MALFORMED_MULTIPART: RequestInit = {
@@ -677,6 +682,70 @@ describe.each(modes)('secret routes $name', ({ authOn }) => {
         expect(/role="alert"[^>]*>([^<]*)</u.exec(body)?.[1]).toMatch(cases[index]![1]);
         expect(body).not.toContain(SECRET);
       }
+    });
+
+    it('tells an empty secret from one over the limit', async () => {
+      const responses = await Promise.all([
+        submit({ ...FIELDS, secret: '' }),
+        submit({ ...FIELDS, secret: 'x'.repeat(MAX_SECRET_BYTES + 1) }),
+      ]);
+
+      const alerts = await Promise.all(
+        responses.map(async (res) => /role="alert"[^>]*>([^<]*)</u.exec(await res.text())?.[1]),
+      );
+      expect(alerts).toEqual(['Enter a secret.', 'Enter a secret of at most 64 KiB.']);
+    });
+
+    it('accepts a secret of the full 64 KiB sent as CRLF line breaks, as a browser sends them', async () => {
+      const created = await submit({ ...FIELDS, secret: '\r\n'.repeat(MAX_SECRET_BYTES) });
+
+      expect(created.status).toBe(303);
+      const { id, key } = parseHandle(await handleShownAfter(created)) ?? { id: '', key: '' };
+      const claim = await secrets.claim(id, key);
+      const downloaded = await app.request(`/s/download/${claim?.claimToken ?? ''}`, DOWNLOAD);
+      expect(downloaded.status).toBe(200);
+      expect((await downloaded.arrayBuffer()).byteLength).toBe(MAX_SECRET_BYTES);
+    });
+
+    it('keeps every response out of caches and lets each page submit only its own form', async () => {
+      const broken = (create: SecretService['create']) => appWith({ ...secrets, create });
+      const created = await submit();
+      const responses = {
+        created,
+        failed: await submit(FIELDS, broken(failStore)),
+        form: await newSecretPage(),
+        full: await submit(
+          FIELDS,
+          broken(async () => {
+            throw new SecretLimitError(SECRET_LIMIT);
+          }),
+        ),
+        handle: await newSecretPage(cookiePair(created)),
+        refused: await submit({ ...FIELDS, expires: '60' }),
+        tooLarge: await submit({ ...FIELDS, secret: 'x'.repeat(7 * MAX_SECRET_BYTES) }),
+      };
+
+      const noStore = authOn ? 'private, no-store' : 'no-store';
+      expect(
+        Object.entries(responses).map(([name, res]) => [name, res.headers.get('cache-control')]),
+      ).toEqual(Object.keys(responses).map((name) => [name, noStore]));
+      const { form, full, handle, refused, tooLarge } = responses;
+      const pages = [form, handle, refused, tooLarge, full];
+      expect(pages.map((res) => res.headers.get('content-security-policy'))).toEqual(
+        pages.map(() => NEW_SECRET_PAGE_CSP),
+      );
+    });
+
+    it('masks the secret field, with a Show toggle that only the page script reveals', async () => {
+      const body = await (await newSecretPage()).text();
+
+      expect(body).toMatch(/<textarea[^>]*id="secret-content"[^>]*\bdata-masked\b/u);
+      expect(body).toMatch(
+        /<button[^>]*id="secret-content-toggle"[^>]*aria-controls="secret-content"[^>]*\bhidden\b[^>]*>Show</u,
+      );
+      expect(body).toMatch(/<button[^>]*id="secret-content-toggle"[^>]*type="button"/u);
+      expect(body).toContain('<script src="/assets/secret.js" type="module">');
+      expect(body).not.toMatch(/<script(?![^>]*\bsrc=)/u);
     });
 
     it('refuses a body far over the limit with the form and no echo', async () => {
