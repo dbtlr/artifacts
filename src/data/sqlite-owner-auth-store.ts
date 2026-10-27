@@ -1,5 +1,4 @@
 import { DatabaseSync } from 'node:sqlite';
-import type { SQLOutputValue } from 'node:sqlite';
 
 import type {
   ApiKeySummary,
@@ -11,13 +10,34 @@ import type {
   StoredApiKey,
   StoredSession,
 } from '../auth/types.js';
+import type { SqlStatement } from './artifact-metadata-sql.js';
+import {
+  apiKeySummaryFromRow,
+  apiKeyUseFromRow,
+  countLoginAttemptsAfter,
+  deleteAllApiKeys,
+  deleteApiKey,
+  deleteExpiredSessions,
+  deleteLoginAttempts,
+  deleteLoginAttemptsUpTo,
+  deleteOldUrlSigningKeys,
+  deleteSession,
+  findApiKeyByHash,
+  findSessionExpiry,
+  findUrlSigningKey,
+  insertApiKey,
+  insertLoginAttempt,
+  insertSession,
+  insertUrlSigningKey,
+  listApiKeys,
+  loginAttemptCountsFromRow,
+  sessionExpiryFromRow,
+  updateApiKeyUse,
+  urlSigningKeyFromRow,
+} from './owner-auth-sql.js';
 import { runSqliteMigrations } from './sqlite-migrations.js';
 
 const SQLITE_BUSY_TIMEOUT_MS = 1_000;
-
-function textOrNull(value: SQLOutputValue | undefined): string | null {
-  return value === null || value === undefined ? null : String(value);
-}
 
 // Owner sessions, login attempts, API keys, and URL signing keys, in the
 // same database file as the artifact metadata. It opens its own connection;
@@ -41,111 +61,77 @@ export class SqliteOwnerAuthStore implements OwnerAuthStore {
     }
   }
 
+  private run({ sql, values }: SqlStatement): number {
+    return Number(this.database.prepare(sql).run(...values).changes);
+  }
+
+  private get({ sql, values }: SqlStatement): Record<string, unknown> | undefined {
+    return this.database.prepare(sql).get(...values);
+  }
+
   async reserveLoginAttempt(
-    { at, clientAddress }: LoginAttempt,
+    attempt: LoginAttempt,
     since: string,
-    { perClient, total }: LoginAttemptLimits,
+    limits: LoginAttemptLimits,
   ): Promise<boolean> {
-    this.database.prepare('DELETE FROM login_attempts WHERE attempted_at <= ?').run(since);
-    const { changes } = this.database
-      .prepare(
-        `INSERT INTO login_attempts (attempted_at, client_address)
-         SELECT ?, ?
-         WHERE (SELECT COUNT(*) FROM login_attempts
-                WHERE client_address = ? AND attempted_at > ?) < ?
-           AND (SELECT COUNT(*) FROM login_attempts WHERE attempted_at > ?) < ?`,
-      )
-      .run(at, clientAddress, clientAddress, since, perClient, since, total);
-    return changes > 0;
+    this.run(deleteLoginAttemptsUpTo(since));
+    return this.run(insertLoginAttempt(attempt, since, limits)) > 0;
   }
 
   async countLoginAttemptsAfter(since: string, clientAddress: string): Promise<LoginAttemptCounts> {
-    const record = this.database
-      .prepare(
-        `SELECT COUNT(*) AS total_count,
-                MIN(attempted_at) AS total_oldest,
-                COUNT(CASE WHEN client_address = ? THEN 1 END) AS client_count,
-                MIN(CASE WHEN client_address = ? THEN attempted_at END) AS client_oldest
-         FROM login_attempts WHERE attempted_at > ?`,
-      )
-      .get(clientAddress, clientAddress, since);
-    return {
-      client: { count: Number(record?.client_count), oldest: textOrNull(record?.client_oldest) },
-      total: { count: Number(record?.total_count), oldest: textOrNull(record?.total_oldest) },
-    };
+    return loginAttemptCountsFromRow(this.get(countLoginAttemptsAfter(since, clientAddress)));
   }
 
   async clearLoginAttempts(clientAddress: string): Promise<void> {
-    this.database.prepare('DELETE FROM login_attempts WHERE client_address = ?').run(clientAddress);
+    this.run(deleteLoginAttempts(clientAddress));
   }
 
-  async createSession({ createdAt, expiresAt, tokenHash }: StoredSession): Promise<void> {
-    this.database.prepare('DELETE FROM owner_sessions WHERE expires_at <= ?').run(createdAt);
-    this.database
-      .prepare('INSERT INTO owner_sessions (token_hash, created_at, expires_at) VALUES (?, ?, ?)')
-      .run(tokenHash, createdAt, expiresAt);
+  async createSession(session: StoredSession): Promise<void> {
+    this.run(deleteExpiredSessions(session.createdAt));
+    this.run(insertSession(session));
   }
 
   async findSessionExpiry(tokenHash: string): Promise<string | null> {
-    const record = this.database
-      .prepare('SELECT expires_at FROM owner_sessions WHERE token_hash = ?')
-      .get(tokenHash);
-    return record === undefined ? null : String(record.expires_at);
+    const record = this.get(findSessionExpiry(tokenHash));
+    return record === undefined ? null : sessionExpiryFromRow(record);
   }
 
   async removeSession(tokenHash: string): Promise<void> {
-    this.database.prepare('DELETE FROM owner_sessions WHERE token_hash = ?').run(tokenHash);
+    this.run(deleteSession(tokenHash));
   }
 
-  async createApiKey({ createdAt, id, keyHash, name }: StoredApiKey): Promise<void> {
-    this.database
-      .prepare('INSERT INTO api_keys (id, name, key_hash, created_at) VALUES (?, ?, ?, ?)')
-      .run(id, name, keyHash, createdAt);
+  async createApiKey(key: StoredApiKey): Promise<void> {
+    this.run(insertApiKey(key));
   }
 
   async listApiKeys(): Promise<ApiKeySummary[]> {
+    const { sql, values } = listApiKeys();
     return this.database
-      .prepare('SELECT id, name, created_at, last_used_at FROM api_keys ORDER BY created_at, rowid')
-      .all()
-      .map((row) => ({
-        createdAt: String(row.created_at),
-        id: String(row.id),
-        lastUsedAt: textOrNull(row.last_used_at),
-        name: String(row.name),
-      }));
+      .prepare(sql)
+      .all(...values)
+      .map(apiKeySummaryFromRow);
   }
 
   async findApiKeyByHash(keyHash: string): Promise<ApiKeyUse | null> {
-    const record = this.database
-      .prepare('SELECT id, last_used_at FROM api_keys WHERE key_hash = ?')
-      .get(keyHash);
-    return record === undefined
-      ? null
-      : {
-          id: String(record.id),
-          lastUsedAt: textOrNull(record.last_used_at),
-        };
+    const record = this.get(findApiKeyByHash(keyHash));
+    return record === undefined ? null : apiKeyUseFromRow(record);
   }
 
   async recordApiKeyUse(id: string, at: string): Promise<void> {
-    this.database.prepare('UPDATE api_keys SET last_used_at = ? WHERE id = ?').run(at, id);
+    this.run(updateApiKeyUse(id, at));
   }
 
   async removeApiKey(id: string): Promise<void> {
-    this.database.prepare('DELETE FROM api_keys WHERE id = ?').run(id);
+    this.run(deleteApiKey(id));
   }
 
   async removeAllApiKeys(): Promise<void> {
-    this.database.exec('DELETE FROM api_keys');
+    this.run(deleteAllApiKeys());
   }
 
   async createUrlSigningKey(bucket: number, key: string): Promise<string> {
-    this.database.prepare('DELETE FROM url_signing_keys WHERE bucket < ?').run(bucket - 1);
-    this.database
-      .prepare(
-        'INSERT INTO url_signing_keys (bucket, signing_key) VALUES (?, ?) ON CONFLICT DO NOTHING',
-      )
-      .run(bucket, key);
+    this.run(deleteOldUrlSigningKeys(bucket));
+    this.run(insertUrlSigningKey(bucket, key));
     const stored = await this.findUrlSigningKey(bucket);
     if (stored === null) {
       throw new Error(`The URL signing key for bucket ${String(bucket)} was not stored`);
@@ -154,9 +140,7 @@ export class SqliteOwnerAuthStore implements OwnerAuthStore {
   }
 
   async findUrlSigningKey(bucket: number): Promise<string | null> {
-    const record = this.database
-      .prepare('SELECT signing_key FROM url_signing_keys WHERE bucket = ?')
-      .get(bucket);
-    return record === undefined ? null : String(record.signing_key);
+    const record = this.get(findUrlSigningKey(bucket));
+    return record === undefined ? null : urlSigningKeyFromRow(record);
   }
 }
