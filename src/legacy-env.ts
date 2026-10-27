@@ -5,8 +5,9 @@ const CURRENT_PREFIX = 'MUNINN_';
 // that still sets ARTIFACTS_OWNER_PASSWORD would otherwise start without
 // owner auth, so any variable under the old prefix stops startup. Only names
 // are reported; values may be secrets. The match ignores case because
-// Windows reads environment names that way.
-export function assertNoLegacyEnv(env: NodeJS.ProcessEnv = process.env): void {
+// Windows reads environment names that way. A Worker's bindings are checked
+// the same way, whatever kind of binding a name holds.
+export function assertNoLegacyEnv(env: Readonly<Record<string, unknown>> = process.env): void {
   const legacy = Object.keys(env)
     .filter((name) => name.toUpperCase().startsWith(LEGACY_PREFIX))
     .toSorted();

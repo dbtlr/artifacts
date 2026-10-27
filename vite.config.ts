@@ -89,6 +89,9 @@ export default defineConfig({
   // the Worker. Bindings added here also need a type in
   // src/workers-test-env.d.ts. TEST_MIGRATIONS carries the shared SQL
   // migrations into the Worker, where tests apply them to the D1 database.
+  // The owner password and public base URL are the settings the Worker entry
+  // requires; workerd also copies them into process.env, as it does in a
+  // deployed Worker.
   test: {
     projects: [
       { extends: true, test: { exclude: ['src/**/*.workers.test.ts'], name: 'node' } },
@@ -96,7 +99,11 @@ export default defineConfig({
         plugins: [
           cloudflareTest(async () => ({
             miniflare: {
-              bindings: { TEST_MIGRATIONS: await readD1Migrations(MIGRATIONS_DIR) },
+              bindings: {
+                MUNINN_OWNER_PASSWORD: 'a long workers test password',
+                MUNINN_PUBLIC_BASE_URL: 'https://muninn.example',
+                TEST_MIGRATIONS: await readD1Migrations(MIGRATIONS_DIR),
+              },
               compatibilityDate: '2026-08-15',
               compatibilityFlags: ['nodejs_compat'],
               d1Databases: ['MUNINN_DB'],
