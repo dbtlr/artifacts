@@ -92,6 +92,22 @@ export function ownerAuthStoreContract(
       );
     });
 
+    it('counts toward the total limit only attempts after since', async () => {
+      const { store } = await createHarness();
+      const limits = { perClient: 99, total: 2 };
+      await store.reserveLoginAttempt(attemptFrom('a', 0), windowStart, limits);
+      await store.reserveLoginAttempt(attemptFrom('b', 5), windowStart, limits);
+
+      await expect(store.reserveLoginAttempt(attemptFrom('c', 10), at(-5), limits)).resolves.toBe(
+        false,
+      );
+      await expect(store.reserveLoginAttempt(attemptFrom('c', 15), at(0), limits)).resolves.toBe(
+        true,
+      );
+    });
+
+    // The parallel tests interleave calls only on an async database such as
+    // D1. node:sqlite runs each call synchronously, so there they pass in turn.
     it('records at most the per-client limit from parallel attempts', async () => {
       const { store } = await createHarness();
       const limits = { perClient: 3, total: 99 };
@@ -195,6 +211,7 @@ export function ownerAuthStoreContract(
     it('finds a session until it is removed', async () => {
       const { store } = await createHarness();
       await store.createSession({ createdAt: at(0), expiresAt: at(60), tokenHash: 'session' });
+      await store.createSession({ createdAt: at(0), expiresAt: at(61), tokenHash: 'other' });
 
       await expect(store.findSessionExpiry('session')).resolves.toBe(at(60));
       await expect(store.findSessionExpiry('missing')).resolves.toBeNull();
@@ -203,6 +220,7 @@ export function ownerAuthStoreContract(
       await expect(store.removeSession('missing')).resolves.toBeUndefined();
 
       await expect(store.findSessionExpiry('session')).resolves.toBeNull();
+      await expect(store.findSessionExpiry('other')).resolves.toBe(at(61));
     });
 
     it('removes the sessions that expired by the time a session is created', async () => {
@@ -220,21 +238,23 @@ export function ownerAuthStoreContract(
     it('lists API keys oldest first, without their hashes', async () => {
       const { store } = await createHarness();
       // Keys made in the same millisecond list in the order they were stored.
-      await store.createApiKey(apiKeyNamed('second', at(1)));
-      await store.createApiKey(apiKeyNamed('first', at(0)));
-      await store.createApiKey(apiKeyNamed('third', at(1)));
+      // No order of the ids matches the list's.
+      await store.createApiKey(apiKeyNamed('mike', at(1)));
+      await store.createApiKey(apiKeyNamed('zulu', at(0)));
+      await store.createApiKey(apiKeyNamed('alpha', at(1)));
 
       await expect(store.listApiKeys()).resolves.toEqual([
-        { createdAt: at(0), id: 'first', lastUsedAt: null, name: 'Key first' },
-        { createdAt: at(1), id: 'second', lastUsedAt: null, name: 'Key second' },
-        { createdAt: at(1), id: 'third', lastUsedAt: null, name: 'Key third' },
+        { createdAt: at(0), id: 'zulu', lastUsedAt: null, name: 'Key zulu' },
+        { createdAt: at(1), id: 'mike', lastUsedAt: null, name: 'Key mike' },
+        { createdAt: at(1), id: 'alpha', lastUsedAt: null, name: 'Key alpha' },
       ]);
     });
 
-    it('finds an API key by its hash and records its use', async () => {
+    it('finds an API key by its hash and records its latest use', async () => {
       const { store } = await createHarness();
       const key = apiKeyNamed('key');
       await store.createApiKey(key);
+      await store.createApiKey(apiKeyNamed('other'));
 
       await expect(store.findApiKeyByHash(key.keyHash)).resolves.toEqual({
         id: 'key',
@@ -243,13 +263,21 @@ export function ownerAuthStoreContract(
       await expect(store.findApiKeyByHash('missing')).resolves.toBeNull();
 
       await store.recordApiKeyUse('key', at(5));
+      await store.recordApiKeyUse('key', at(9));
       await expect(store.recordApiKeyUse('missing', at(5))).resolves.toBeUndefined();
 
       await expect(store.findApiKeyByHash(key.keyHash)).resolves.toEqual({
         id: 'key',
-        lastUsedAt: at(5),
+        lastUsedAt: at(9),
       });
-      await expect(store.listApiKeys()).resolves.toMatchObject([{ id: 'key', lastUsedAt: at(5) }]);
+      await expect(store.findApiKeyByHash('hash-of-other')).resolves.toEqual({
+        id: 'other',
+        lastUsedAt: null,
+      });
+      await expect(store.listApiKeys()).resolves.toMatchObject([
+        { id: 'key', lastUsedAt: at(9) },
+        { id: 'other', lastUsedAt: null },
+      ]);
     });
 
     it('removes one API key or all of them', async () => {

@@ -45,8 +45,8 @@ import {
 // has already done what it was asked. A URL signing key made for a bucket is
 // what the next call reads back. Unlike in one node:sqlite process, another
 // call can run between the signing-key insert and its read: a process whose
-// clock runs two or more hours ahead can prune the key in that gap, and the
-// call then throws.
+// clock is at least two hour buckets ahead of this call's bucket can prune
+// the key in that gap, and the call then throws.
 export class D1OwnerAuthStore implements OwnerAuthStore {
   private readonly database: D1DatabaseBinding;
 

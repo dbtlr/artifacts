@@ -6,7 +6,8 @@ export type OwnerAuthStore = UrlSigningKeyStore & {
   // after `since`, that address already has `limits.perClient` attempts or
   // all addresses together have `limits.total`. Resolves whether it was
   // recorded. The check and the insert are one step, so parallel attempts
-  // cannot all slip under a limit.
+  // cannot all slip under a limit. Whether or not it records the attempt, it
+  // forgets every attempt at or before `since`.
   reserveLoginAttempt: (
     attempt: LoginAttempt,
     since: string,

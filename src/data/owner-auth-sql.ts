@@ -12,8 +12,11 @@ import type { SqlStatement } from './artifact-metadata-sql.js';
 // The owner auth statements that every SQLite-dialect adapter runs, so the
 // node:sqlite and D1 adapters differ only in how they execute them. Each
 // check-and-write is one statement, which SQLite runs atomically. The
-// deletes that prune old rows stand alone: each removes only rows that no
-// check counts any more, so it may run before or apart from its write.
+// deletes that prune old rows stand alone: under one clock, each removes only
+// rows that no check counts any more, so it may run before or apart from its
+// write. Across processes or Worker isolates whose clocks differ, a prune
+// from a clock that runs ahead can drop attempts near the edge of a window
+// that a check from a clock behind it still counts.
 
 export function deleteLoginAttemptsUpTo(since: string): SqlStatement {
   return { sql: 'DELETE FROM login_attempts WHERE attempted_at <= ?', values: [since] };
