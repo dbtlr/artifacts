@@ -320,6 +320,41 @@ abandoned. A load of a URL under `MUNINN_PUBLIC_BASE_URL`, such as an artifact e
 URL that `add_artifact` returned, is redirected to the same path on the server's own origin, so the
 embed shows in the preview without the renderer reaching the public address.
 
+## Run on Cloudflare Workers (experimental)
+
+Muninn also runs as a Cloudflare Worker, with metadata in D1, content in R2, and the stylesheet,
+scripts, and icons in Workers Static Assets
+([ADR-0009](docs/decisions/0009-cloudflare-workers-profile.md)). `src/worker.ts` is the entry and
+`wrangler.jsonc` configures it. Workers Paid is the supported plan: on the free plan, a request
+gets 10 ms of CPU, and rendering a Markdown artifact of a few kilobytes when it is saved takes
+longer.
+
+The Worker always requires an owner password. Until `MUNINN_OWNER_PASSWORD` (16 characters or
+more) and `MUNINN_PUBLIC_BASE_URL` are both valid, it answers every request with a plain-text error
+that names the setting. To deploy:
+
+```sh
+pnpm exec wrangler login
+pnpm exec wrangler d1 create muninn
+pnpm worker:deploy
+pnpm exec wrangler secret put MUNINN_OWNER_PASSWORD
+pnpm exec wrangler secret put MUNINN_PUBLIC_BASE_URL
+```
+
+- Create the `muninn` database once, before the first deploy: `pnpm worker:deploy` applies
+  `migrations/` to it before it deploys the Worker. The first deploy also creates the R2 bucket,
+  and Wrangler writes the IDs of both into `wrangler.jsonc`.
+- Set `MUNINN_PUBLIC_BASE_URL` to the Worker's URL, such as
+  `https://muninn.<your-subdomain>.workers.dev`. Set it as a secret, not a variable:
+  `wrangler deploy` replaces variables that `wrangler.jsonc` does not list, and it lists none.
+- Login limits count each client by the `CF-Connecting-IP` header that Cloudflare sets.
+  `MUNINN_CLIENT_ADDRESS_HEADER` is not read.
+- A Cron Trigger removes expired one-time secrets every 10 minutes.
+- Gallery previews stay as placeholders. The Worker has no preview renderer yet.
+
+To run the Worker locally, put both settings in an ignored `.dev.vars` file, apply the migrations
+with `pnpm exec wrangler d1 migrations apply MUNINN_DB --local`, and run `pnpm worker:dev`.
+
 ## Development
 
 ```sh
@@ -335,7 +370,11 @@ pnpm fmt
 pnpm lint
 pnpm test
 pnpm build
+pnpm worker:check
 ```
+
+`pnpm worker:check` builds the Worker without deploying it and fails if its bundle reaches a
+Node-only module, such as `node:sqlite` or `@hono/node-server`.
 
 `pnpm test` runs two Vitest projects. `node` runs the ordinary tests. `workers` runs
 `*.workers.test.ts` files inside workerd, the local Workers runtime, through
