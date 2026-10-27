@@ -1,7 +1,7 @@
 # Two-stage build: full workspace install to run the build, then a slim
 # prod-only runtime image carrying just dist/.
 #
-# Layout matters here: src/app.tsx and src/data-dir.ts resolve the static
+# Layout matters here: src/static-files.ts and src/data-dir.ts resolve the static
 # asset root and the default data dir relative to their own module location
 # (one level below the app root), not process.cwd() — see the comments in
 # those files. tsdown bundles everything into a single dist/server.js, so at

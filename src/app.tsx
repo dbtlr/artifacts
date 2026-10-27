@@ -1,14 +1,18 @@
 import { createHash } from 'node:crypto';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { StreamableHTTPTransport } from '@hono/mcp';
-import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 
 import { substituteEmbedReferences } from './artifacts/embeds.js';
+import { adaptLegacyArtifactStore } from './artifacts/legacy-adapter.js';
 import { legacyTypeFromMediaType } from './artifacts/media.js';
+import type {
+  ArtifactService,
+  ArtifactStore,
+  ArtifactWithContent,
+  LegacyArtifactWithContent,
+} from './artifacts/types.js';
 import { installOwnerAuth } from './auth/routes.js';
 import { EMBED_URL_EXPIRY } from './auth/signed-urls.js';
 import { ArtifactPage } from './components/artifact-page.js';
@@ -16,29 +20,12 @@ import { HomePage } from './components/home-page.js';
 import { Layout } from './components/layout.js';
 import { NotFoundPage } from './components/not-found-page.js';
 import { ProjectPage } from './components/project-page.js';
-import type {
-  ArtifactService,
-  ArtifactStore,
-  ArtifactWithContent,
-  LegacyArtifactWithContent,
-} from './data/store.js';
-import { adaptLegacyArtifactStore } from './data/store.js';
 import { buildIndexView, kindOf } from './index-view.js';
 import { createMcpServer } from './mcp/server.js';
 import { installSecretNoStore, installSecretRoutes } from './secrets/routes.js';
 import type { AppServices } from './services.js';
-import { getDefaultAppServices } from './services.js';
 import { placeholderSvg } from './thumbnails/placeholder.js';
 import { isOwnOrigin } from './urls.js';
-
-// Resolve the static asset root relative to this module, not process.cwd(),
-// so a different WORKDIR/cwd (e.g. Docker) can't silently 404 every asset.
-// Both the dev entry (src/app.tsx) and the packed bundle (dist/server.js)
-// live exactly one directory below the repo root, so `../dist/public` reaches
-// the Vite build output from either location. MUNINN_STATIC_ROOT overrides
-// it outright for deployments with a different layout.
-const moduleDir = dirname(fileURLToPath(import.meta.url));
-const STATIC_ROOT = process.env.MUNINN_STATIC_ROOT ?? join(moduleDir, '..', 'dist', 'public');
 
 const MAX_MCP_BODY_BYTES = 16 * 1024 * 1024;
 
@@ -50,16 +37,6 @@ const MAX_MCP_BODY_BYTES = 16 * 1024 * 1024;
 // sandbox, and show alert, confirm, and prompt dialogs. See ADR-0006.
 const HTML_ARTIFACT_CSP =
   'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-modals';
-
-// server.ts passes the composed services in; `export const app` below (used
-// by embedding callers and tests) leaves `store` undefined and resolves the
-// same default services (see services.ts) lazily on the first request —
-// never merely by importing this module. Most tests pass temp-directory
-// services explicitly instead of touching the repo's data/.
-async function defaultServices(mcpService?: ArtifactService): Promise<AppServices> {
-  const services = await getDefaultAppServices();
-  return mcpService === undefined ? services : { ...services, mcp: mcpService };
-}
 
 function etagOf(bytes: Uint8Array): string {
   return `"${createHash('sha256').update(bytes).digest('base64url')}"`;
@@ -113,36 +90,23 @@ function suppliedServices(
   return { artifacts, mcp: mcpService ?? artifacts };
 }
 
-export function createApp(store?: ArtifactStore | AppServices, mcpService?: ArtifactService): Hono {
+// Installs the static-file routes on the app, ahead of auth, so they are served
+// before any session check; auth lists the same paths as public. The Node
+// implementation is in static-files.ts; a runtime without one supplies none,
+// and those routes fall through to the 404 page.
+export type StaticFileInstaller = (app: Hono) => void;
+
+export function createApp(
+  store: ArtifactStore | AppServices,
+  mcpService?: ArtifactService,
+  installStaticFiles?: StaticFileInstaller,
+): Hono {
   const app = new Hono();
   // A supplied legacy store is adapted once, when the app is built.
-  const supplied = store === undefined ? undefined : suppliedServices(store, mcpService);
-  const resolveServices = (): Promise<AppServices> =>
-    supplied === undefined ? defaultServices(mcpService) : Promise.resolve(supplied);
+  const supplied = suppliedServices(store, mcpService);
+  const resolveServices = (): Promise<AppServices> => Promise.resolve(supplied);
 
-  // Namespaced under /assets so dynamic routes (/mcp, /a/:id) can never be
-  // shadowed by an asset filename or race a filesystem stat. serveStatic
-  // calls next() on a miss, so this falls through to the route handlers below.
-  app.use(
-    '/assets/*',
-    serveStatic({
-      rewriteRequestPath: (path) => path.replace(/^\/assets/u, ''),
-      root: STATIC_ROOT,
-    }),
-  );
-
-  // Root-level icon endpoints, serving real bytes rather than redirecting:
-  // raw html artifacts render without the Layout head, so browsers and
-  // tab-icon probes (t3code among them) fall back to these well-known root
-  // paths, and naive probes don't follow redirects. /favicon.ico gets the
-  // 32px PNG's bytes with an image/png content type — modern clients sniff
-  // the content and none of them require a real ICO container.
-  app.use('/favicon.svg', serveStatic({ path: 'favicon.svg', root: STATIC_ROOT }));
-  app.use('/favicon.ico', serveStatic({ path: 'favicon-32.png', root: STATIC_ROOT }));
-  app.use(
-    '/apple-touch-icon.png',
-    serveStatic({ path: 'apple-touch-icon.png', root: STATIC_ROOT }),
-  );
+  installStaticFiles?.(app);
 
   // Secret responses are never cached, owner-auth refusals included.
   installSecretNoStore(app);
@@ -353,5 +317,3 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
 
   return app;
 }
-
-export const app = createApp();

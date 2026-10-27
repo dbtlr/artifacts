@@ -12,6 +12,7 @@ import { createApp } from '../app.js';
 import { SqliteOwnerAuthStore } from '../data/sqlite-owner-auth-store.js';
 import type { ArtifactService } from '../data/store.js';
 import { createByteNativeArtifactService } from '../data/store.js';
+import { installNodeStaticFiles } from '../static-files.js';
 import { createThumbnailQueue } from '../thumbnails/queue.js';
 import { buildArtifactUrl } from '../urls.js';
 import { createOwnerAuth, LOGIN_ATTEMPT_LIMIT, SESSION_LIFETIME_SECONDS } from './owner-auth.js';
@@ -730,7 +731,12 @@ describe('with an owner password', () => {
 
   it('serves icons without a session so the login page can use them', async () => {
     const paths = ['/favicon.svg', '/favicon.ico', '/apple-touch-icon.png', '/assets/app.css'];
-    const responses = await Promise.all(paths.map(async (path) => testApp.request(path)));
+    const staticApp = createApp(
+      { artifacts: service, auth, mcp: service },
+      undefined,
+      installNodeStaticFiles,
+    );
+    const responses = await Promise.all(paths.map(async (path) => staticApp.request(path)));
 
     expect(responses.map((res) => res.status)).not.toContain(302);
   });

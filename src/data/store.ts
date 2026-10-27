@@ -1,24 +1,18 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import { extractEmbedReferences } from '../artifacts/embeds.js';
 import { legacyTypeFromMediaType, mediaTypeFromLegacyType } from '../artifacts/media.js';
 import { createArtifactService } from '../artifacts/service.js';
-import type {
-  Artifact,
-  ArtifactService,
-  ArtifactStore,
-  ArtifactWithContent,
-  LegacyArtifact,
-} from '../artifacts/types.js';
+import type { Artifact, ArtifactService, ArtifactStore } from '../artifacts/types.js';
 import { resolveStoragePaths } from '../data-dir.js';
 import type { StoragePaths } from '../data-dir.js';
-import { renderMarkdownToHtml } from '../markdown.js';
-import { resolvePublicBaseUrl } from '../urls.js';
 import { FilesystemArtifactContentStore } from './filesystem-artifact-content-store.js';
 import { SqliteArtifactMetadataStore } from './sqlite-artifact-metadata-store.js';
 
 export type * from '../artifacts/types.js';
+
+// Re-exported so importers of the store module keep one place to look.
+export { adaptLegacyArtifactStore } from '../artifacts/legacy-adapter.js';
 
 function assertLegacyType(type: string): asserts type is 'html' | 'md' | 'txt' {
   if (type !== 'html' && type !== 'md' && type !== 'txt') {
@@ -42,81 +36,6 @@ function toLegacyArtifact(artifact: Artifact) {
 
 function isLegacyText(artifact: Artifact): boolean {
   return legacyTypeFromMediaType(artifact.mediaType) !== undefined;
-}
-
-// Copies only the fields of the current model: a caller-supplied store may
-// still hand back fields this model has dropped.
-function fromLegacyArtifact(artifact: LegacyArtifact): Artifact {
-  return {
-    createdAt: artifact.createdAt,
-    description: artifact.description,
-    id: artifact.id,
-    mediaType: mediaTypeFromLegacyType(artifact.type),
-    project: artifact.project,
-    title: artifact.title,
-  };
-}
-
-// Preserve createApp(store)'s established one-argument embedding API. Its MCP
-// surface remains text-only, as the supplied legacy store is, but both the UI
-// and MCP operate on the same caller-owned data rather than silently splitting
-// across that store and the process default.
-export function adaptLegacyArtifactStore(store: ArtifactStore): ArtifactService {
-  return {
-    createArtifact: async (input) => {
-      const type = legacyTypeFromMediaType(input.mediaType);
-      if (type === undefined) {
-        throw new Error('This configured artifact store only supports text media types');
-      }
-      if (input.collection !== undefined || input.filename !== undefined) {
-        throw new Error('This configured artifact store does not support collection or filename');
-      }
-      return fromLegacyArtifact(
-        await store.createArtifact({
-          content: new TextDecoder('utf-8', { fatal: true }).decode(input.content),
-          description: input.description,
-          project: input.project,
-          title: input.title,
-          type,
-        }),
-      );
-    },
-    findArtifact: async (id) => {
-      const artifact = (await store.listArtifacts()).find((candidate) => candidate.id === id);
-      return artifact === undefined ? null : fromLegacyArtifact(artifact);
-    },
-    getArtifact: async (id): Promise<ArtifactWithContent | null> => {
-      const artifact = await store.getArtifact(id);
-      if (artifact === null) {
-        return null;
-      }
-      const { content, ...metadata } = artifact;
-      return { ...fromLegacyArtifact(metadata), content: new TextEncoder().encode(content) };
-    },
-    // A caller-supplied store has nowhere to keep derived data, so an HTML
-    // artifact's references, or a Markdown rendering's, are extracted on
-    // every view.
-    getEmbedReferences: async (id) => {
-      const artifact = await store.getArtifact(id);
-      if (artifact?.type === 'html') {
-        return extractEmbedReferences(artifact.content, resolvePublicBaseUrl());
-      }
-      return artifact?.type === 'md'
-        ? extractEmbedReferences(
-            renderMarkdownToHtml(artifact.content).html,
-            resolvePublicBaseUrl(),
-          )
-        : null;
-    },
-    // A caller-supplied store has nowhere to keep derived data, so its
-    // Markdown is rendered on every view.
-    getRenderedMarkdown: async (id) => {
-      const artifact = await store.getArtifact(id);
-      return artifact?.type === 'md' ? renderMarkdownToHtml(artifact.content) : null;
-    },
-    listArtifacts: async (query) => (await store.listArtifacts(query)).map(fromLegacyArtifact),
-    removeArtifact: (id) => store.removeArtifact(id),
-  };
 }
 
 // The composition root is the only place that knows which persistence
