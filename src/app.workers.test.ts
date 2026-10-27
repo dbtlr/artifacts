@@ -20,7 +20,7 @@ beforeEach(async () => {
 
 function workerApp() {
   const artifacts = createArtifactService(
-    new D1ArtifactMetadataStore(env.MUNINN_DB),
+    new D1ArtifactMetadataStore(env.MUNINN_DB, env.MUNINN_BUCKET),
     new R2ArtifactContentStore(env.MUNINN_BUCKET),
   );
   return { app: createApp({ artifacts, mcp: artifacts }), artifacts };
