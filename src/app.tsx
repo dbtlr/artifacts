@@ -25,7 +25,7 @@ import type {
 import { adaptLegacyArtifactStore } from './data/store.js';
 import { buildIndexView, kindOf } from './index-view.js';
 import { createMcpServer } from './mcp/server.js';
-import { installSecretRoutes } from './secrets/routes.js';
+import { installSecretNoStore, installSecretRoutes } from './secrets/routes.js';
 import type { AppServices } from './services.js';
 import { getDefaultAppServices } from './services.js';
 import { placeholderSvg } from './thumbnails/placeholder.js';
@@ -143,6 +143,9 @@ export function createApp(store?: ArtifactStore | AppServices, mcpService?: Arti
     '/apple-touch-icon.png',
     serveStatic({ path: 'apple-touch-icon.png', root: STATIC_ROOT }),
   );
+
+  // Secret responses are never cached, owner-auth refusals included.
+  installSecretNoStore(app);
 
   // With an owner password configured, every route below needs a session.
   installOwnerAuth(app, async () => (await resolveServices()).auth);

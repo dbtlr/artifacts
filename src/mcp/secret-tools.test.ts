@@ -253,6 +253,9 @@ describe('secret_status', () => {
       `${BASE_URL}/s/#${key}`,
       `${BASE_URL}/s/upload/${key}`,
       `not a ref ${key}`,
+      // 22 characters, but not a canonical 16-byte id.
+      'AAAAAAAAAAAAAAAAAAAAAB',
+      `${BASE_URL}/s/AAAAAAAAAAAAAAAAAAAAAB#${key}`,
       '',
     ];
 

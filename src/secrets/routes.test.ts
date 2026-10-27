@@ -408,6 +408,9 @@ describe('secret routes with an owner password', () => {
     const none = await app.request(`/s/${id}/reveal`, revealRequest(key, null));
 
     expect([foreign.status, sandboxed.status, none.status]).toEqual([403, 403, 403]);
+    for (const refusal of [foreign, sandboxed, none]) {
+      expect(refusal.headers.get('cache-control')).toBe('no-store');
+    }
     expect((await app.request(`/s/${id}/reveal`, revealRequest(key))).status).toBe(200);
   });
 
@@ -449,6 +452,10 @@ describe('secret routes with an owner password', () => {
     expect(
       responses.map((res, index) => `${probes[index]![1]} ${probes[index]![0]} ${res.status}`),
     ).toEqual(probes.map(([path, method, , status]) => `${method} ${path} ${status}`));
+    // The guard's refusals under /s/ are kept by no cache either.
+    for (const res of responses) {
+      expect(res.headers.get('cache-control')).toBe('no-store');
+    }
     expect((await app.request(upload, uploadRequest(SECRET))).status).toBe(201);
   });
 

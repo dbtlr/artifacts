@@ -39,8 +39,22 @@ const PAGE_HEADERS = {
   'X-Frame-Options': 'DENY',
 };
 
+// Keeps a `no-store` the response already has (owner auth sends
+// `private, no-store`) and adds it to any response that lacks one.
 function markNoStore(res: Response): void {
-  res.headers.set('Cache-Control', 'no-store');
+  if (!/\bno-store\b/u.test(res.headers.get('Cache-Control') ?? '')) {
+    res.headers.set('Cache-Control', 'no-store');
+  }
+}
+
+// Every response under /s/, including an owner-auth refusal and an error a
+// route did not foresee, is kept by no cache. Install it before owner auth,
+// so it also wraps the guard's refusals.
+export function installSecretNoStore(app: Hono): void {
+  app.use('/s/*', async (c, runRoute) => {
+    await runRoute();
+    markNoStore(c.res);
+  });
 }
 
 const PAGE_TITLE = 'One-time secret · Muninn';
@@ -58,13 +72,6 @@ export function installSecretRoutes(
   app: Hono,
   resolveSecrets: () => Promise<SecretService | undefined>,
 ): void {
-  // Every response under /s/, including an error a route did not foresee,
-  // is kept by no cache.
-  app.use('/s/*', async (c, runRoute) => {
-    await runRoute();
-    markNoStore(c.res);
-  });
-
   // The upload URL an agent pipes a secret into with
   // `curl -fsS --data-binary @- "$uploadUrl"`. The raw body is the secret. The
   // response body is only the view link and a newline, so curl prints
