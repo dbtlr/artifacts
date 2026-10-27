@@ -5,11 +5,11 @@ import { resolvePort } from './port.js';
 // it: its origin is an allowed form Origin, and https makes cookies Secure.
 // Unset, the base URL follows MUNINN_PORT and goes through the same
 // normalization, so one setting moves the listener and the links together. An
-// invalid MUNINN_PORT throws the same error as startup.
-export function resolvePublicBaseUrl(): string {
+// invalid MUNINN_PORT throws the same error as startup. The Worker entry
+// passes its own bindings to check the setting before it serves anything.
+export function resolvePublicBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
   const raw =
-    process.env.MUNINN_PUBLIC_BASE_URL ??
-    `http://localhost:${String(resolvePort(process.env.MUNINN_PORT))}`;
+    env.MUNINN_PUBLIC_BASE_URL ?? `http://localhost:${String(resolvePort(env.MUNINN_PORT))}`;
   const base = raw.trim();
   let url: URL;
   try {

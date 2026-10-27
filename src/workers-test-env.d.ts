@@ -10,6 +10,8 @@ declare module 'cloudflare:workers' {
   export const env: {
     MUNINN_BUCKET: ListableR2Bucket;
     MUNINN_DB: D1DatabaseBinding;
+    MUNINN_OWNER_PASSWORD: string;
+    MUNINN_PUBLIC_BASE_URL: string;
     TEST_MIGRATIONS: D1Migration[];
   };
 }
@@ -23,4 +25,12 @@ declare module 'cloudflare:test' {
     database: D1DatabaseBinding,
     migrations: D1Migration[],
   ): Promise<void>;
+
+  // An ExecutionContext and a ScheduledController, as far as the Worker
+  // entry's handlers use them.
+  export function createExecutionContext(): {
+    waitUntil: (promise: Promise<unknown>) => void;
+  };
+  export function createScheduledController(): { cron: string; scheduledTime: number };
+  export function waitOnExecutionContext(context: object): Promise<void>;
 }

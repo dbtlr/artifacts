@@ -1,0 +1,36 @@
+// The Cloudflare Workers profile (ADR-0009). src/worker.ts is the entry; the
+// Node profile ignores this file. Settings are not committed: the owner
+// password and the public base URL are both secrets (`wrangler secret put
+// MUNINN_OWNER_PASSWORD`, `wrangler secret put MUNINN_PUBLIC_BASE_URL`), since
+// `wrangler deploy` drops variables this file does not list, and the Worker
+// serves only an error until both are valid.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "muninn",
+  "main": "src/worker.ts",
+  // Matches the `workers` test project in vite.config.ts.
+  "compatibility_date": "2026-08-15",
+  "compatibility_flags": ["nodejs_compat"],
+  // No database_id or bucket_name: wrangler provisions both on the first
+  // deploy and writes their IDs back here.
+  "d1_databases": [
+    {
+      "binding": "MUNINN_DB",
+      "database_name": "muninn",
+      // The shared SQL migrations. Wrangler applies only the top-level
+      // `*.sql` files, so `down/` and the README are skipped.
+      "migrations_dir": "migrations",
+    },
+  ],
+  "r2_buckets": [{ "binding": "MUNINN_BUCKET" }],
+  // The Vite build output, served without auth. It holds only the stylesheet,
+  // the client scripts, and the icons. Matching files are served before the
+  // Worker runs, even when it is misconfigured, at their paths under
+  // dist/public, so each is also reachable at the site root (/app.css), not
+  // only under /assets as on Node. That is harmless: everything here is
+  // public. The Worker maps /assets/* and /favicon.ico onto the same files
+  // (src/worker-static-files.ts).
+  "assets": { "binding": "ASSETS", "directory": "./dist/public" },
+  // Sweeps expired one-time secrets, as Node's 10-minute timer does.
+  "triggers": { "crons": ["*/10 * * * *"] },
+}

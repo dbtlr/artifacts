@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 
-import { buildArtifactUrl } from './urls.js';
+import { buildArtifactUrl, resolvePublicBaseUrl } from './urls.js';
 
 const originalArtifactsBaseUrl = process.env.MUNINN_PUBLIC_BASE_URL;
 const originalLegacyBaseUrl = process.env.PUBLIC_BASE_URL;
@@ -67,5 +67,15 @@ describe('buildArtifactUrl', () => {
     process.env.MUNINN_PUBLIC_BASE_URL = value;
 
     expect(() => buildArtifactUrl('abc123')).toThrow(/MUNINN_PUBLIC_BASE_URL/u);
+  });
+});
+
+describe('resolvePublicBaseUrl', () => {
+  it('reads a given environment instead of process.env', () => {
+    process.env.MUNINN_PUBLIC_BASE_URL = 'https://process.example';
+
+    expect(resolvePublicBaseUrl({ MUNINN_PUBLIC_BASE_URL: 'https://given.example/' })).toBe(
+      'https://given.example',
+    );
   });
 });
