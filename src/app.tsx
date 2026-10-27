@@ -90,9 +90,10 @@ function suppliedServices(
   return { artifacts, mcp: mcpService ?? artifacts };
 }
 
-// Installs the static-file routes on the app, ahead of auth so that they stay
-// public. The Node implementation is in static-files.ts; a runtime without one
-// supplies none, and those routes fall through to the 404 page.
+// Installs the static-file routes on the app, ahead of auth, so they are served
+// before any session check; auth lists the same paths as public. The Node
+// implementation is in static-files.ts; a runtime without one supplies none,
+// and those routes fall through to the 404 page.
 export type StaticFileInstaller = (app: Hono) => void;
 
 export function createApp(

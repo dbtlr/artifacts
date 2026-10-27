@@ -250,12 +250,7 @@ describe('with an owner password', () => {
     const artifact = await createText('owner eyes only');
 
     const paths = [`/a/${artifact.id}`, `/a/${artifact.id}/thumb`, '/a/missing'];
-    const staticApp = createApp(
-      { artifacts: service, auth, mcp: service },
-      undefined,
-      installNodeStaticFiles,
-    );
-    const responses = await Promise.all(paths.map(async (path) => staticApp.request(path)));
+    const responses = await Promise.all(paths.map(async (path) => testApp.request(path)));
 
     expect(responses.map((res) => res.status)).toEqual([302, 302, 302]);
     const bodies = await Promise.all(responses.map((res) => res.text()));
@@ -791,12 +786,7 @@ describe('with an owner password', () => {
       `/a/${artifact.id}/thumb${signed.search}`,
       `/${signed.search}`,
     ];
-    const staticApp = createApp(
-      { artifacts: service, auth, mcp: service },
-      undefined,
-      installNodeStaticFiles,
-    );
-    const responses = await Promise.all(paths.map(async (path) => staticApp.request(path)));
+    const responses = await Promise.all(paths.map(async (path) => testApp.request(path)));
 
     expect(responses.map((res) => res.status)).toEqual([403, 403, 403, 403, 403]);
     const bodies = await Promise.all(responses.map((res) => res.text()));

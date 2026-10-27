@@ -20,7 +20,7 @@ import { MIGRATIONS_DIR } from './src/migrations-dir.js';
 // assets, never something `pack` pulls into the server bundle:
 // dist/server.js never imports src/client/.
 export default defineConfig({
-  // Static assets are served under /assets (see serveStatic in app.tsx, which
+  // Static assets are served under /assets (see serveStatic in static-files.ts, which
   // strips that prefix and reads from dist/public). Vite's own default base
   // ("/") assumes the build output is served from the site root, so without
   // this, the scripts' code-split chunk imports (mermaid lazily imports a

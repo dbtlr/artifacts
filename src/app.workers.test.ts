@@ -8,8 +8,10 @@ import { D1ArtifactMetadataStore } from './data/d1-artifact-metadata-store.js';
 import { R2ArtifactContentStore } from './data/r2-artifact-content-store.js';
 import { emptyBucket } from './data/r2-bucket.test-support.js';
 
-// Loading this file at all proves createApp's static import graph is
-// Worker-safe; the requests prove it serves from the Worker adapters.
+// The requests prove the app serves from the Worker adapters under workerd.
+// Loading it is a weak import guard: workerd's nodejs_compat provides node:fs
+// and the test pool resolves node:sqlite, so a Worker bundle build is the
+// stronger check.
 beforeEach(async () => {
   await applyD1Migrations(env.MUNINN_DB, env.TEST_MIGRATIONS);
   await env.MUNINN_DB.prepare('DELETE FROM artifacts').run();

@@ -1,7 +1,7 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Mirrors src/app.tsx's STATIC_ROOT resolution: both the dev entry (this
+// Mirrors src/static-files.ts's STATIC_ROOT resolution: both the dev entry (this
 // module) and the packed bundle (dist/server.js) live exactly one directory
 // below the repo root. Kept out of src/data/ because tsdown collapses deeper
 // module nesting in the bundle.
