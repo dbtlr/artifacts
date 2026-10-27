@@ -197,6 +197,43 @@ describe('D1ArtifactMetadataStore renderings', () => {
     await expect(store.findRendering('missing')).resolves.toBeNull();
   });
 
+  it('leaves no blob when the artifact is removed between the two writes of a save', async () => {
+    let removed = false;
+    // Removes the artifact once, right after the save's first write, whichever
+    // store that write goes to: written row-first, the blob would land after
+    // the removal and never be deleted.
+    async function removeAfterFirstWrite<T>(write: Promise<T>): Promise<T> {
+      const result = await write;
+      if (!removed) {
+        removed = true;
+        await newStore().remove(artifact.id);
+      }
+      return result;
+    }
+    function interleaved(statement: D1PreparedStatementBinding): D1PreparedStatementBinding {
+      return {
+        all: () => statement.all(),
+        bind: (...values) => interleaved(statement.bind(...values)),
+        first: () => statement.first(),
+        run: () => removeAfterFirstWrite(statement.run()),
+      };
+    }
+    const store = new D1ArtifactMetadataStore(
+      { prepare: (query) => interleaved(env.MUNINN_DB.prepare(query)) },
+      {
+        delete: (key) => env.MUNINN_BUCKET.delete(key),
+        get: (key) => env.MUNINN_BUCKET.get(key),
+        head: (key) => env.MUNINN_BUCKET.head(key),
+        put: (key, value) => removeAfterFirstWrite(env.MUNINN_BUCKET.put(key, value)),
+      },
+    );
+
+    await store.saveRendering(artifact.id, rendering);
+
+    expect(removed).toBe(true);
+    await expect(env.MUNINN_BUCKET.head(renderingKey)).resolves.toBeNull();
+  });
+
   it('shares a bucket with the content and thumbnail stores without touching their objects', async () => {
     const content = new R2ArtifactContentStore(env.MUNINN_BUCKET);
     const thumbnails = new R2ThumbnailStore(env.MUNINN_BUCKET);
