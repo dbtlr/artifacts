@@ -13,11 +13,12 @@ import { MIGRATIONS_DIR } from './src/migrations-dir.js';
 // `@hono/node-server` external (they're real "dependencies", present after a
 // prod install). `fixedExtension: false` picks the plain `.js` extension (this
 // package.json is `"type": "module"`) so `node dist/server.js` just works.
-// Vite itself builds the static assets: the Tailwind stylesheet and the two
-// client-side scripts, src/client/highlight.ts (shiki) and
-// src/client/mermaid.ts. Both are large dependencies, so they must stay
-// Vite-built static assets, never something `pack` pulls into the server
-// bundle: dist/server.js never imports src/client/.
+// Vite itself builds the static assets: the Tailwind stylesheet and the
+// client-side scripts, src/client/highlight.ts (shiki),
+// src/client/mermaid.ts, and src/client/secret.ts (the one-time secret page).
+// The first two are large dependencies, so they must stay Vite-built static
+// assets, never something `pack` pulls into the server bundle:
+// dist/server.js never imports src/client/.
 export default defineConfig({
   // Static assets are served under /assets (see serveStatic in app.tsx, which
   // strips that prefix and reads from dist/public). Vite's own default base
@@ -41,6 +42,7 @@ export default defineConfig({
       input: {
         highlight: 'src/client/highlight.ts',
         mermaid: 'src/client/mermaid.ts',
+        secret: 'src/client/secret.ts',
         styles: 'src/client/styles.css',
       },
       output: {

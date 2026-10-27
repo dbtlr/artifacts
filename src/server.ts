@@ -12,6 +12,8 @@ import { resolvePublicBaseUrl } from './urls.js';
 // How long shutdown waits for the headless browser to close before exiting
 // anyway; well inside Docker's default 10s stop grace period.
 const SHUTDOWN_GRACE_MS = 5_000;
+// How often expired one-time secrets, upload slots, and claims are removed.
+const SECRET_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 
 assertNoLegacyEnv();
 const port = resolvePort(process.env.MUNINN_PORT);
@@ -37,6 +39,23 @@ async function startThumbnails(boundPort: number): Promise<void> {
     process.exit(1);
   }
 }
+
+// Removes expired secret rows. A failed sweep is reported and retried at the
+// next interval; the rows it missed stay unreadable, since every read checks
+// expiry itself.
+async function sweepSecrets(): Promise<void> {
+  try {
+    await services.secrets.sweep();
+  } catch (error) {
+    const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+    process.stderr.write(`Muninn failed to sweep expired secrets: ${detail}\n`);
+  }
+}
+
+void sweepSecrets();
+setInterval(() => {
+  void sweepSecrets();
+}, SECRET_SWEEP_INTERVAL_MS).unref();
 
 const server = serve({ fetch: app.fetch, port }, (info) => {
   process.stdout.write(`Muninn listening on http://localhost:${String(info.port)}\n`);

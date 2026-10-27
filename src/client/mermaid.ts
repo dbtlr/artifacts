@@ -1,6 +1,6 @@
 import mermaid from 'mermaid';
 
-// One of the app's two client-side scripts (with highlight.ts), loaded only on
+// One of the app's client-side scripts (with highlight.ts), loaded only on
 // pages whose rendered markdown actually contains a ```mermaid fence — see
 // `hasMermaid` in src/markdown.ts and its use in src/app.tsx. markdown.ts's
 // renderer already emitted each diagram's source, text-escaped, as

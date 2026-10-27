@@ -52,3 +52,14 @@ export function isOwnOrigin(origin: string, requestUrl: string): boolean {
 export function buildArtifactUrl(id: string): string {
   return `${resolvePublicBaseUrl()}/a/${id}`;
 }
+
+// A one-time secret's single-use upload URL (ADR-0008).
+export function buildSecretUploadUrl(uploadToken: string): string {
+  return `${resolvePublicBaseUrl()}/s/upload/${uploadToken}`;
+}
+
+// A one-time secret's view link. The key is in the fragment, so a browser
+// never sends it to the server or puts it in a Referer.
+export function buildSecretViewUrl(id: string, key: string): string {
+  return `${resolvePublicBaseUrl()}/s/${id}#${key}`;
+}

@@ -89,7 +89,8 @@ no `Origin` and work. A browser-based MCP client sends the origin of its own pag
 For example, MCP Inspector in direct connection mode cannot connect.
 
 The server exposes `add_artifact`, `remove_artifact`, `list_artifacts`, `list_collections`, and
-`get_artifact`. Artifacts are immutable: there is no update tool. A revision or variation is a new
+`get_artifact`, and `create_secret_upload` and `secret_status` for
+[one-time secrets](#one-time-secrets). Artifacts are immutable: there is no update tool. A revision or variation is a new
 artifact, usually in the same collection, so earlier versions keep their links.
 
 Text artifacts use `content`; binary artifacts use canonical `mediaType`, a safe `filename`, and
@@ -130,6 +131,27 @@ an `<iframe>`, `<embed>`, or `<object>` does not display, so link to the PDF ins
 artifact in an `<iframe>` shows no syntax highlighting or Mermaid diagrams. When an owner password
 is set, the browser does not send the session cookie on requests from the sandbox, so embedded
 `/a/:id` files load through signed URLs instead. See [Owner login](#owner-login).
+
+### One-time secrets
+
+An agent can send the owner a secret, such as a token or a key file, without the secret passing
+through MCP. The agent calls `create_secret_upload` with a `label` (and an optional `filename` and
+`ttlSeconds`), then pipes the secret into the returned upload URL:
+
+```sh
+<command that prints the secret> | curl -fsS --data-binary @- "$uploadUrl"
+```
+
+The command prints only a view link, `/s/<id>#<key>`. If it prints no link, the upload failed: call
+`create_secret_upload` again. Do not inspect or echo the input. The secret is stored exactly as
+piped, so use a command that adds no trailing newline, such as `printf %s "$TOKEN"`. The upload URL works once and expires after 15
+minutes; the secret is at most 64 KiB and expires unread after 24 hours by default (1 hour to 7
+days). Opening the link shows the label and a **Reveal once** button. Revealing needs JavaScript,
+shows text for copying or offers a file for download, and deletes the secret from Muninn. A read,
+expired, or unknown link shows the same "Nothing to reveal" page. `secret_status` takes an id, view
+link, or handle and reports `pending`, `read`, `expired`, or `unknown`. Each secret is encrypted
+under a key that Muninn does not keep; the key travels only in the link's fragment. See
+[ADR-0008](docs/decisions/0008-one-time-secrets.md).
 
 ### Optional artifact skill
 
@@ -229,6 +251,8 @@ With a password set:
 
 - Every page and every `/a/:id` link redirects to `/login` until the owner logs in. The login form,
   `/assets/*`, and the root icons stay public, so the Docker health check still passes.
+- A secret's upload URL, view page, and Reveal need no session: the upload token and the link's
+  key authorize them ([ADR-0008](docs/decisions/0008-one-time-secrets.md)).
 - A login lasts 7 days. **Log out** in the gallery header ends it.
 - Login allows 10 attempts from one client address in any 15-minute window, and 100 from all
   addresses together. After that the form answers `429` with a `Retry-After` header. A successful
