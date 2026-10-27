@@ -164,9 +164,9 @@ curl -fsS -X POST "$downloadUrl" | <command that consumes it>
 ```
 
 The download URL works once and expires after 5 minutes, and the download deletes the secret from
-Muninn. Claiming does not, so an agent whose download URL expired can claim again. An unknown, read,
-expired, or mistyped handle gets one error that does not say which. A handle works only through MCP,
-so with owner auth on it is useless without an API key.
+Muninn. An unknown, read, expired, or mistyped handle, or one claimed too many times in the last
+few minutes, gets one error that does not say which. A handle works only through MCP, so with owner
+auth on it is useless without an API key.
 
 ### Optional artifact skill
 

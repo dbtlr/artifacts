@@ -108,7 +108,7 @@ Use this when the owner gives you a handle, `sec_<id>.<key>`, for a secret they 
    ```
 
    For example, `curl -fsS -X POST "$downloadUrl" | gh auth login --with-token`. The download deletes the secret from Muninn.
-3. If the pipe fails, do not retry the download or inspect its output: ask the owner for a new secret. If `claim_secret` reports that no secret can be claimed, the handle is used up, expired, or mistyped: ask the owner for a new one.
+3. If the pipe fails, do not retry the download or inspect its output: ask the owner for a new secret. If `claim_secret` reports that no secret can be claimed, the handle is unknown, used up, expired, mistyped, or claimed too many times in the last few minutes: ask the owner for a new one.
 
 ## Important Behaviors
 

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { z } from 'zod';
 
 import { SqliteSecretStore } from '../data/sqlite-secret-store.js';
@@ -14,6 +14,7 @@ import { createByteNativeArtifactService } from '../data/store.js';
 import { formatHandle } from '../secrets/handle.js';
 import {
   CLAIM_LIFETIME_SECONDS,
+  CLAIMS_PER_SECRET,
   createSecretService,
   UPLOAD_SLOT_LIFETIME_SECONDS,
 } from '../secrets/service.js';
@@ -356,6 +357,9 @@ describe('claim_secret', () => {
       formatHandle(expiring.id, expiring.key),
       `sec_${pending.id}.${pending.key.slice(1)}`,
       `sec_${pending.id}.${pending.key}x`,
+      // Nothing may extend a handle on either side.
+      `x${formatHandle(pending.id, pending.key)}`,
+      `${formatHandle(pending.id, pending.key)}A`,
       pending.key,
       `${BASE_URL}/s/${pending.id}#${pending.key}`,
       'not a handle',
@@ -379,5 +383,53 @@ describe('claim_secret', () => {
     expect(first?.text).not.toContain(SECRET);
     const valid = await call('claim_secret', { handle: formatHandle(pending.id, pending.key) });
     expect(valid.isError).toBe(false);
+  });
+
+  it('refuses a claim past the per-secret cap with the same message, which says so', async () => {
+    const { id, key } = await ownerSecret();
+    const handle = formatHandle(id, key);
+    const claims = await Promise.all(
+      Array.from({ length: CLAIMS_PER_SECRET }, async () => call('claim_secret', { handle })),
+    );
+    expect(claims.map((claim) => claim.isError)).toEqual(claims.map(() => false));
+
+    const capped = await call('claim_secret', { handle });
+    const unknown = await call('claim_secret', { handle: 'not a handle' });
+
+    expect(capped).toEqual(unknown);
+    expect(capped.isError).toBe(true);
+    expect(capped.text).toMatch(/claimed too many times in the last few minutes/u);
+    await expect(secrets.status(id)).resolves.toBe('pending');
+    advance(CLAIM_LIFETIME_SECONDS);
+    expect((await call('claim_secret', { handle })).isError).toBe(false);
+  });
+
+  it('refuses with the same message when the secret service fails, echoing nothing', async () => {
+    const { id, key } = await ownerSecret();
+    await client.close();
+    await closeServer();
+    await connect({
+      ...secrets,
+      claim: async () => {
+        throw new Error('store unavailable');
+      },
+    });
+    const logged = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+
+    try {
+      const failed = await call('claim_secret', { handle: formatHandle(id, key) });
+      const unknown = await call('claim_secret', { handle: 'not a handle' });
+
+      expect(failed).toEqual(unknown);
+      expect(failed.text).not.toContain(id);
+      expect(failed.text).not.toContain(key);
+      expect(logged).toHaveBeenCalledOnce();
+      const line = logged.mock.calls[0]!.map(String).join(' ');
+      expect(line).toContain('store unavailable');
+      expect(line).not.toContain(id);
+      expect(line).not.toContain(key);
+    } finally {
+      logged.mockRestore();
+    }
   });
 });

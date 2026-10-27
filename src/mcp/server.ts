@@ -169,10 +169,12 @@ const SECRET_UPLOAD_RECIPE =
   '<command that prints the secret> | curl -fsS --data-binary @- "$uploadUrl"';
 const SECRET_DOWNLOAD_RECIPE = 'curl -fsS -X POST "$downloadUrl" | <command that consumes it>';
 // One message for every handle that cannot be claimed, whatever the reason,
-// quoting none of it.
+// quoting none of it: unknown, read, expired, mistyped, or a pending secret
+// that already has CLAIMS_PER_SECRET unexpired claims. A service failure gets
+// it too, so no refusal says which it was.
 const CLAIM_REFUSED =
-  'No secret can be claimed with that handle: it is unknown, already read, expired, or ' +
-  'mistyped. Ask the owner for a new secret.';
+  'No secret can be claimed with that handle: it is unknown, already read, expired, mistyped, ' +
+  'or claimed too many times in the last few minutes. Ask the owner for a new secret.';
 
 // One-time secret tools (ADR-0008). None accepts or returns secret contents:
 // the agent moves the bytes with curl, outside its transcript.
@@ -240,7 +242,11 @@ function registerSecretTools(server: McpServer, secrets: SecretService): void {
               expiresAt: claim.expiresAt,
             });
       } catch (error) {
-        return toolError(errorMessage(error));
+        // The service never puts a handle or key in an error, so the cause
+        // is logged here and the agent gets the one refusal.
+        const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+        process.stderr.write(`claim_secret failed: ${detail}\n`);
+        return toolError(CLAIM_REFUSED);
       }
     },
   );
