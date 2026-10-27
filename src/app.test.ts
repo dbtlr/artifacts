@@ -22,7 +22,7 @@ import {
 } from 'vite-plus/test';
 import { z } from 'zod';
 
-import { app, createApp } from './app.js';
+import { createApp } from './app.js';
 import { createArtifactService } from './artifacts/service.js';
 import { FilesystemArtifactContentStore } from './data/filesystem-artifact-content-store.js';
 import { FilesystemThumbnailStore } from './data/filesystem-thumbnail-store.js';
@@ -33,6 +33,22 @@ import { markdownRenderer } from './markdown.js';
 import type { MarkdownRenderer } from './markdown.js';
 
 describe('app', () => {
+  let dataDir: string;
+  let app: ReturnType<typeof createApp>;
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(join(tmpdir(), 'artifacts-app-shell-'));
+    const service = await createByteNativeArtifactService({
+      databasePath: join(dataDir, 'artifacts.db'),
+      filesDir: join(dataDir, 'artifacts'),
+    });
+    app = createApp({ artifacts: service, mcp: service });
+  });
+
+  afterEach(async () => {
+    await rm(dataDir, { force: true, recursive: true });
+  });
+
   it('renders the homepage with the stylesheet linked', async () => {
     const res = await app.request('/');
 

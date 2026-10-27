@@ -85,12 +85,8 @@ async function createDefaultAppServices(): Promise<DefaultAppServices> {
 
 // The one composition root for the process: the sqlite-backed artifact
 // service wrapped with preview bookkeeping, and the one-time secret service
-// on the same database file. server.ts awaits this up front,
-// passes it to createApp, and starts the queue once the port is known. The
-// memo exists for app.tsx's argument-less `createApp()` (the embedding and
-// test default), which resolves the same services lazily; a caller on that
-// path never calls `thumbnailQueue.start`, so there queued ids simply wait
-// and cards keep their placeholders.
+// on the same database file. server.ts awaits this up front, passes it to
+// createApp, and starts the queue once the port is known.
 export function getDefaultAppServices(): Promise<DefaultAppServices> {
   defaultServices ??= createDefaultAppServices();
   return defaultServices;

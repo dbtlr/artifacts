@@ -6,6 +6,7 @@ import { createApp } from './app.js';
 import { assertNoLegacyEnv } from './legacy-env.js';
 import { resolvePort } from './port.js';
 import { getDefaultAppServices } from './services.js';
+import { installNodeStaticFiles } from './static-files.js';
 import { createPlaywrightRenderer, resolveChromiumPath } from './thumbnails/playwright-renderer.js';
 import { resolvePublicBaseUrl } from './urls.js';
 
@@ -23,7 +24,7 @@ const renderer = createPlaywrightRenderer({
   executablePath: chromiumPath,
   publicBaseUrl: resolvePublicBaseUrl(),
 });
-const app = createApp(services);
+const app = createApp(services, undefined, installNodeStaticFiles);
 
 // Previews are screenshots of this server's own pages, so rendering can
 // only start once the port is bound. Backfill covers artifacts uploaded
