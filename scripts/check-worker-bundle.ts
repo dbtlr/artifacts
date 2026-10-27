@@ -7,7 +7,14 @@ import { promisify } from 'node:util';
 
 import { z } from 'zod';
 
-// Modules that exist only for the Node profile (ADR-0009). workerd stubs
+// Builds the Cloudflare Worker without deploying it and fails if its bundle
+// reaches a Node-only module (ADR-0009). It sees modules reachable through
+// static imports and dynamic imports of a literal specifier. It does not see
+// modules resolved at run time, such as through process.getBuiltinModule,
+// createRequire, or a computed import(). It exists to catch an accidental
+// Node-only dependency, not deliberate evasion.
+
+// Modules that exist only for the Node profile. workerd stubs
 // node:sqlite and provides node:fs, so a Worker that loads one of these still
 // starts, and a test under workerd does not notice; only the built bundle
 // shows that the Worker reached them.
@@ -67,6 +74,11 @@ export function forbiddenImports(metafile: Metafile): string[] {
   return [...found].toSorted();
 }
 
+// The repository root, which holds wrangler.jsonc, and the local wrangler,
+// run with this Node so the check works without node_modules/.bin on PATH.
+const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const WRANGLER = join(REPO_ROOT, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
+
 // Builds the Worker as `wrangler deploy` would, without uploading it, and
 // reads its metafile. The assets directory must exist, so run `vite build`
 // first; `pnpm worker:check` does.
@@ -75,9 +87,9 @@ async function buildMetafile(): Promise<Metafile> {
   try {
     const metafilePath = join(outdir, 'meta.json');
     await promisify(execFile)(
-      'wrangler',
-      ['deploy', '--dry-run', '--outdir', outdir, '--metafile', metafilePath],
-      { maxBuffer: 16 * 1024 * 1024 },
+      process.execPath,
+      [WRANGLER, 'deploy', '--dry-run', '--outdir', outdir, '--metafile', metafilePath],
+      { cwd: REPO_ROOT, maxBuffer: 16 * 1024 * 1024 },
     );
     return metafileSchema.parse(JSON.parse(await readFile(metafilePath, 'utf8')));
   } finally {

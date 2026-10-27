@@ -24,8 +24,11 @@
   "r2_buckets": [{ "binding": "MUNINN_BUCKET" }],
   // The Vite build output, served without auth. It holds only the stylesheet,
   // the client scripts, and the icons. Matching files are served before the
-  // Worker runs, at their paths under dist/public; the Worker maps /assets/*
-  // and /favicon.ico onto the same files (src/worker-static-files.ts).
+  // Worker runs, even when it is misconfigured, at their paths under
+  // dist/public, so each is also reachable at the site root (/app.css), not
+  // only under /assets as on Node. That is harmless: everything here is
+  // public. The Worker maps /assets/* and /favicon.ico onto the same files
+  // (src/worker-static-files.ts).
   "assets": { "binding": "ASSETS", "directory": "./dist/public" },
   // Sweeps expired one-time secrets, as Node's 10-minute timer does.
   "triggers": { "crons": ["*/10 * * * *"] },

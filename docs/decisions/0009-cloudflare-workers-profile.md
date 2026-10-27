@@ -28,9 +28,11 @@ network.
 - **The Worker requires the owner password.** A Worker has no trusted network, so the opt-in of
   [ADR-0001](0001-opt-in-owner-auth.md) does not apply: without `MUNINN_OWNER_PASSWORD` the Worker
   serves nothing but an error. It also requires `MUNINN_PUBLIC_BASE_URL`, because Node's default
-  follows `MUNINN_PORT`, which means nothing on a Worker. Until both are valid, every request gets
-  a plain-text `500` that names the setting, and the scheduled handler fails. The Node profile
-  keeps the opt-in unchanged.
+  follows `MUNINN_PORT`, which means nothing on a Worker. Until both are valid, every request that
+  reaches the Worker gets a plain-text `500` that names the setting but not its value, and the
+  scheduled handler fails. Static Assets still serve the built files, such as `/app.css`,
+  `/secret.js`, `/chunks/*`, and the icons, because they answer before the Worker runs. The Node
+  profile keeps the opt-in unchanged.
 - **Each request composes its own services.** The Worker builds the services and the app from the
   request's bindings, with no state kept in the isolate between requests. Composing is only object
   construction, and workerd does not let one request safely await I/O that another request
@@ -49,8 +51,10 @@ network.
   runs from the Worker's scheduled handler, every 10 minutes.
 - **Static Assets serve the Vite build.** `dist/public` holds only the stylesheet, the client
   scripts, and the icons, so it is served without auth. Static Assets serve its files at the site
-  root before the Worker runs. The Worker maps `/assets/*` and `/favicon.ico` onto the same files,
-  as the Node profile does.
+  root before the Worker runs, so on the Worker each built file is reachable both at the root, such
+  as `/app.css`, and under `/assets/`, where the Node profile serves it. The root paths are
+  harmless, because everything in `dist/public` is public. The Worker maps `/assets/*` and
+  `/favicon.ico` onto the same files, as the Node profile does.
 
 ## Considered options
 

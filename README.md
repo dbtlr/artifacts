@@ -335,15 +335,19 @@ that names the setting. To deploy:
 
 ```sh
 pnpm exec wrangler login
-pnpm exec wrangler d1 create muninn
+pnpm exec wrangler d1 create muninn --binding MUNINN_DB --update-config
 pnpm worker:deploy
 pnpm exec wrangler secret put MUNINN_OWNER_PASSWORD
 pnpm exec wrangler secret put MUNINN_PUBLIC_BASE_URL
 ```
 
 - Create the `muninn` database once, before the first deploy: `pnpm worker:deploy` applies
-  `migrations/` to it before it deploys the Worker. The first deploy also creates the R2 bucket,
-  and Wrangler writes the IDs of both into `wrangler.jsonc`.
+  `migrations/` to it before it deploys the Worker. `--binding MUNINN_DB` makes Wrangler record
+  it on the existing binding rather than add a second one. The first deploy also creates the R2
+  bucket.
+- Wrangler writes the database and bucket IDs into `wrangler.jsonc`, which is a tracked file.
+  Commit that change on the branch you deploy from, and leave it out of pull requests to this
+  repository.
 - Set `MUNINN_PUBLIC_BASE_URL` to the Worker's URL, such as
   `https://muninn.<your-subdomain>.workers.dev`. Set it as a secret, not a variable:
   `wrangler deploy` replaces variables that `wrangler.jsonc` does not list, and it lists none.
@@ -354,6 +358,8 @@ pnpm exec wrangler secret put MUNINN_PUBLIC_BASE_URL
 
 To run the Worker locally, put both settings in an ignored `.dev.vars` file, apply the migrations
 with `pnpm exec wrangler d1 migrations apply MUNINN_DB --local`, and run `pnpm worker:dev`.
+`wrangler dev` trusts a `CF-Connecting-IP` header that the client sends, so do not expose it
+beyond localhost.
 
 ## Development
 

@@ -38,7 +38,9 @@ function serveAsset(assets: AssetsBinding, fileOf: (path: string) => string): Mi
 // The Worker's static-file routes, passed to createApp by worker.ts. Static
 // Assets already serves dist/public at the site root before the Worker runs,
 // so these cover the paths the app links to that are not files there:
-// /assets/* with its prefix stripped, and /favicon.ico.
+// /assets/* with its prefix stripped, and /favicon.ico. The /favicon.svg and
+// /apple-touch-icon.png routes are kept for parity with Node; in production
+// Static Assets answer them first.
 export function workerStaticFiles(assets: AssetsBinding): StaticFileInstaller {
   return (app) => {
     app.use(
