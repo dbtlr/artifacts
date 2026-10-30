@@ -2,3 +2,5 @@
 export function ratio(part: number, whole: number): number {
 	return part / whole;
 }
+
+export const cadenceProbe = true;
