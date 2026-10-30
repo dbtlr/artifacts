@@ -10,3 +10,5 @@ console.log(average([]));
 export function count(values: number[]): number {
 	return values.length;
 }
+
+export const probe = true;
